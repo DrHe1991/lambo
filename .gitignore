@@ -1,0 +1,90 @@
+# ========================================
+# BitLine Monorepo .gitignore
+# ========================================
+
+# ----------------------------------------
+# Dependencies
+# ----------------------------------------
+node_modules/
+
+# ----------------------------------------
+# Build outputs
+# ----------------------------------------
+dist/
+dist-ssr/
+*.local
+
+# ----------------------------------------
+# Environment & Secrets
+# ----------------------------------------
+.env
+.env.local
+.env.*.local
+
+# ----------------------------------------
+# x-agent: Browser automation data (sensitive & generated)
+# ----------------------------------------
+x-agent/browser-data/
+x-agent/cookies/
+x-agent/screenshots/
+x-agent/output/
+x-agent/data/
+x-agent/media/
+
+# ----------------------------------------
+# bitline-ui: Android build artifacts
+# ----------------------------------------
+bitline-ui/android/.gradle/
+bitline-ui/android/build/
+bitline-ui/android/app/build/
+bitline-ui/android/local.properties
+bitline-ui/android/capacitor-cordova-android-plugins/
+bitline-ui/android/app/src/main/assets/public/
+bitline-ui/android/app/src/main/assets/capacitor.config.json
+bitline-ui/android/app/src/main/assets/capacitor.plugins.json
+bitline-ui/android/app/src/main/res/xml/config.xml
+
+# ----------------------------------------
+# Logs
+# ----------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ----------------------------------------
+# Editor & IDE
+# ----------------------------------------
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.iml
+
+# ----------------------------------------
+# OS generated files
+# ----------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ----------------------------------------
+# Misc
+# ----------------------------------------
+*.hprof
+*.apk
+*.aab
+*.aar
+*.ap_
+*.dex
+*.class
