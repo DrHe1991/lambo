@@ -1,0 +1,57 @@
+# BitLine Project Rules
+
+## Project Structure
+- `api/` - Python FastAPI backend
+- `bitline-ui/` - React + Capacitor mobile app
+- `x-agent/` - Content scraping agent
+
+## Comments
+- Keep comments short and concise (1 line max)
+- Always write comments in English
+- Avoid obvious comments that just repeat the code
+
+## Python (api/)
+- Use Python 3.12+ features (type hints, match statements)
+- Use async/await for all database operations
+- Use Pydantic for validation, SQLAlchemy for ORM
+- Follow FastAPI patterns: Depends for DI, HTTPException for errors
+- Use single quotes for strings
+- Max line length: 100 chars
+- Run `ruff check --fix` before committing
+
+## React/TypeScript (bitline-ui/)
+- Use functional components with hooks
+- Use TypeScript strict mode
+- Destructure props at function signature
+- Keep components small and focused
+- Use single quotes for strings
+- Use semicolons at end of statements
+
+## Naming Conventions
+- Python: snake_case for functions/variables, PascalCase for classes
+- TypeScript: camelCase for functions/variables, PascalCase for components
+- Database: snake_case for tables and columns
+- API routes: kebab-case for URLs
+
+## API Design
+- RESTful endpoints: GET/POST/PATCH/DELETE
+- Use query params for filtering, path params for IDs
+- Return consistent response shapes
+- Use HTTP status codes correctly (201 created, 404 not found, etc.)
+
+## Database
+- Use migrations for schema changes (Alembic)
+- Always use transactions for multi-step operations
+- Index frequently queried columns
+- Use soft deletes where appropriate (status field)
+
+## Security
+- Never log sensitive data (passwords, tokens)
+- Validate all user input with Pydantic
+- Use parameterized queries (SQLAlchemy handles this)
+
+## General
+- DRY - Don't Repeat Yourself
+- Keep functions under 50 lines when possible
+- Handle errors gracefully
+- No console.log/print in production code

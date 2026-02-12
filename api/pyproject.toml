@@ -1,0 +1,15 @@
+[project]
+name = "bitline-api"
+version = "0.1.0"
+description = "BitLine Backend API"
+requires-python = ">=3.12"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true

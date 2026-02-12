@@ -172,33 +172,35 @@ const App: React.FC = () => {
   const renderBottomNav = () => {
     if (currentView !== 'MAIN' || isPublishing) return null;
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-zinc-800 px-6 pt-4 flex items-center justify-between safe-bottom-nav">
-        <button onClick={() => setActiveTab('Feed')} className={`flex flex-col items-center gap-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
-          <Home size={24} />
-          <span className="text-[10px] font-bold">Feed</span>
-        </button>
-        <button onClick={() => setActiveTab('Following')} className={`flex flex-col items-center gap-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
-          <Users size={24} />
-          <span className="text-[10px] font-bold">Following</span>
-        </button>
-        
-        <div className="relative -top-2">
-          <button 
-            onClick={() => setIsPublishing(true)}
-            className="w-12 h-12 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/20 active:scale-90 transition-transform"
-          >
-            <Plus size={24} color="white" strokeWidth={3} />
+      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-zinc-800 safe-bottom-nav">
+        <div className="max-w-md mx-auto px-4 pt-3 pb-2 grid grid-cols-5 items-end">
+          <button onClick={() => setActiveTab('Feed')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <Home size={24} />
+            <span className="text-[10px] font-bold">Feed</span>
+          </button>
+          <button onClick={() => setActiveTab('Following')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <Users size={24} />
+            <span className="text-[10px] font-bold">Following</span>
+          </button>
+          
+          <div className="flex justify-center -mt-4">
+            <button 
+              onClick={() => setIsPublishing(true)}
+              className="w-14 h-14 bg-orange-500 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/30 active:scale-90 transition-transform"
+            >
+              <Plus size={28} color="white" strokeWidth={3} />
+            </button>
+          </div>
+
+          <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <MessageCircle size={24} />
+            <span className="text-[10px] font-bold">Chat</span>
+          </button>
+          <button onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <UserIcon size={24} />
+            <span className="text-[10px] font-bold">Me</span>
           </button>
         </div>
-
-        <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center gap-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
-          <MessageCircle size={24} />
-          <span className="text-[10px] font-bold">Chat</span>
-        </button>
-        <button onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center gap-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
-          <UserIcon size={24} />
-          <span className="text-[10px] font-bold">Me</span>
-        </button>
       </nav>
     );
   };
