@@ -41,12 +41,12 @@ services:
     container_name: bitline-api
     restart: unless-stopped
     ports:
-      - '8000:8000'
+      - '8001:8000'
     environment:
       DATABASE_URL: postgresql+asyncpg://bitline:bitline_dev_password@postgres:5432/bitline
       REDIS_URL: redis://redis:6379/0
       ENV: development
-      DEBUG: 'true'
+      DEBUG: 'false'
     volumes:
       - ./api:/app
     depends_on:
@@ -55,6 +55,23 @@ services:
       redis:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # React UI
+  ui:
+    build:
+      context: ./bitline-ui
+      dockerfile: Dockerfile
+    container_name: bitline-ui
+    restart: unless-stopped
+    ports:
+      - '3001:3000'
+    environment:
+      VITE_API_URL: http://localhost:8001
+    volumes:
+      - ./bitline-ui:/app
+      - /app/node_modules
+    depends_on:
+      - api
 
 volumes:
   postgres_data:

@@ -19,10 +19,6 @@ class User(Base):
     # Trust score (0-1000)
     trust_score: Mapped[int] = mapped_column(Integer, default=500)
 
-    # Temp auth (will be replaced by Google OAuth in P2)
-    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
-    password_hash: Mapped[str | None] = mapped_column(String(255))
-
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(

@@ -1,7 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { Tab, Post, User, ChatSession } from './types';
+import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_POSTS, MOCK_CHATS, MOCK_ME, MOCK_USERS } from './constants';
+import { useUserStore, usePostStore, useChatStore } from './stores';
+import { api } from './api/client';
 import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Rocket, Gift, Copy, Share2, UserPlus, ScanLine } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 import { TrustBadge } from './components/TrustBadge';
@@ -15,14 +17,45 @@ import { getTrustRingClass } from './trustTheme';
 type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'ADD_FRIENDS' | 'GROUP_CHAT' | 'SCAN' | 'ADD_FRIENDS' | 'GROUP_CHAT' | 'SCAN' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST';
 
 const App: React.FC = () => {
-  // Auth state
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  // Stores
+  const {
+    currentUser,
+    isLoggedIn,
+    isLoading: isLoggingIn,
+    availableBalance,
+    lockedBalance,
+    loginStreak,
+    loadFromStorage,
+    logout,
+  } = useUserStore();
+
+  const {
+    posts: apiPosts,
+    feedPosts: apiFeedPosts,
+    fetchPosts,
+    fetchFeed,
+    createPost: createApiPost,
+    likePost: likeApiPost,
+  } = usePostStore();
+
+  const {
+    sessions: apiSessions,
+    messages: apiMessages,
+    fetchSessions,
+    fetchMessages,
+    sendMessage: sendApiMessage,
+    createSession: createApiSession,
+  } = useChatStore();
+
+  // Convert API data to UI format
+  const posts: Post[] = apiPosts.length > 0 ? apiPosts.map(apiPostToPost) : MOCK_POSTS;
+  const feedPostsConverted: Post[] = apiFeedPosts.length > 0 ? apiFeedPosts.map(apiPostToPost) : MOCK_POSTS.filter(p => p.author.isFollowing);
+  const chatSessions: ChatSession[] = apiSessions.length > 0 ? apiSessions.map(apiSessionToSession) : MOCK_CHATS;
+  const currentMe: User = currentUser ? apiUserToUser(currentUser) : MOCK_ME;
+
+  // Local UI state
   const [showDailyReward, setShowDailyReward] = useState(false);
   const [dailyRewardAmount, setDailyRewardAmount] = useState(0);
-  const [loginStreak, setLoginStreak] = useState(1);
-  const [availableBalance, setAvailableBalance] = useState(12450);
-  const [lockedBalance, setLockedBalance] = useState(2500);
 
   const [activeTab, setActiveTab] = useState<Tab>('Feed');
   const [currentView, setCurrentView] = useState<View>('MAIN');
@@ -44,6 +77,11 @@ const App: React.FC = () => {
   const [commentDraft, setCommentDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState<{ id: string; handle: string } | null>(null);
 
+  // Chat detail state
+  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string}>>([]);
+  const [chatMessageInput, setChatMessageInput] = useState('');
+  const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
+
   const LIKE_STAKE = 10; // sat required to like
 
   // Handle challenge action
@@ -53,98 +91,72 @@ const App: React.FC = () => {
   };
 
   const handleChallengeComplete = (result: 'violation' | 'no_violation', reward: number) => {
-    setAvailableBalance(prev => prev + reward);
-    // In a real app, we'd also update the post status, remove it if violation, etc.
+    // In Phase 1, balance updates will come from the API via ledger service
+    console.log('Challenge complete:', result, reward);
   };
 
   // Handle like action
   const handleLikeRequest = (post: Post) => {
-    if (likedPosts.has(post.id)) {
-      // Already liked, do nothing or unlike
+    if (likedPosts.has(String(post.id)) || post.isLiked) {
       return;
     }
     setLikeTargetPost(post);
     setShowLikeModal(true);
   };
 
-  const handleLikeConfirm = () => {
-    if (likeTargetPost) {
-      setLikedPosts(prev => new Set([...prev, likeTargetPost.id]));
-      setAvailableBalance(prev => prev - LIKE_STAKE);
-      setLockedBalance(prev => prev + LIKE_STAKE);
-    }
-  };
-
-  // Handle Google Sign-In
-  const handleLogin = async () => {
-    setIsLoggingIn(true);
-    
-    // Simulate Google Sign-In delay
-    // In production, this would be actual Google OAuth
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Calculate daily reward (early stage: generous rewards)
-    const baseReward = 100;
-    const streakBonus = Math.min(loginStreak * 10, 100); // Max 100% bonus
-    const reward = Math.floor(baseReward * (1 + streakBonus / 100));
-    
-    setDailyRewardAmount(reward);
-    setAvailableBalance(prev => prev + reward);
-    setIsLoggedIn(true);
-    setIsLoggingIn(false);
-    setShowDailyReward(true);
-  };
-
-  // Check if user is already logged in (localStorage simulation)
-  useEffect(() => {
-    const savedLogin = localStorage.getItem('bitline_logged_in');
-    const lastLoginDate = localStorage.getItem('bitline_last_login');
-    const savedStreak = localStorage.getItem('bitline_streak');
-    
-    if (savedLogin === 'true') {
-      const today = new Date().toDateString();
-      if (lastLoginDate === today) {
-        // Already logged in today, no reward
-        setIsLoggedIn(true);
-        setLoginStreak(parseInt(savedStreak || '1'));
-      } else if (lastLoginDate) {
-        // New day, check streak
-        const lastDate = new Date(lastLoginDate);
-        const todayDate = new Date();
-        const diffDays = Math.floor((todayDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-        
-        if (diffDays === 1) {
-          // Consecutive day
-          const newStreak = parseInt(savedStreak || '1') + 1;
-          setLoginStreak(newStreak);
-          localStorage.setItem('bitline_streak', newStreak.toString());
-        } else {
-          // Streak broken
-          setLoginStreak(1);
-          localStorage.setItem('bitline_streak', '1');
-        }
-        
-        // Show daily reward
-        const baseReward = 100;
-        const streakBonus = Math.min(loginStreak * 10, 100);
-        const reward = Math.floor(baseReward * (1 + streakBonus / 100));
-        setDailyRewardAmount(reward);
-        setAvailableBalance(prev => prev + reward);
-        setIsLoggedIn(true);
-        setShowDailyReward(true);
-        localStorage.setItem('bitline_last_login', today);
+  const handleLikeConfirm = async () => {
+    if (likeTargetPost && currentUser) {
+      setLikedPosts(prev => new Set([...prev, String(likeTargetPost.id)]));
+      // Call API
+      try {
+        await likeApiPost(Number(likeTargetPost.id), currentUser.id);
+      } catch (error) {
+        console.error('Failed to like post:', error);
       }
     }
+  };
+
+  // Handle Google Sign-In (placeholder for Phase 2)
+  const handleLogin = async () => {
+    // In Phase 2, this will trigger actual Google OAuth
+    // For now, users must use the "Create Account" button
+    console.log('Google login will be implemented in Phase 2');
+  };
+
+  // Load user from storage on mount
+  useEffect(() => {
+    loadFromStorage();
   }, []);
 
-  // Save login state
+  // Fetch posts and chats when logged in
   useEffect(() => {
-    if (isLoggedIn) {
-      localStorage.setItem('bitline_logged_in', 'true');
-      localStorage.setItem('bitline_last_login', new Date().toDateString());
-      localStorage.setItem('bitline_streak', loginStreak.toString());
+    if (isLoggedIn && currentUser) {
+      fetchPosts();
+      fetchFeed(currentUser.id);
+      fetchSessions(currentUser.id);
     }
-  }, [isLoggedIn, loginStreak]);
+  }, [isLoggedIn, currentUser?.id]);
+
+  // Load chat messages when selectedChat changes
+  useEffect(() => {
+    const loadMessages = async () => {
+      if (!selectedChat || selectedChat.id === 'new' || !currentUser) {
+        setChatMessages([]);
+        return;
+      }
+      setIsLoadingChatMessages(true);
+      try {
+        const msgs = await api.getMessages(Number(selectedChat.id), currentUser.id);
+        setChatMessages(msgs.map(m => ({ id: m.id, senderId: m.sender_id, content: m.content })));
+      } catch (error) {
+        console.error('Failed to load messages:', error);
+        setChatMessages([]);
+      } finally {
+        setIsLoadingChatMessages(false);
+      }
+    };
+    loadMessages();
+  }, [selectedChat?.id, currentUser?.id]);
 
   // Show login page if not logged in
   if (!isLoggedIn) {
@@ -217,7 +229,7 @@ const App: React.FC = () => {
           <Zap className="text-white fill-white" size={24} />
         </div>
 
-        {MOCK_POSTS.map(post => (
+        {posts.map(post => (
           <PostCard 
             key={post.id} 
             post={post} 
@@ -226,13 +238,13 @@ const App: React.FC = () => {
               setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
             }}
             onUserClick={(id) => {
-              const user = MOCK_POSTS.find(p => p.author.id === id)?.author || MOCK_ME;
+              const user = posts.find(p => p.author.id === id)?.author || currentMe;
               setSelectedUser(user);
               setCurrentView('USER_PROFILE');
             }}
             onChallenge={handleChallenge}
             onLike={handleLikeRequest}
-            isLiked={likedPosts.has(post.id)}
+            isLiked={likedPosts.has(String(post.id)) || post.isLiked}
           />
         ))}
       </div>
@@ -242,7 +254,7 @@ const App: React.FC = () => {
   const renderFollowing = () => (
     <div className="p-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
       <h2 className="text-xl font-bold mb-4 px-2">Timeline</h2>
-      {MOCK_POSTS.filter(p => p.author.isFollowing || p.author.id === 'me').map(post => (
+      {feedPostsConverted.map(post => (
         <PostCard 
           key={post.id} 
           post={post} 
@@ -251,7 +263,7 @@ const App: React.FC = () => {
             setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
           }}
           onUserClick={(id) => {
-            const user = MOCK_POSTS.find(p => p.author.id === id)?.author || MOCK_ME;
+            const user = feedPostsConverted.find(p => p.author.id === id)?.author || currentMe;
             setSelectedUser(user);
             setCurrentView('USER_PROFILE');
           }}
@@ -298,7 +310,7 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
-        {MOCK_CHATS.map(chat => (
+        {chatSessions.map(chat => (
           <div
             key={chat.id}
             className="flex items-center gap-4 mb-6 active:opacity-70"
@@ -309,14 +321,14 @@ const App: React.FC = () => {
             }}
           >
             <div className="relative">
-              <img src={chat.participants[0].avatar} className="w-14 h-14 rounded-full border border-zinc-800 object-cover" />
-              {chat.isGroup && (
-                 <img src={chat.participants[1].avatar} className="w-8 h-8 rounded-full border-2 border-black absolute -bottom-1 -right-1 object-cover" />
+              <img src={chat.participants[0]?.avatar || `https://picsum.photos/id/${Number(chat.id) + 10}/200/200`} className="w-14 h-14 rounded-full border border-zinc-800 object-cover" />
+              {chat.isGroup && chat.participants[1] && (
+                 <img src={chat.participants[1].avatar || `https://picsum.photos/id/${Number(chat.id) + 11}/200/200`} className="w-8 h-8 rounded-full border-2 border-black absolute -bottom-1 -right-1 object-cover" />
               )}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between mb-0.5">
-                <span className="font-bold text-zinc-100">{chat.isGroup ? 'Hackathon Team' : chat.participants[0].name}</span>
+                <span className="font-bold text-zinc-100">{chat.isGroup ? (chat.name || 'Group Chat') : chat.participants[0]?.name}</span>
                 <span className="text-[10px] text-zinc-500">{chat.timestamp}</span>
               </div>
               <p className="text-sm text-zinc-500 truncate">{chat.lastMessage}</p>
@@ -368,18 +380,19 @@ const App: React.FC = () => {
   );
 
   const renderAddFriends = () => {
-    const candidates = MOCK_USERS.filter(u => u.id !== MOCK_ME.id);
+    const candidates = MOCK_USERS.filter(u => u.id !== currentMe.id);
     const filteredFriends = candidates.filter(u => {
       const query = friendSearch.trim().toLowerCase();
       if (!query) return true;
       return u.name.toLowerCase().includes(query) || u.handle.toLowerCase().includes(query);
     });
 
-    const toggleAddFriend = (userId: string) => {
+    const toggleAddFriend = (userId: string | number) => {
+      const id = String(userId);
       setAddedFriendIds(prev => {
         const next = new Set(prev);
-        if (next.has(userId)) next.delete(userId);
-        else next.add(userId);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         return next;
       });
     };
@@ -403,7 +416,7 @@ const App: React.FC = () => {
 
           <div className="space-y-3">
             {filteredFriends.map(user => {
-              const isAdded = addedFriendIds.has(user.id);
+              const isAdded = addedFriendIds.has(String(user.id));
               return (
                 <div key={user.id} className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
@@ -433,12 +446,13 @@ const App: React.FC = () => {
   };
 
   const renderGroupChat = () => {
-    const candidates = MOCK_USERS.filter(u => u.id !== MOCK_ME.id);
-    const toggleMember = (userId: string) => {
+    const candidates = MOCK_USERS.filter(u => u.id !== currentMe.id);
+    const toggleMember = (userId: string | number) => {
+      const id = String(userId);
       setGroupMemberIds(prev => {
         const next = new Set(prev);
-        if (next.has(userId)) next.delete(userId);
-        else next.add(userId);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
         return next;
       });
     };
@@ -483,7 +497,7 @@ const App: React.FC = () => {
 
           <div className="space-y-3 mb-6">
             {candidates.map(user => {
-              const selected = groupMemberIds.has(user.id);
+              const selected = groupMemberIds.has(String(user.id));
               return (
                 <button
                   key={user.id}
@@ -542,16 +556,11 @@ const App: React.FC = () => {
   );
 
   const renderProfile = () => {
-    const followingUsers = MOCK_POSTS
-      .filter(p => p.author.isFollowing && p.author.id !== 'me')
-      .map(p => p.author)
-      .filter((user, idx, arr) => arr.findIndex(u => u.id === user.id) === idx);
-    const followingCount = followingUsers.length;
-    const followerUsers: User[] = [MOCK_USERS[0], MOCK_USERS[2], MOCK_USERS[4], MOCK_USERS[6]];
-    const followerCount = followerUsers.length;
+    const followingCount = currentUser?.following_count || 0;
+    const followerCount = currentUser?.followers_count || 0;
 
     const handleOpenMyProfile = () => {
-      setSelectedUser({ ...MOCK_ME, isFollowing: false });
+      setSelectedUser({ ...currentMe, isFollowing: false });
       setCurrentView('USER_PROFILE');
     };
 
@@ -562,16 +571,16 @@ const App: React.FC = () => {
            {/* TrustScore Visualization Ring (0-1000 scale) */}
            <svg className="absolute inset-0 w-full h-full transform -rotate-90">
              <circle cx="56" cy="56" r="50" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-zinc-800" />
-             <circle cx="56" cy="56" r="50" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={314} strokeDashoffset={314 * (1 - MOCK_ME.trustScore * 10 / 1000)} className="text-orange-500" />
+             <circle cx="56" cy="56" r="50" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={314} strokeDashoffset={314 * (1 - currentMe.trustScore / 100)} className="text-orange-500" />
            </svg>
-           <img src={MOCK_ME.avatar} className="absolute inset-2 w-24 h-24 rounded-full border border-zinc-800 object-cover" />
+           <img src={currentMe.avatar || `https://picsum.photos/id/64/200/200`} className="absolute inset-2 w-24 h-24 rounded-full border border-zinc-800 object-cover" />
            <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full border-2 border-black">
-             {MOCK_ME.trustScore * 10}
+             {currentMe.trustScore * 10}
            </div>
         </button>
-        <h2 className="text-xl font-black italic tracking-tighter">{MOCK_ME.name}</h2>
-        <span className="text-zinc-500 text-xs font-medium">{MOCK_ME.handle}</span>
-        <span className="text-[10px] text-zinc-600 mt-1">Trust Score {MOCK_ME.trustScore * 10}/1000</span>
+        <h2 className="text-xl font-black italic tracking-tighter">{currentMe.name}</h2>
+        <span className="text-zinc-500 text-xs font-medium">{currentMe.handle}</span>
+        <span className="text-[10px] text-zinc-600 mt-1">Trust Score {currentMe.trustScore * 10}/1000</span>
         <div className="flex items-center gap-6 mt-4">
           <button
             className="text-center active:scale-[0.98]"
@@ -635,10 +644,7 @@ const App: React.FC = () => {
 
       {/* Logout button */}
       <button 
-        onClick={() => {
-          localStorage.removeItem('bitline_logged_in');
-          setIsLoggedIn(false);
-        }}
+        onClick={() => logout()}
         className="w-full mt-6 py-3 text-zinc-500 text-sm font-medium"
       >
         Sign Out
@@ -1080,14 +1086,37 @@ const App: React.FC = () => {
 
   const renderChatDetail = () => {
     if (!selectedChat) return null;
-    const chatPartner = selectedChat.participants[0];
+    const chatPartner = selectedChat.participants.find(p => p.id !== currentMe.id) || selectedChat.participants[0];
     const isGroup = Boolean(selectedChat.isGroup);
 
-    const mockMessages = [
-      { id: 'm1', senderId: chatPartner.id, text: 'Hey, did you see the latest proposal for the staking algorithm?' },
-      { id: 'm2', senderId: 'me', text: 'Yes! It looks solid. 24h review window seems like the sweet spot.' },
-      { id: 'm3', senderId: chatPartner.id, text: 'The jury just cleared that spam report too. System is working perfectly.' },
-    ];
+    const handleSendMessage = async () => {
+      if (!chatMessageInput.trim() || !currentUser) return;
+
+      const content = chatMessageInput.trim();
+      setChatMessageInput('');
+
+      try {
+        // If this is a new session, create it first
+        let sessionId = selectedChat.id;
+        if (sessionId === 'new') {
+          const otherUserId = chatPartner.id;
+          const newSession = await api.createChatSession(currentUser.id, {
+            member_ids: [Number(otherUserId)],
+          });
+          sessionId = newSession.id;
+          setSelectedChat({
+            ...selectedChat,
+            id: newSession.id,
+          });
+        }
+
+        // Send the message
+        const msg = await api.sendMessage(Number(sessionId), currentUser.id, content);
+        setChatMessages(prev => [...prev, { id: msg.id, senderId: msg.sender_id, content: msg.content }]);
+      } catch (error) {
+        console.error('Failed to send message:', error);
+      }
+    };
 
     const handleOpenProfile = () => {
       if (!isGroup) {
@@ -1108,36 +1137,46 @@ const App: React.FC = () => {
           >
             {isGroup ? (
               <div className="relative w-10 h-10">
-                <img src={selectedChat.participants[0]?.avatar} className="w-7 h-7 rounded-full border border-zinc-800 absolute top-0 left-0" />
-                <img src={selectedChat.participants[1]?.avatar || selectedChat.participants[0]?.avatar} className="w-7 h-7 rounded-full border border-zinc-800 absolute bottom-0 right-0" />
+                <img src={selectedChat.participants[0]?.avatar || `https://picsum.photos/id/10/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 absolute top-0 left-0" />
+                <img src={selectedChat.participants[1]?.avatar || `https://picsum.photos/id/11/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 absolute bottom-0 right-0" />
               </div>
             ) : (
-              <img src={chatPartner.avatar} className="w-10 h-10 rounded-full border border-zinc-800 object-cover" />
+              <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-10 h-10 rounded-full border border-zinc-800 object-cover" />
             )}
             <div className="text-left">
-              <span className="text-sm font-bold block leading-none">{isGroup ? 'Hackathon Group' : chatPartner.name}</span>
+              <span className="text-sm font-bold block leading-none">{isGroup ? (selectedChat.name || 'Group Chat') : chatPartner?.name}</span>
               <span className="text-[10px] text-green-500 font-bold uppercase tracking-widest">Active now</span>
             </div>
           </button>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-          {mockMessages.map(msg => {
-            const isMe = msg.senderId === 'me';
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {isLoadingChatMessages && (
+            <div className="flex justify-center py-4">
+              <div className="w-6 h-6 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+            </div>
+          )}
+          {chatMessages.length === 0 && !isLoadingChatMessages && (
+            <div className="text-center text-zinc-600 py-8">
+              No messages yet. Say hi! 👋
+            </div>
+          )}
+          {chatMessages.map(msg => {
+            const isMe = msg.senderId === currentUser?.id || msg.senderId === currentMe.id;
             return (
-              <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'self-end flex-row-reverse' : 'self-start'}`}>
+              <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
                 {!isMe && (
-                  <button onClick={handleOpenProfile}>
-                    <img src={chatPartner.avatar} className="w-7 h-7 rounded-full border border-zinc-800 object-cover" />
+                  <button onClick={handleOpenProfile} className="flex-shrink-0">
+                    <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 object-cover" />
                   </button>
                 )}
-                <div className={`max-w-[75%] p-3 text-sm ${
+                <div className={`max-w-[70%] px-4 py-2.5 text-sm break-words ${
                   isMe
-                    ? 'bg-orange-600 text-white rounded-2xl rounded-tr-none'
-                    : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-tl-none'
+                    ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
+                    : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-bl-sm'
                 }`}>
-                  {msg.text}
+                  {msg.content}
                 </div>
               </div>
             );
@@ -1147,9 +1186,20 @@ const App: React.FC = () => {
         {/* Input */}
         <div className="p-4 bg-black border-t border-zinc-900 flex items-center gap-4 safe-bottom-nav">
           <div className="flex-1 bg-zinc-900 rounded-xl px-4 py-3 flex items-center gap-3">
-            <input placeholder="Message..." className="bg-transparent border-none outline-none text-sm w-full" />
+            <input 
+              value={chatMessageInput}
+              onChange={(e) => setChatMessageInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+              placeholder="Message..." 
+              className="bg-transparent border-none outline-none text-sm w-full" 
+            />
           </div>
-          <button className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform"><Send size={18} /></button>
+          <button 
+            onClick={handleSendMessage}
+            className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform"
+          >
+            <Send size={18} />
+          </button>
         </div>
       </div>
     );

@@ -10,8 +10,8 @@ Python FastAPI backend for BitLine social platform.
 # From project root
 docker compose up -d
 
-# API runs at http://localhost:8000
-# Swagger docs at http://localhost:8000/docs
+# API runs at http://localhost:8001
+# Swagger docs at http://localhost:8001/docs
 ```
 
 ### Local Development

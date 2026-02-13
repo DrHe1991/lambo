@@ -5,31 +5,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.database import get_db
 from app.models.user import User, Follow
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserBrief
-import bcrypt
 
 router = APIRouter()
 
 
-def hash_password(password: str) -> str:
-    """Hash a password using bcrypt."""
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+@router.get('', response_model=list[UserBrief])
+async def list_users(
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all users (for dev user selection)."""
+    result = await db.execute(select(User).limit(limit))
+    return result.scalars().all()
 
 
 @router.post('', response_model=UserBrief, status_code=status.HTTP_201_CREATED)
 async def create_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new user."""
-    # Check if email or handle already exists
-    existing = await db.execute(
-        select(User).where((User.email == user_data.email) | (User.handle == user_data.handle))
-    )
+    """Create a new user (no password needed)."""
+    # Check if handle already exists
+    existing = await db.execute(select(User).where(User.handle == user_data.handle))
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail='Email or handle already registered')
+        raise HTTPException(status_code=400, detail='Handle already taken')
 
     user = User(
         name=user_data.name,
         handle=user_data.handle,
-        email=user_data.email,
-        password_hash=hash_password(user_data.password),
         avatar=user_data.avatar,
         bio=user_data.bio if hasattr(user_data, 'bio') else None,
     )

@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 
 class UserBase(BaseModel):
@@ -10,9 +10,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    """Schema for creating a user."""
-    email: EmailStr
-    password: str = Field(..., min_length=6)
+    """Schema for creating a user (no password - dev mode)."""
     avatar: str | None = None
 
 

@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     # Environment
     env: str = 'development'
-    debug: bool = True
+    debug: bool = False
 
     # Auth (for later phases)
     secret_key: str = 'dev-secret-key-change-in-production'
