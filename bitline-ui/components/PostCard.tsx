@@ -19,6 +19,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
 
   return (
     <div 
+      data-testid={`post-card-${post.id}`}
       className={`border rounded-2xl p-4 mb-3 active:scale-[0.98] transition-transform duration-100 ${
         isBoosted
           ? 'bg-gradient-to-br from-orange-500/12 via-zinc-900 to-zinc-900 border-orange-400/70 shadow-[0_0_0_1px_rgba(251,146,60,0.32),0_0_20px_rgba(249,115,22,0.16)]'
@@ -83,11 +84,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
       <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">
         <div className="flex items-center gap-4">
           <button 
+            data-testid={`like-button-${post.id}`}
             className={`flex items-center gap-1.5 transition-colors ${isLiked ? 'text-pink-500' : 'text-zinc-400 hover:text-pink-400'}`}
             onClick={(e) => { e.stopPropagation(); onLike?.(post); }}
           >
             <Heart size={18} className={isLiked ? 'fill-current' : ''} />
-            <span className="text-xs font-medium">{post.likes + (isLiked ? 1 : 0)}</span>
+            <span className="text-xs font-medium">{post.likes}</span>
             {!isLiked && <span className="text-[10px] text-zinc-600 font-bold">10sat</span>}
           </button>
           <button className="flex items-center gap-1.5 text-zinc-400 hover:text-blue-400 transition-colors">
@@ -96,6 +98,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           </button>
         </div>
         <button 
+          data-testid={`report-button-${post.id}`}
           className="flex items-center gap-1 text-zinc-600 hover:text-red-500 transition-colors"
           onClick={(e) => { e.stopPropagation(); onChallenge?.(post); }}
         >

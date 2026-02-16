@@ -50,6 +50,11 @@
 - Validate all user input with Pydantic
 - Use parameterized queries (SQLAlchemy handles this)
 
+## Code Changes
+- NEVER use terminal commands (python scripts, sed, cat, echo, etc.) to modify source files
+- Always use the editor's built-in edit tools so the user can review and approve every change
+- Terminal is only for running builds, tests, servers, and read-only commands (grep, curl, logs, etc.)
+
 ## General
 - DRY - Don't Repeat Yourself
 - Keep functions under 50 lines when possible

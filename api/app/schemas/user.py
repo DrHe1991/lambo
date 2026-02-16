@@ -28,6 +28,8 @@ class UserBrief(BaseModel):
     handle: str
     avatar: str | None
     trust_score: int
+    available_balance: int = 0
+    free_posts_remaining: int = 1
 
     class Config:
         from_attributes = True
@@ -37,9 +39,15 @@ class UserResponse(UserBrief):
     """Full user response."""
     bio: str | None
     created_at: datetime
+    available_balance: int = 0
     followers_count: int = 0
     following_count: int = 0
     is_following: bool = False
+    # Trust sub-scores
+    creator_score: int = 500
+    curator_score: int = 500
+    juror_score: int = 500
+    risk_score: int = 0
 
     class Config:
         from_attributes = True

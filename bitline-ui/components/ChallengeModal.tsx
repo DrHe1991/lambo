@@ -1,31 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { X, ShieldAlert, Loader2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import { Post } from '../types';
+import { api, ApiChallenge } from '../api/client';
 
 type ChallengeStep = 'confirm' | 'processing' | 'result';
-type ChallengeResult = 'violation' | 'no_violation';
 
 interface ChallengeModalProps {
   isOpen: boolean;
   onClose: () => void;
   post: Post | null;
   userBalance: number;
-  onChallengeComplete: (result: ChallengeResult, reward: number) => void;
+  userId: number;
+  challengeFee: number;
+  onChallengeComplete: (result: 'violation' | 'no_violation', challenge: ApiChallenge) => void;
 }
-
-const CHALLENGE_STAKE = 100; // sat required to challenge
 
 export const ChallengeModal: React.FC<ChallengeModalProps> = ({
   isOpen,
   onClose,
   post,
   userBalance,
+  userId,
+  challengeFee,
   onChallengeComplete,
 }) => {
   const [step, setStep] = useState<ChallengeStep>('confirm');
   const [selectedReason, setSelectedReason] = useState<string | null>(null);
-  const [result, setResult] = useState<ChallengeResult | null>(null);
-  const [processingProgress, setProcessingProgress] = useState(0);
+  const [challenge, setChallenge] = useState<ApiChallenge | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const reasons = [
     { id: 'spam', label: 'Spam', icon: '📢' },
@@ -39,40 +41,39 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
     if (isOpen) {
       setStep('confirm');
       setSelectedReason(null);
-      setResult(null);
-      setProcessingProgress(0);
+      setChallenge(null);
+      setError(null);
     }
   }, [isOpen]);
 
-  const handleSubmitChallenge = () => {
-    if (!selectedReason) return;
-    
+  const handleSubmitChallenge = async () => {
+    if (!selectedReason || !post) return;
+
     setStep('processing');
-    
-    // Simulate AI processing
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 15 + 5;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
-        
-        // Simulate AI decision (70% chance of violation for demo)
-        const isViolation = Math.random() > 0.3;
-        setResult(isViolation ? 'violation' : 'no_violation');
-        setStep('result');
-      }
-      setProcessingProgress(Math.min(progress, 100));
-    }, 200);
+    setError(null);
+
+    try {
+      const result = await api.createChallenge(userId, {
+        content_type: 'post',
+        content_id: Number(post.id),
+        reason: selectedReason,
+      });
+
+      setChallenge(result);
+      setStep('result');
+    } catch (err: any) {
+      setError(err.message || 'Challenge failed');
+      setStep('confirm');
+    }
   };
 
   const handleAcceptResult = () => {
-    if (result === 'violation') {
-      // User wins: get stake back + reward from violator
-      onChallengeComplete('violation', CHALLENGE_STAKE + 200);
+    if (!challenge) return;
+
+    if (challenge.status === 'guilty') {
+      onChallengeComplete('violation', challenge);
     } else {
-      // User loses: lose stake
-      onChallengeComplete('no_violation', -CHALLENGE_STAKE);
+      onChallengeComplete('no_violation', challenge);
     }
     onClose();
   };
@@ -88,7 +89,7 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
       />
       
       {/* Modal */}
-      <div className="relative bg-zinc-900 border-t border-zinc-800 rounded-t-3xl w-full max-w-lg animate-in slide-in-from-bottom duration-300 max-h-[85vh] overflow-y-auto">
+      <div data-testid="challenge-modal" className="relative bg-zinc-900 border-t border-zinc-800 rounded-t-3xl w-full max-w-lg animate-in slide-in-from-bottom duration-300 max-h-[85vh] overflow-y-auto">
         {/* Handle */}
         <div className="flex justify-center pt-3 pb-2">
           <div className="w-10 h-1 bg-zinc-700 rounded-full" />
@@ -119,11 +120,18 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
               {/* Content preview */}
               <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-4 mb-6">
                 <div className="flex items-center gap-2 mb-2">
-                  <img src={post.author.avatar} className="w-6 h-6 rounded-full" />
+                  <img src={post.author.avatar || undefined} className="w-6 h-6 rounded-full" />
                   <span className="text-xs font-bold text-zinc-400">{post.author.handle}</span>
                 </div>
                 <p className="text-sm text-zinc-300 line-clamp-3">{post.content}</p>
               </div>
+
+              {/* Error */}
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4">
+                  <p className="text-red-400 text-sm text-center">{error}</p>
+                </div>
+              )}
 
               {/* Reason selection */}
               <div className="mb-6">
@@ -134,6 +142,7 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
                   {reasons.map(reason => (
                     <button
                       key={reason.id}
+                      data-testid={`reason-${reason.id}`}
                       onClick={() => setSelectedReason(reason.id)}
                       className={`p-3 rounded-xl border text-left transition-all ${
                         selectedReason === reason.id
@@ -148,33 +157,34 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
                 </div>
               </div>
 
-              {/* Stake info */}
+              {/* Fee info */}
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 mb-6">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-amber-400 text-sm font-bold">Report Stake</span>
+                    <span className="text-amber-400 text-sm font-bold">Report Fee</span>
                     <p className="text-[10px] text-amber-400/70">Lost if report is rejected</p>
                   </div>
-                  <span className="text-xl font-black text-amber-400">{CHALLENGE_STAKE} sat</span>
+                  <span className="text-xl font-black text-amber-400">{challengeFee} sat</span>
                 </div>
               </div>
 
               {/* Balance check */}
-              {userBalance < CHALLENGE_STAKE && (
+              {userBalance < challengeFee && (
                 <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 mb-4">
                   <p className="text-red-400 text-sm text-center">
-                    Insufficient balance. Need {CHALLENGE_STAKE} sat
+                    Insufficient balance. Need {challengeFee} sat
                   </p>
                 </div>
               )}
 
               {/* Submit button */}
               <button
+                data-testid="submit-report-button"
                 onClick={handleSubmitChallenge}
-                disabled={!selectedReason || userBalance < CHALLENGE_STAKE}
+                disabled={!selectedReason || userBalance < challengeFee}
                 className="w-full bg-red-600 text-white font-black py-4 rounded-2xl text-sm uppercase tracking-tighter active:scale-[0.98] transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Submit Report (Stake {CHALLENGE_STAKE} sat)
+                Submit Report ({challengeFee} sat)
               </button>
             </>
           )}
@@ -189,33 +199,43 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
               </div>
               
               <h2 className="text-xl font-black text-white mb-2">AI Reviewing...</h2>
-              <p className="text-zinc-500 text-sm mb-6">Analyzing content for violations</p>
-              
-              {/* Progress bar */}
-              <div className="bg-zinc-800 rounded-full h-2 overflow-hidden max-w-xs mx-auto">
-                <div 
-                  className="bg-orange-500 h-full transition-all duration-200"
-                  style={{ width: `${processingProgress}%` }}
-                />
-              </div>
-              <p className="text-zinc-600 text-xs mt-2">{Math.round(processingProgress)}%</p>
+              <p className="text-zinc-500 text-sm mb-6">
+                Analyzing content, author profile & history
+              </p>
             </div>
           )}
 
-          {step === 'result' && (
+          {step === 'result' && challenge && (
             <div className="py-6 text-center">
-              {result === 'violation' ? (
+              {challenge.status === 'guilty' ? (
                 <>
                   <div className="w-20 h-20 bg-green-500/10 border border-green-500/30 rounded-full flex items-center justify-center mx-auto mb-6">
                     <CheckCircle className="w-10 h-10 text-green-500" />
                   </div>
                   <h2 className="text-2xl font-black text-green-500 mb-2">Report Upheld</h2>
-                  <p className="text-zinc-400 text-sm mb-6">AI found this content violates rules</p>
+                  <p className="text-zinc-400 text-sm mb-4">AI found this content violates rules</p>
                   
+                  {/* AI reasoning */}
+                  <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-3 mb-4 text-left">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-1">
+                      AI Reasoning
+                    </span>
+                    <p className="text-sm text-zinc-300">{challenge.ai_reason}</p>
+                    {challenge.ai_confidence && (
+                      <span className="text-[10px] text-zinc-600 mt-1 block">
+                        Confidence: {Math.round(challenge.ai_confidence * 100)}%
+                      </span>
+                    )}
+                  </div>
+
                   <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-4 mb-6">
                     <span className="text-zinc-500 text-xs block mb-1">You receive</span>
-                    <span className="text-3xl font-black text-green-500">+{CHALLENGE_STAKE + 200} sat</span>
-                    <p className="text-[10px] text-green-400/70 mt-1">Stake refund + violator penalty</p>
+                    <span className="text-3xl font-black text-green-500">
+                      +{challenge.fee_paid + Math.round(challenge.fine_amount * 0.35)} sat
+                    </span>
+                    <p className="text-[10px] text-green-400/70 mt-1">
+                      Fee refund ({challenge.fee_paid}) + violation reward ({Math.round(challenge.fine_amount * 0.35)})
+                    </p>
                   </div>
                 </>
               ) : (
@@ -224,12 +244,25 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
                     <XCircle className="w-10 h-10 text-red-500" />
                   </div>
                   <h2 className="text-2xl font-black text-red-500 mb-2">Report Rejected</h2>
-                  <p className="text-zinc-400 text-sm mb-6">AI found no rule violations</p>
+                  <p className="text-zinc-400 text-sm mb-4">AI found no rule violations</p>
+
+                  {/* AI reasoning */}
+                  <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-3 mb-4 text-left">
+                    <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-1">
+                      AI Reasoning
+                    </span>
+                    <p className="text-sm text-zinc-300">{challenge.ai_reason}</p>
+                    {challenge.ai_confidence && (
+                      <span className="text-[10px] text-zinc-600 mt-1 block">
+                        Confidence: {Math.round(challenge.ai_confidence * 100)}%
+                      </span>
+                    )}
+                  </div>
                   
                   <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-4 mb-6">
                     <span className="text-zinc-500 text-xs block mb-1">You lose</span>
-                    <span className="text-3xl font-black text-red-500">-{CHALLENGE_STAKE} sat</span>
-                    <p className="text-[10px] text-red-400/70 mt-1">Stake forfeited</p>
+                    <span className="text-3xl font-black text-red-500">-{challenge.fee_paid} sat</span>
+                    <p className="text-[10px] text-red-400/70 mt-1">Fee forfeited</p>
                   </div>
                 </>
               )}
@@ -238,7 +271,7 @@ export const ChallengeModal: React.FC<ChallengeModalProps> = ({
               <div className="bg-zinc-800/50 border border-zinc-700 rounded-xl p-3 mb-6">
                 <div className="flex items-center justify-center gap-2 text-zinc-500 text-xs">
                   <AlertTriangle size={14} />
-                  <span>Disagree? Human appeal coming soon</span>
+                  <span>Disagree? Community jury appeal coming soon</span>
                 </div>
               </div>
 

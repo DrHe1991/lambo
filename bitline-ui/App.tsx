@@ -3,18 +3,19 @@ import React, { useState, useEffect } from 'react';
 import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_POSTS, MOCK_CHATS, MOCK_ME, MOCK_USERS } from './constants';
 import { useUserStore, usePostStore, useChatStore } from './stores';
-import { api } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Rocket, Gift, Copy, Share2, UserPlus, ScanLine } from 'lucide-react';
+import { api, ApiComment } from './api/client';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 import { TrustBadge } from './components/TrustBadge';
 import { LoginPage } from './components/LoginPage';
-import { DailyRewardModal } from './components/DailyRewardModal';
 import { ChallengeModal } from './components/ChallengeModal';
 import { LikeStakeModal } from './components/LikeStakeModal';
-import { getTrustRingClass } from './trustTheme';
+import { ToastContainer, toast } from './components/Toast';
+import { getTrustRingClass, getTrustStrokeColor, getTrustBadgeBg, getTrustTier } from './trustTheme';
+import { ApiTrustBreakdown, ApiUserCosts } from './api/client';
 
 // Views
-type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'ADD_FRIENDS' | 'GROUP_CHAT' | 'SCAN' | 'ADD_FRIENDS' | 'GROUP_CHAT' | 'SCAN' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST';
+type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'ADD_FRIENDS' | 'GROUP_CHAT' | 'SCAN' | 'TRUST_DETAIL';
 
 const App: React.FC = () => {
   // Stores
@@ -23,19 +24,25 @@ const App: React.FC = () => {
     isLoggedIn,
     isLoading: isLoggingIn,
     availableBalance,
-    lockedBalance,
-    loginStreak,
+    change24h,
+    ledgerEntries,
     loadFromStorage,
     logout,
+    fetchBalance,
+    fetchLedger,
   } = useUserStore();
 
   const {
     posts: apiPosts,
     feedPosts: apiFeedPosts,
+    comments: apiComments,
     fetchPosts,
     fetchFeed,
+    fetchComments,
     createPost: createApiPost,
-    likePost: likeApiPost,
+    createComment: createApiComment,
+    toggleLikePost,
+    toggleLikeComment,
   } = usePostStore();
 
   const {
@@ -54,16 +61,16 @@ const App: React.FC = () => {
   const currentMe: User = currentUser ? apiUserToUser(currentUser) : MOCK_ME;
 
   // Local UI state
-  const [showDailyReward, setShowDailyReward] = useState(false);
-  const [dailyRewardAmount, setDailyRewardAmount] = useState(0);
-
   const [activeTab, setActiveTab] = useState<Tab>('Feed');
   const [currentView, setCurrentView] = useState<View>('MAIN');
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedChat, setSelectedChat] = useState<ChatSession | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [publishType, setPublishType] = useState<'Note' | 'Question' | null>(null);
+  const [publishType, setPublishType] = useState<'Note' | 'Question'>('Note');
+  const [publishContent, setPublishContent] = useState('');
+  const [publishBounty, setPublishBounty] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [challengePost, setChallengePost] = useState<Post | null>(null);
   const [showChallengeModal, setShowChallengeModal] = useState(false);
   const [showLikeModal, setShowLikeModal] = useState(false);
@@ -77,12 +84,33 @@ const App: React.FC = () => {
   const [commentDraft, setCommentDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState<{ id: string; handle: string } | null>(null);
 
+
   // Chat detail state
   const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
 
+  // Trust & dynamic costs state
+  const [trustBreakdown, setTrustBreakdown] = useState<ApiTrustBreakdown | null>(null);
+  const [userCosts, setUserCosts] = useState<ApiUserCosts | null>(null);
+
   const LIKE_STAKE = 10; // sat required to like
+
+  // Fetch trust breakdown & dynamic costs
+  const fetchTrustData = async (userId: number) => {
+    try {
+      const [trust, costs] = await Promise.all([
+        api.getTrustBreakdown(userId),
+        api.getUserCosts(userId),
+      ]);
+      setTrustBreakdown(trust);
+      setUserCosts(costs);
+    } catch { /* silent */ }
+  };
+
+
+
+
 
   // Handle challenge action
   const handleChallenge = (post: Post) => {
@@ -90,30 +118,39 @@ const App: React.FC = () => {
     setShowChallengeModal(true);
   };
 
-  const handleChallengeComplete = (result: 'violation' | 'no_violation', reward: number) => {
-    // In Phase 1, balance updates will come from the API via ledger service
-    console.log('Challenge complete:', result, reward);
+  const handleChallengeComplete = (result: 'violation' | 'no_violation') => {
+    // Refresh balance + posts after challenge settles
+    if (currentUser) {
+      fetchBalance(currentUser.id);
+      fetchPosts({ user_id: currentUser.id });
+    }
   };
 
-  // Handle like action
-  const handleLikeRequest = (post: Post) => {
-    if (likedPosts.has(String(post.id)) || post.isLiked) {
-      return;
+  // Handle like action (toggle)
+  const handleLikeToggle = async (post: Post) => {
+    if (!currentUser) return;
+    const isLiked = likedPosts.has(String(post.id)) || post.isLiked;
+    try {
+      await toggleLikePost(Number(post.id), currentUser.id, isLiked);
+      if (isLiked) {
+        setLikedPosts(prev => { const s = new Set(prev); s.delete(String(post.id)); return s; });
+      } else {
+        setLikedPosts(prev => new Set([...prev, String(post.id)]));
+      }
+      fetchBalance(currentUser.id);
+    } catch (error) {
+      const msg = (error as Error).message || 'Like failed';
+      toast.warning(msg);
     }
-    setLikeTargetPost(post);
-    setShowLikeModal(true);
+  };
+
+  // Legacy — keep modal wiring for now but simplified
+  const handleLikeRequest = (post: Post) => {
+    handleLikeToggle(post);
   };
 
   const handleLikeConfirm = async () => {
-    if (likeTargetPost && currentUser) {
-      setLikedPosts(prev => new Set([...prev, String(likeTargetPost.id)]));
-      // Call API
-      try {
-        await likeApiPost(Number(likeTargetPost.id), currentUser.id);
-      } catch (error) {
-        console.error('Failed to like post:', error);
-      }
-    }
+    if (likeTargetPost) handleLikeToggle(likeTargetPost);
   };
 
   // Handle Google Sign-In (placeholder for Phase 2)
@@ -131,9 +168,10 @@ const App: React.FC = () => {
   // Fetch posts and chats when logged in
   useEffect(() => {
     if (isLoggedIn && currentUser) {
-      fetchPosts();
+      fetchPosts({ user_id: currentUser.id });
       fetchFeed(currentUser.id);
       fetchSessions(currentUser.id);
+      fetchTrustData(currentUser.id);
     }
   }, [isLoggedIn, currentUser?.id]);
 
@@ -186,29 +224,30 @@ const App: React.FC = () => {
     return (
       <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-zinc-800 safe-bottom-nav">
         <div className="max-w-md mx-auto px-4 pt-3 pb-2 grid grid-cols-5 items-end">
-          <button onClick={() => setActiveTab('Feed')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-feed" onClick={() => setActiveTab('Feed')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <Home size={24} />
             <span className="text-[10px] font-bold">Feed</span>
           </button>
-          <button onClick={() => setActiveTab('Following')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-following" onClick={() => setActiveTab('Following')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <Users size={24} />
             <span className="text-[10px] font-bold">Following</span>
           </button>
           
           <div className="flex justify-center -mt-4">
             <button 
+              data-testid="new-post-button"
               onClick={() => setIsPublishing(true)}
-              className="w-14 h-14 bg-orange-500 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/30 active:scale-90 transition-transform"
+              className="w-14 h-14 bg-orange-500 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/30 active:scale-90 transition-transform duration-200"
             >
               <Plus size={28} color="white" strokeWidth={3} />
             </button>
           </div>
 
-          <button onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-chat" onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <MessageCircle size={24} />
             <span className="text-[10px] font-bold">Chat</span>
           </button>
-          <button onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-profile" onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <UserIcon size={24} />
             <span className="text-[10px] font-bold">Me</span>
           </button>
@@ -219,7 +258,7 @@ const App: React.FC = () => {
 
   // Sub-Views
   const renderFeed = () => (
-    <div className="animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="">
       <div className="p-4">
         <div className="bg-gradient-to-r from-orange-600 to-amber-600 rounded-2xl p-4 mb-6 flex items-center justify-between shadow-lg shadow-orange-500/10">
           <div>
@@ -236,6 +275,7 @@ const App: React.FC = () => {
             onClick={(p) => {
               setSelectedPost(p);
               setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
+              fetchComments(Number(p.id), currentUser?.id);
             }}
             onUserClick={(id) => {
               const user = posts.find(p => p.author.id === id)?.author || currentMe;
@@ -252,7 +292,7 @@ const App: React.FC = () => {
   );
 
   const renderFollowing = () => (
-    <div className="p-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="p-4">
       <h2 className="text-xl font-bold mb-4 px-2">Timeline</h2>
       {feedPostsConverted.map(post => (
         <PostCard 
@@ -261,6 +301,7 @@ const App: React.FC = () => {
           onClick={(p) => {
             setSelectedPost(p);
             setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
+            fetchComments(Number(p.id), currentUser?.id);
           }}
           onUserClick={(id) => {
             const user = feedPostsConverted.find(p => p.author.id === id)?.author || currentMe;
@@ -280,7 +321,7 @@ const App: React.FC = () => {
     ];
 
     return (
-      <div className="p-4 animate-in fade-in slide-in-from-bottom-4 duration-300">
+      <div className="p-4">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-bold tracking-wide uppercase text-zinc-100">Messages</h2>
           <div className="relative">
@@ -345,7 +386,7 @@ const App: React.FC = () => {
   };
 
   const renderUserListPage = (title: 'Followers' | 'Following', users: User[]) => (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
       <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <h2 className="text-lg font-bold uppercase tracking-wide">{title}</h2>
@@ -398,7 +439,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-lg font-bold uppercase tracking-wide">Add Friends</h2>
@@ -476,7 +517,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-lg font-bold uppercase tracking-wide">Group Chat</h2>
@@ -534,7 +575,7 @@ const App: React.FC = () => {
   };
 
   const renderScan = () => (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
       <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <h2 className="text-lg font-bold uppercase tracking-wide">Scan</h2>
@@ -565,22 +606,21 @@ const App: React.FC = () => {
     };
 
     return (
-    <div className="p-4 pb-28 animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="p-4 pb-28">
       <div className="flex flex-col items-center mb-8">
-        <button className="relative w-28 h-28 mb-4" onClick={handleOpenMyProfile}>
-           {/* TrustScore Visualization Ring (0-1000 scale) */}
+        <button className="relative w-28 h-28 mb-4" onClick={() => { if (currentUser) fetchTrustData(currentUser.id); setCurrentView('TRUST_DETAIL'); }}>
            <svg className="absolute inset-0 w-full h-full transform -rotate-90">
              <circle cx="56" cy="56" r="50" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-zinc-800" />
-             <circle cx="56" cy="56" r="50" stroke="currentColor" strokeWidth="6" fill="transparent" strokeDasharray={314} strokeDashoffset={314 * (1 - currentMe.trustScore / 100)} className="text-orange-500" />
+             <circle cx="56" cy="56" r="50" stroke={getTrustStrokeColor(currentMe.trustScore)} strokeWidth="6" fill="transparent" strokeDasharray={314} strokeDashoffset={314 * (1 - currentMe.trustScore / 1000)} strokeLinecap="round" />
            </svg>
            <img src={currentMe.avatar || `https://picsum.photos/id/64/200/200`} className="absolute inset-2 w-24 h-24 rounded-full border border-zinc-800 object-cover" />
-           <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full border-2 border-black">
-             {currentMe.trustScore * 10}
+           <div className={`absolute -bottom-1 left-1/2 -translate-x-1/2 ${getTrustBadgeBg(currentMe.trustScore)} text-white text-[10px] font-black px-2 py-0.5 rounded-full border-2 border-black`}>
+             {currentMe.trustScore}
            </div>
         </button>
         <h2 className="text-xl font-black italic tracking-tighter">{currentMe.name}</h2>
         <span className="text-zinc-500 text-xs font-medium">{currentMe.handle}</span>
-        <span className="text-[10px] text-zinc-600 mt-1">Trust Score {currentMe.trustScore * 10}/1000</span>
+        <span className="text-[10px] text-zinc-600 mt-1">{getTrustTier(currentMe.trustScore).toUpperCase()} · {currentMe.trustScore}/1000</span>
         <div className="flex items-center gap-6 mt-4">
           <button
             className="text-center active:scale-[0.98]"
@@ -599,30 +639,22 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-6">
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-          <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Available</span>
-          <span className="text-lg font-black text-zinc-100">{availableBalance.toLocaleString()} <span className="text-orange-500 text-sm">sat</span></span>
+      <div data-testid="balance-card" className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
+        <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Balance</span>
+        <div className="flex items-baseline justify-between">
+          <span data-testid="balance-amount" className="text-2xl font-black text-zinc-100">{availableBalance.toLocaleString()} <span className="text-orange-500 text-sm">sat</span></span>
+          {change24h !== 0 && (
+            <span className={`text-sm font-bold ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
+              {change24h > 0 ? '+' : ''}{change24h.toLocaleString()} <span className="text-[10px] text-zinc-500">24h</span>
+            </span>
+          )}
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-          <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Staked</span>
-          <span className="text-lg font-black text-orange-400">{lockedBalance.toLocaleString()} <span className="text-orange-300/50 text-sm">sat</span></span>
-        </div>
-      </div>
-
-      {/* Daily login streak card */}
-      <div className="bg-gradient-to-r from-orange-600/20 to-amber-600/20 border border-orange-500/30 rounded-2xl p-4 mb-6 flex items-center justify-between">
-        <div>
-          <span className="text-[10px] font-bold text-orange-400 uppercase block mb-1">Login Streak</span>
-          <span className="text-xl font-black text-white">{loginStreak} {loginStreak === 1 ? 'day' : 'days'}</span>
-        </div>
-        <Gift className="text-orange-500" size={28} />
       </div>
 
       <div className="space-y-2">
         {[
-          { icon: <Gift size={20} />, label: 'Invite Friends', sublabel: 'Earn 500 sat per referral', action: () => setCurrentView('INVITE') },
-          { icon: <ShieldCheck size={20} />, label: 'Transactions', action: () => setCurrentView('TRANSACTIONS') },
+          { icon: <ShieldCheck size={20} />, label: 'Trust Score', sublabel: userCosts ? `${userCosts.tier.toUpperCase()} · ${userCosts.fee_multiplier}× fees` : 'View breakdown', action: () => { if (currentUser) fetchTrustData(currentUser.id); setCurrentView('TRUST_DETAIL'); } },
+          { icon: <Zap size={20} />, label: 'Transactions', action: () => { if (currentUser) fetchLedger(currentUser.id); setCurrentView('TRANSACTIONS'); } },
           { icon: <SlidersHorizontal size={20} />, label: 'Settings', action: () => setCurrentView('SETTINGS') }
         ].map((item, idx) => (
           <button 
@@ -654,7 +686,7 @@ const App: React.FC = () => {
   };
 
   const renderSearch = () => (
-    <div className="fixed inset-0 z-[60] bg-black animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-[60] bg-black">
       <div className="p-4 border-b border-zinc-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 flex items-center gap-3">
@@ -695,105 +727,108 @@ const App: React.FC = () => {
     </div>
   );
 
-  const renderPostDetail = () => {
-    if (!selectedPost) return null;
-    const discussionPreviewCount = Math.min(3, Math.max(selectedPost.comments, 1));
-    const discussionItems = Array.from({ length: discussionPreviewCount }, (_, idx) => ({
-      id: `${selectedPost.id}-c-${idx + 1}`,
-      userId: `commenter-${idx + 1}`,
-      name: `Contributor ${idx + 1}`,
-      handle: `@contrib_${idx + 1}`,
-      trustScore: Math.max(35, 85 - idx * 12),
-      avatarId: idx + 11,
-      text:
-        idx === 0
-          ? 'Great point on the staking mechanics. A 24h window feels balanced for both creators and reviewers.'
-          : idx === 1
-            ? 'I agree with the direction. Maybe we should expose a clearer unlock timer in the UI.'
-            : 'Also worth adding clearer challenge outcomes so new users can learn from resolved cases.',
-      likes: 12 - idx * 3
-    }));
+  // Shared comment-list component used by Post Detail & QA Detail
+  const renderCommentItem = (c: ApiComment) => {
+    const isLiked = c.is_liked;
+    return (
+      <div key={c.id} className={`flex gap-3 mb-5 ${c.parent_id ? 'ml-10' : ''}`}>
+        <div className={`w-8 h-8 rounded-full p-[2px] ${getTrustRingClass(c.author.trust_score)} shrink-0`}>
+          <img
+            src={c.author.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.author.handle}`}
+            className="w-full h-full rounded-full object-cover border border-zinc-900"
+          />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-bold truncate">{c.author.name}</span>
+            <span className="text-[10px] text-zinc-500 font-medium">@{c.author.handle}</span>
+          </div>
+          <p className="text-sm text-zinc-400 break-words">{c.content}</p>
+          <div className="flex items-center gap-4 mt-2">
+            <button
+              className={`flex items-center gap-1 text-[10px] font-bold ${isLiked ? 'text-orange-400' : 'text-zinc-500'}`}
+              onClick={async () => {
+                if (!currentUser || !selectedPost) return;
+                try {
+                  await toggleLikeComment(Number(selectedPost.id), c.id, currentUser.id, isLiked);
+                  fetchBalance(currentUser.id);
+                } catch (err) {
+                  toast.warning((err as Error).message);
+                }
+              }}
+            >
+              <Heart size={12} fill={isLiked ? 'currentColor' : 'none'} /> {c.likes_count}
+              <span className="text-zinc-600 ml-0.5">5</span>
+            </button>
+            <button
+              className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300"
+              onClick={() => {
+                setReplyTarget(prev => prev?.id === String(c.id) ? null : { id: String(c.id), handle: `@${c.author.handle}` });
+                if (!commentDraft.trim()) setCommentDraft(`@${c.author.handle} `);
+              }}
+            >
+              Reply <span className="text-zinc-600">20</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-    const handleCommentReply = (itemId: string, handle: string) => {
-      setReplyTarget(prev => (prev?.id === itemId ? null : { id: itemId, handle }));
-      if (!commentDraft.trim()) {
-        setCommentDraft(`${handle} `);
-      }
-    };
-
-    const handleCommentChallenge = (item: typeof discussionItems[number]) => {
-      const commentPost: Post = {
-        id: `challenge-${item.id}`,
-        author: {
-          id: item.userId,
-          name: item.name,
-          handle: item.handle,
-          avatar: `https://picsum.photos/id/${item.avatarId}/200/200`,
-          trustScore: item.trustScore,
-          isFollowing: false
-        },
-        content: `[Comment] ${item.text}`,
-        stakedSats: 100,
-        likes: item.likes,
-        comments: 0,
-        timestamp: 'now',
-        type: 'Note'
-      };
-      handleChallenge(commentPost);
-    };
-
-    const handleSubmitComment = () => {
-      if (!commentDraft.trim()) return;
+  // Submit comment or reply (shared)
+  const handleSubmitComment = async () => {
+    if (!commentDraft.trim() || !selectedPost || !currentUser) return;
+    const parentId = replyTarget ? Number(replyTarget.id) : undefined;
+    try {
+      await createApiComment(Number(selectedPost.id), currentUser.id, commentDraft.trim(), parentId);
       setCommentDraft('');
       setReplyTarget(null);
-    };
+      fetchBalance(currentUser.id);
+    } catch (err) {
+      toast.warning((err as Error).message);
+    }
+  };
+
+  // Determine comment input cost label
+  const commentCostLabel = () => {
+    if (!selectedPost) return '';
+    if (replyTarget) return '20 sat';
+    if (selectedPost.type === 'Question') return '200 sat';
+    return '50 sat';
+  };
+
+  const renderPostDetail = () => {
+    if (!selectedPost) return null;
+    const topLevel = apiComments.filter(c => !c.parent_id);
+    const replies = apiComments.filter(c => c.parent_id);
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center justify-between">
-          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
+          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
           <span className="font-black italic tracking-tighter uppercase">Thread</span>
           <button><MoreHorizontal /></button>
         </div>
-        <div className="p-4">
+        <div className="p-4 pb-28">
           <PostCard post={selectedPost} />
-          
-          <div className="mt-8 border-t border-zinc-900 pt-6">
-            <h3 className="text-sm font-black mb-4 uppercase tracking-wider text-zinc-500">
-              Discussion · Top {discussionItems.length} of {selectedPost.comments}
-            </h3>
-            {discussionItems.map((item, idx) => (
-              <div key={item.id} className="flex gap-4 mb-6">
-                <div className={`w-8 h-8 rounded-full p-[2px] ${getTrustRingClass(item.trustScore)} shrink-0`}>
-                  <img src={`https://picsum.photos/id/${item.avatarId}/50/50`} className="w-full h-full rounded-full object-cover border border-zinc-900" />
+
+
+
+          {apiComments.length > 0 && (
+            <div className="mt-8 border-t border-zinc-900 pt-6">
+              <h3 className="text-sm font-black mb-4 uppercase tracking-wider text-zinc-500">
+                Discussion · {apiComments.length}
+              </h3>
+              {topLevel.map(c => (
+                <div key={c.id}>
+                  {renderCommentItem(c)}
+                  {replies.filter(r => r.parent_id === c.id).map(r => renderCommentItem(r))}
                 </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-bold">{item.name}</span>
-                    <span className="text-[10px] text-zinc-500 font-medium">{item.handle}</span>
-                  </div>
-                  <p className="text-sm text-zinc-400">{item.text}</p>
-                  <div className="flex items-center gap-4 mt-2">
-                    <button className="flex items-center gap-1 text-[10px] font-bold text-zinc-500"><Heart size={12} /> {item.likes}</button>
-                    <button
-                      className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300"
-                      onClick={() => handleCommentReply(item.id, item.handle)}
-                    >
-                      Reply
-                    </button>
-                    <button
-                      className="text-[10px] font-bold text-zinc-500 hover:text-red-400 uppercase tracking-wide"
-                      onClick={() => handleCommentChallenge(item)}
-                    >
-                      Challenge
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950 border-t border-zinc-900 flex items-center gap-4">
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950 border-t border-zinc-900 flex items-center gap-3">
           <div className="flex-1">
             {replyTarget && (
               <div className="flex items-center justify-between mb-2 px-1">
@@ -804,11 +839,15 @@ const App: React.FC = () => {
             <input
               value={commentDraft}
               onChange={(e) => setCommentDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
               placeholder={replyTarget ? `Reply to ${replyTarget.handle}...` : 'Add your insight...'}
               className="w-full bg-zinc-900 rounded-xl px-4 py-3 text-sm"
             />
           </div>
-          <button className="bg-orange-500 p-3 rounded-xl" onClick={handleSubmitComment}><Send size={18} /></button>
+          <div className="flex flex-col items-center gap-1">
+            <button className="bg-orange-500 p-3 rounded-xl" onClick={handleSubmitComment}><Send size={18} /></button>
+            <span className="text-[9px] text-zinc-500 font-medium">{commentCostLabel()}</span>
+          </div>
         </div>
       </div>
     );
@@ -816,27 +855,13 @@ const App: React.FC = () => {
 
   const renderQADetail = () => {
     if (!selectedPost) return null;
-    const answerItems = [
-      {
-        id: 'a1',
-        name: 'ProtocolEngineer',
-        trustScore: 94,
-        bio: 'Expert in Bitcoin Script',
-        content: 'Scaling L2 settlements requires a combination of BitVM for trustless verification and a robust gossip protocol...'
-      },
-      {
-        id: 'a2',
-        name: 'RollupBuilder',
-        trustScore: 78,
-        bio: 'L2 infra contributor',
-        content: 'I would prioritize deterministic batching first, then optimize proving costs. This keeps operational risk lower in early stages.'
-      }
-    ];
+    const answers = apiComments.filter(c => !c.parent_id);
+    const answerReplies = apiComments.filter(c => c.parent_id);
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
+          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
           <span className="font-black italic tracking-tighter uppercase">Inquiry</span>
         </div>
         <div className="p-4 bg-orange-500/5 border-b border-orange-500/10 mb-4">
@@ -844,108 +869,263 @@ const App: React.FC = () => {
            <h2 className="text-xl font-bold mb-4">{selectedPost.content}</h2>
            <div className="flex items-center justify-between">
              <div className="flex items-center gap-2">
-               <img src={selectedPost.author.avatar} className="w-6 h-6 rounded-full" />
+               <img src={selectedPost.author.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${selectedPost.author.handle}`} className="w-6 h-6 rounded-full" />
                <span className="text-xs font-bold">{selectedPost.author.handle}</span>
              </div>
-             <div className="text-orange-500 font-black text-sm uppercase">💰 {selectedPost.bounty?.toLocaleString()} sats bounty</div>
+             {selectedPost.bounty ? (
+               <div className="text-orange-500 font-black text-sm uppercase">💰 {selectedPost.bounty.toLocaleString()} sat bounty</div>
+             ) : null}
            </div>
         </div>
-        <div className="p-4">
-          <h3 className="text-xs font-black uppercase text-zinc-500 mb-4 tracking-widest">{answerItems.length} Answers</h3>
-          {answerItems.map((item, idx) => (
-            <div key={item.id} className="bg-zinc-900/50 border border-zinc-900 rounded-2xl p-4 mb-4">
+        <div className="p-4 pb-28">
+
+          <h3 className="text-xs font-black uppercase text-zinc-500 mb-4 tracking-widest">{answers.length} Answers</h3>
+          {answers.map(answer => (
+            <div key={answer.id} className="bg-zinc-900/50 border border-zinc-900 rounded-2xl p-4 mb-4">
                <div className="flex items-center gap-2 mb-3">
-                  <div className={`w-8 h-8 rounded-full p-[2px] ${getTrustRingClass(item.trustScore)} shrink-0`}>
-                    <img src={`https://picsum.photos/id/${22 + idx}/50/50`} className="w-full h-full rounded-full object-cover border border-zinc-900" />
+                  <div className={`w-8 h-8 rounded-full p-[2px] ${getTrustRingClass(answer.author.trust_score)} shrink-0`}>
+                    <img
+                      src={answer.author.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${answer.author.handle}`}
+                      className="w-full h-full rounded-full object-cover border border-zinc-900"
+                    />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold">{item.name}</span>
-                    </div>
-                    <span className="text-[10px] text-zinc-500 italic">{item.bio}</span>
+                    <span className="text-xs font-bold">{answer.author.name}</span>
+                    <span className="text-[10px] text-zinc-500 italic block">@{answer.author.handle}</span>
                   </div>
                </div>
-               <p className="text-sm text-zinc-200 leading-relaxed mb-4">
-                 {item.content}
-               </p>
-               <div className="flex items-center justify-between">
-                 <button className="text-orange-400 font-bold text-[10px] uppercase tracking-tighter border border-orange-400/20 px-3 py-1 rounded-full">Stake to Vote</button>
-                 <button className="text-zinc-500"><MoreHorizontal size={18} /></button>
+               <p className="text-sm text-zinc-200 leading-relaxed mb-3 break-words">{answer.content}</p>
+               <div className="flex items-center gap-4">
+                 <button
+                   className={`flex items-center gap-1 text-[10px] font-bold ${answer.is_liked ? 'text-orange-400' : 'text-zinc-500'}`}
+                   onClick={async () => {
+                     if (!currentUser || !selectedPost) return;
+                     try {
+                       await toggleLikeComment(Number(selectedPost.id), answer.id, currentUser.id, answer.is_liked);
+                       fetchBalance(currentUser.id);
+                     } catch (err) { toast.warning((err as Error).message); }
+                   }}
+                 >
+                   <Heart size={12} fill={answer.is_liked ? 'currentColor' : 'none'} /> {answer.likes_count}
+                   <span className="text-zinc-600 ml-0.5">5</span>
+                 </button>
+                 <button
+                   className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300"
+                   onClick={() => {
+                     setReplyTarget(prev => prev?.id === String(answer.id) ? null : { id: String(answer.id), handle: `@${answer.author.handle}` });
+                     if (!commentDraft.trim()) setCommentDraft(`@${answer.author.handle} `);
+                   }}
+                 >
+                   Reply <span className="text-zinc-600">20</span>
+                 </button>
                </div>
+               {/* Sub-replies to this answer */}
+               {answerReplies.filter(r => r.parent_id === answer.id).length > 0 && (
+                 <div className="mt-3 pt-3 border-t border-zinc-800">
+                   {answerReplies.filter(r => r.parent_id === answer.id).map(r => renderCommentItem(r))}
+                 </div>
+               )}
             </div>
           ))}
-          <button className="w-full bg-orange-600 text-white font-black py-4 rounded-2xl text-sm uppercase tracking-tighter mt-4 shadow-lg shadow-orange-900/20 active:scale-95 transition-transform">
-            Submit Your Answer (Stake 500 sat)
-          </button>
+          {answers.length === 0 && (
+            <p className="text-zinc-600 text-sm text-center py-4">No answers yet. Be the first!</p>
+          )}
+        </div>
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950 border-t border-zinc-900 flex items-center gap-3">
+          <div className="flex-1">
+            {replyTarget && (
+              <div className="flex items-center justify-between mb-2 px-1">
+                <span className="text-[10px] font-bold text-orange-400 uppercase tracking-wide">Replying to {replyTarget.handle}</span>
+                <button className="text-[10px] text-zinc-500" onClick={() => setReplyTarget(null)}>Cancel</button>
+              </div>
+            )}
+            <input
+              value={commentDraft}
+              onChange={(e) => setCommentDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
+              placeholder={replyTarget ? `Reply to ${replyTarget.handle}...` : 'Submit your answer...'}
+              className="w-full bg-zinc-900 rounded-xl px-4 py-3 text-sm"
+            />
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <button className="bg-orange-500 p-3 rounded-xl" onClick={handleSubmitComment}><Send size={18} /></button>
+            <span className="text-[9px] text-zinc-500 font-medium">{commentCostLabel()}</span>
+          </div>
         </div>
       </div>
     );
   };
 
-  // Mock transaction history
-  const mockTransactions = [
-    { id: '1', type: 'reward', amount: 100, description: 'Daily login reward', time: 'Today 09:30' },
-    { id: '2', type: 'stake', amount: -50, description: 'Post stake', time: 'Today 10:15', status: 'locked', unlockTime: '23:15:00' },
-    { id: '3', type: 'refund', amount: 50, description: 'Stake refunded', time: 'Yesterday 14:30' },
-    { id: '4', type: 'penalty', amount: -200, description: 'Report rejected penalty', time: 'Yesterday 11:00' },
-    { id: '5', type: 'reward', amount: 500, description: 'Referral reward', time: '3 days ago' },
-    { id: '6', type: 'stake', amount: -30, description: 'Like stake', time: '3 days ago', status: 'refunded' },
-  ];
+  const renderTrustDetail = () => {
+    const tb = trustBreakdown;
+    const uc = userCosts;
+    const trustScore = tb?.trust_score ?? currentMe.trustScore;
+    const tier = tb?.tier ?? getTrustTier(trustScore);
+    const strokeColor = getTrustStrokeColor(trustScore);
+    const badgeBg = getTrustBadgeBg(trustScore);
 
-  const renderTransactions = () => (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
-      <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
-        <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-        <h2 className="text-xl font-black italic tracking-tighter uppercase">Transactions</h2>
-      </div>
-      
-      <div className="p-4">
-        {/* Balance summary */}
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Available</span>
-            <span className="text-xl font-black text-green-500">+{availableBalance.toLocaleString()}</span>
-          </div>
-          <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl">
-            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Staked</span>
-            <span className="text-xl font-black text-orange-400">{lockedBalance.toLocaleString()}</span>
-          </div>
+    const dimensions = [
+      { label: 'Creator', score: tb?.creator_score ?? 500, desc: 'Post quality & engagement', color: 'text-orange-400' },
+      { label: 'Curator', score: tb?.curator_score ?? 500, desc: 'Like accuracy (liked good posts)', color: 'text-blue-400' },
+      { label: 'Juror', score: tb?.juror_score ?? 500, desc: 'Challenge judgement accuracy', color: 'text-purple-400' },
+      { label: 'Risk', score: tb?.risk_score ?? 0, desc: 'Spam / violation penalty (lower=better)', color: 'text-red-400', inverted: true },
+    ];
+
+    return (
+      <div className="p-4 pb-28">
+        <div className="flex items-center gap-3 mb-6">
+          <button onClick={() => setCurrentView('MAIN')} className="text-zinc-500"><ArrowLeft size={20} /></button>
+          <h2 className="text-lg font-black tracking-tight">Trust Score</h2>
         </div>
 
-        {/* Transaction list */}
-        <div className="space-y-3">
-          {mockTransactions.map(tx => (
-            <div key={tx.id} className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-bold text-zinc-200">{tx.description}</span>
-                <span className={`text-sm font-black ${tx.amount > 0 ? 'text-green-500' : 'text-red-400'}`}>
-                  {tx.amount > 0 ? '+' : ''}{tx.amount} sat
-                </span>
+        {/* Big ring */}
+        <div className="flex flex-col items-center mb-8">
+          <div className="relative w-36 h-36 mb-3">
+            <svg className="absolute inset-0 w-full h-full transform -rotate-90">
+              <circle cx="72" cy="72" r="64" stroke="currentColor" strokeWidth="7" fill="transparent" className="text-zinc-800" />
+              <circle cx="72" cy="72" r="64" stroke={strokeColor} strokeWidth="7" fill="transparent" strokeDasharray={402} strokeDashoffset={402 * (1 - trustScore / 1000)} strokeLinecap="round" />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <span className="text-3xl font-black">{trustScore}</span>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">/1000</span>
+            </div>
+          </div>
+          <span className={`text-xs font-black uppercase tracking-widest ${badgeBg} text-white px-3 py-1 rounded-full`}>{tier}</span>
+        </div>
+
+        {/* Fee multiplier */}
+        {uc && (
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 mb-6">
+            <div className="flex justify-between items-center mb-2">
+              <span className="text-[10px] text-zinc-500 font-bold uppercase">Fee Multiplier</span>
+              <span className="text-lg font-black">{uc.fee_multiplier}×</span>
+            </div>
+            <p className="text-[10px] text-zinc-600">
+              {uc.fee_multiplier < 1 ? 'You pay less than base cost — high trust discount!' : uc.fee_multiplier > 1 ? 'You pay more than base — build trust to reduce fees.' : 'Standard rate.'}
+            </p>
+          </div>
+        )}
+
+        {/* Sub-scores */}
+        <div className="space-y-3 mb-6">
+          <h3 className="text-xs font-bold uppercase text-zinc-500 tracking-wider">Dimensions</h3>
+          {dimensions.map((d) => (
+            <div key={d.label} className="bg-zinc-950/50 border border-zinc-900 rounded-xl p-3">
+              <div className="flex justify-between items-center mb-1">
+                <span className={`text-sm font-bold ${d.color}`}>{d.label}</span>
+                <span className="text-sm font-black text-zinc-200">{d.score}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] text-zinc-600">{tx.time}</span>
-                {tx.status === 'locked' && (
-                  <span className="text-[10px] text-orange-400 font-bold">
-                    🔒 Unlocks in {tx.unlockTime}
-                  </span>
-                )}
-                {tx.status === 'refunded' && (
-                  <span className="text-[10px] text-green-500 font-bold">✓ Refunded</span>
-                )}
+              <div className="w-full h-1.5 bg-zinc-800 rounded-full overflow-hidden mb-1">
+                <div
+                  className={`h-full rounded-full ${d.inverted ? 'bg-red-500' : 'bg-gradient-to-r from-zinc-600 to-green-500'}`}
+                  style={{ width: `${(d.score / 1000) * 100}%` }}
+                />
               </div>
+              <span className="text-[10px] text-zinc-600">{d.desc}</span>
             </div>
           ))}
         </div>
+
+        {/* Dynamic costs */}
+        {uc && (
+          <div>
+            <h3 className="text-xs font-bold uppercase text-zinc-500 tracking-wider mb-3">Your Action Costs</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: 'Post', base: 200, cost: uc.costs.post },
+                { label: 'Question', base: 300, cost: uc.costs.question },
+                { label: 'Answer', base: 200, cost: uc.costs.answer },
+                { label: 'Comment', base: 50, cost: uc.costs.comment },
+                { label: 'Reply', base: 20, cost: uc.costs.reply },
+                { label: 'Like Post', base: 10, cost: uc.costs.like_post },
+                { label: 'Like Comment', base: 5, cost: uc.costs.like_comment },
+              ].map((c) => (
+                <div key={c.label} className="bg-zinc-950/50 border border-zinc-900 rounded-xl p-3">
+                  <span className="text-[10px] text-zinc-500 font-bold uppercase block">{c.label}</span>
+                  <div className="flex items-baseline gap-1.5 mt-0.5">
+                    <span className="text-sm font-black text-zinc-100">{c.cost} sat</span>
+                    {c.cost !== c.base && (
+                      <span className={`text-[10px] font-medium ${c.cost < c.base ? 'text-green-500' : 'text-red-400'}`}>
+                        {c.cost < c.base ? '↓' : '↑'}{Math.abs(c.cost - c.base)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
+
+  const renderTransactions = () => {
+    const actionLabel = (t: string) => {
+      const map: Record<string, string> = {
+        free_post: 'Free Post',
+        reward_post: 'Post Reward',
+        reward_comment: 'Comment Reward',
+        spend_post: 'Post',
+        spend_question: 'Question',
+        spend_answer: 'Answer',
+        spend_comment: 'Comment',
+        spend_reply: 'Reply',
+        spend_like: 'Like',
+        spend_comment_like: 'Comment Like',
+        spend_boost: 'Boost',
+        fine: 'Fine',
+        challenge_fee: 'Challenge Fee',
+        challenge_refund: 'Challenge Refund',
+        challenge_reward: 'Challenge Reward',
+        deposit: 'Deposit',
+        withdraw: 'Withdraw',
+      };
+      return map[t] || t;
+    };
+
+    return (
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
+          <h2 className="text-xl font-black italic tracking-tighter uppercase">Transactions</h2>
+        </div>
+        
+        <div className="p-4">
+          <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-6">
+            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Balance</span>
+            <span className="text-2xl font-black text-zinc-100">{availableBalance.toLocaleString()} <span className="text-orange-500 text-sm">sat</span></span>
+          </div>
+
+          <div className="space-y-3">
+            {ledgerEntries.length === 0 && (
+              <p className="text-zinc-600 text-center py-8">No transactions yet</p>
+            )}
+            {ledgerEntries.map(tx => (
+              <div key={tx.id} className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-bold text-zinc-200">{tx.note || actionLabel(tx.action_type)}</span>
+                  <span className={`text-sm font-black ${tx.amount > 0 ? 'text-green-500' : 'text-red-400'}`}>
+                    {tx.amount > 0 ? '+' : ''}{tx.amount} sat
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-zinc-600">{new Date(tx.created_at).toLocaleString()}</span>
+                  <span className="text-[10px] text-zinc-600">{tx.balance_after.toLocaleString()} sat</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const renderInvite = () => {
     const inviteCode = 'BITLINE-' + Math.random().toString(36).substring(2, 8).toUpperCase();
     const inviteLink = `https://bitline.app/invite/${inviteCode}`;
     
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-xl font-black italic tracking-tighter uppercase">Invite Friends</h2>
@@ -1013,73 +1193,138 @@ const App: React.FC = () => {
 
   const renderPublishOverlay = () => {
     if (!isPublishing) return null;
+
+    const isNote = publishType === 'Note';
+    const accentBg = isNote ? 'bg-orange-500' : 'bg-blue-500';
+    const accentText = isNote ? 'text-orange-500' : 'text-blue-400';
+    const accentBorder = isNote ? 'border-orange-500/30' : 'border-blue-500/30';
+    const accentGlow = isNote ? 'shadow-orange-500/30' : 'shadow-blue-500/30';
+    const freePost = currentUser?.free_posts_remaining && currentUser.free_posts_remaining > 0;
+
+    const handlePublish = async () => {
+      if (!publishContent.trim() || !currentUser) return;
+      setIsSubmitting(true);
+      try {
+        const bounty = publishType === 'Question' && publishBounty ? parseInt(publishBounty) : undefined;
+        await createApiPost(currentUser.id, publishContent, publishType === 'Note' ? 'note' : 'question', bounty);
+        setPublishContent('');
+        setPublishBounty('');
+        setIsPublishing(false);
+        setPublishType('Note');
+        toast.success('Posted');
+        // Refresh feed and balance
+        fetchPosts({ user_id: currentUser.id });
+        if (currentUser) {
+          fetchBalance(currentUser.id);
+          fetchLedger(currentUser.id);
+        }
+      } catch (err) {
+        const msg = (err as Error).message || 'Failed to publish';
+        if (msg.includes('Insufficient balance')) {
+          toast.warning(msg);
+        } else {
+          toast.error(msg);
+        }
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
     return (
-      <div className="fixed inset-0 z-[100] bg-black/95 animate-in slide-in-from-bottom duration-300 p-4 pt-12">
-        <button 
-          onClick={() => { setIsPublishing(false); setPublishType(null); }} 
-          className="absolute top-4 right-4 p-2 bg-zinc-900 rounded-full"
-        >
-          <X size={24} />
-        </button>
+      <div className={`fixed inset-0 z-[100] bg-black flex flex-col`}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-2">
+          <button
+            onClick={() => { setIsPublishing(false); setPublishContent(''); setPublishBounty(''); setPublishType('Note'); }}
+            className="p-2 text-zinc-400"
+          >
+            <X size={24} />
+          </button>
 
-        {!publishType ? (
-          <div className="h-full flex flex-col justify-center gap-6">
-            <h2 className="text-3xl font-black italic tracking-tighter text-center mb-8 uppercase">Broadcast Type</h2>
-            <button 
+          {/* Type toggle */}
+          <div className="flex bg-zinc-900 rounded-xl p-1 gap-1">
+            <button
               onClick={() => setPublishType('Note')}
-              className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl flex flex-col items-center gap-4 active:scale-95 transition-transform"
+              className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight transition-all duration-200 ${
+                isNote ? 'bg-orange-500 text-white' : 'text-zinc-500'
+              }`}
             >
-              <Zap className="text-orange-500" size={48} />
-              <div className="text-center">
-                <span className="text-xl font-black block uppercase tracking-tighter italic">Short Note</span>
-                <span className="text-xs text-zinc-500 font-medium">Fast thoughts, news, updates.</span>
-              </div>
+              Note
             </button>
-            <button 
+            <button
               onClick={() => setPublishType('Question')}
-              className="bg-zinc-900 border border-zinc-800 p-8 rounded-3xl flex flex-col items-center gap-4 active:scale-95 transition-transform"
+              className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight transition-all duration-200 ${
+                !isNote ? 'bg-blue-500 text-white' : 'text-zinc-500'
+              }`}
             >
-              <MessageCircle className="text-blue-400" size={48} />
-              <div className="text-center">
-                <span className="text-xl font-black block uppercase tracking-tighter italic">Inquiry</span>
-                <span className="text-xs text-zinc-500 font-medium">Ask for help, set a bounty.</span>
-              </div>
+              Inquiry
             </button>
           </div>
-        ) : (
-          <div className="h-full flex flex-col">
-            <h2 className="text-xl font-black italic tracking-tighter mb-6 uppercase">New {publishType}</h2>
-            <textarea 
-              autoFocus
-              className="flex-1 bg-transparent border-none outline-none text-lg leading-relaxed placeholder:text-zinc-700 resize-none"
-              placeholder={publishType === 'Note' ? "What's the signal?" : "What do you need to know?"}
+
+          <button
+            data-testid="publish-button"
+            onClick={handlePublish}
+            disabled={!publishContent.trim() || isSubmitting}
+            className={`px-5 py-2 rounded-xl text-sm font-black uppercase tracking-tight transition-all duration-200 ${
+              publishContent.trim()
+                ? `${accentBg} text-white shadow-lg ${accentGlow} active:scale-95`
+                : 'bg-zinc-800 text-zinc-600'
+            }`}
+          >
+            {isSubmitting ? '...' : 'Post'}
+          </button>
+        </div>
+
+        {/* Accent line */}
+        <div className={`h-0.5 ${isNote ? 'bg-gradient-to-r from-orange-500/50 via-orange-500 to-orange-500/50' : 'bg-gradient-to-r from-blue-500/50 via-blue-500 to-blue-500/50'}`} />
+
+        {/* Editor */}
+        <div className="flex-1 px-4 pt-4 overflow-auto">
+          <div className="flex items-start gap-3 mb-4">
+            <img
+              src={currentMe.avatar || 'https://picsum.photos/200'}
+              className={`w-10 h-10 rounded-full border-2 ${isNote ? 'border-orange-500/50' : 'border-blue-500/50'} object-cover flex-shrink-0`}
             />
-            
-            {publishType === 'Question' && (
-              <div className="mb-6 flex items-center justify-between p-4 bg-orange-500/10 border border-orange-500/20 rounded-2xl">
-                <span className="text-sm font-bold text-orange-400">Set Bounty Amount</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xl font-black">10,000</span>
-                  <span className="text-[10px] font-black uppercase text-orange-400">sats</span>
-                </div>
-              </div>
-            )}
-
-            <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4 flex items-center justify-between">
-               <div className="flex items-center gap-2">
-                 <ShieldCheck className="text-zinc-500" size={16} />
-                 <span className="text-xs font-bold text-zinc-400">Stake to publish</span>
-               </div>
-               <span className="text-sm font-black text-orange-500">500 sat</span>
+            <div className="flex-1 min-w-0">
+              <span className="text-sm font-bold text-zinc-300 block">{currentMe.name}</span>
+              <span className="text-[11px] text-zinc-500 font-medium">
+                {freePost
+                  ? 'free · 1 remaining'
+                  : `${isNote ? (userCosts?.costs.post ?? 200) : (userCosts?.costs.question ?? 300)} sat · ${availableBalance.toLocaleString()} available`
+                }
+              </span>
             </div>
-            
-            <p className="text-[10px] text-zinc-600 font-bold text-center mb-6 uppercase italic tracking-widest">Returns in 24h if no violations found</p>
-
-            <button className="w-full bg-white text-black font-black py-4 rounded-2xl text-sm uppercase tracking-tighter mb-10">
-              Broadcast Now
-            </button>
           </div>
-        )}
+
+          <textarea
+            data-testid="post-content"
+            autoFocus
+            value={publishContent}
+            onChange={(e) => setPublishContent(e.target.value)}
+            className={`w-full bg-transparent border-none outline-none text-lg leading-relaxed resize-none min-h-[200px] ${
+              isNote ? 'placeholder:text-orange-500/30' : 'placeholder:text-blue-400/30'
+            }`}
+            placeholder={isNote ? "What's the signal?" : 'What do you need to know?'}
+          />
+
+          {publishType === 'Question' && (
+            <div className={`mt-4 flex items-center justify-between p-4 bg-blue-500/10 border ${accentBorder} rounded-2xl`}>
+              <span className="text-sm font-bold text-blue-400">Bounty (optional)</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={publishBounty}
+                  onChange={(e) => setPublishBounty(e.target.value)}
+                  placeholder="0"
+                  className="w-20 bg-transparent border-none outline-none text-right text-xl font-black text-white"
+                />
+                <span className="text-[10px] font-black uppercase text-blue-400">sat</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-4 pb-8" />
       </div>
     );
   };
@@ -1126,7 +1371,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black flex flex-col animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col">
         {/* Header */}
         <div className="p-4 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
@@ -1196,7 +1441,7 @@ const App: React.FC = () => {
           </div>
           <button 
             onClick={handleSendMessage}
-            className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform"
+            className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform duration-200"
           >
             <Send size={18} />
           </button>
@@ -1208,7 +1453,7 @@ const App: React.FC = () => {
   const renderUserProfile = () => {
     if (!selectedUser) return null;
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md z-10 flex items-center justify-between">
            <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
            <button><MoreHorizontal /></button>
@@ -1257,7 +1502,7 @@ const App: React.FC = () => {
   };
 
   const renderSettings = () => (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto animate-in slide-in-from-right duration-300">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
       <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <h2 className="text-lg font-bold uppercase tracking-wide">Settings</h2>
@@ -1307,6 +1552,7 @@ const App: React.FC = () => {
       {currentView === 'POST_DETAIL' && renderPostDetail()}
       {currentView === 'QA_DETAIL' && renderQADetail()}
       {currentView === 'TRANSACTIONS' && renderTransactions()}
+      {currentView === 'TRUST_DETAIL' && renderTrustDetail()}
       {currentView === 'INVITE' && renderInvite()}
       {currentView === 'CHAT_DETAIL' && renderChatDetail()}
       {currentView === 'USER_PROFILE' && renderUserProfile()}
@@ -1317,21 +1563,14 @@ const App: React.FC = () => {
       {currentView === 'SCAN' && renderScan()}
       {currentView === 'SETTINGS' && renderSettings()}
       
-      {/* Daily Reward Modal */}
-      <DailyRewardModal
-        isOpen={showDailyReward}
-        onClose={() => setShowDailyReward(false)}
-        rewardAmount={dailyRewardAmount}
-        streak={loginStreak}
-        totalBalance={availableBalance}
-      />
-
       {/* Challenge Modal */}
       <ChallengeModal
         isOpen={showChallengeModal}
         onClose={() => setShowChallengeModal(false)}
         post={challengePost}
         userBalance={availableBalance}
+        userId={currentUser?.id || 0}
+        challengeFee={userCosts?.costs ? Math.round(100 * userCosts.fee_multiplier) : 100}
         onChallengeComplete={handleChallengeComplete}
       />
 
@@ -1347,6 +1586,7 @@ const App: React.FC = () => {
       {/* Modals */}
       {renderPublishOverlay()}
       {renderBottomNav()}
+      <ToastContainer />
     </div>
   );
 };

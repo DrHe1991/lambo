@@ -30,6 +30,7 @@ class PostResponse(BaseModel):
     likes_count: int
     comments_count: int
     bounty: int | None
+    cost_paid: int = 0
     is_ai: bool
     created_at: datetime
     is_liked: bool = False
@@ -56,6 +57,8 @@ class CommentResponse(BaseModel):
     content: str
     parent_id: int | None
     likes_count: int
+    cost_paid: int = 0
+    is_liked: bool = False
     created_at: datetime
 
     class Config:

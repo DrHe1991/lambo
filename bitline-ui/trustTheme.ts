@@ -2,24 +2,25 @@ export type TrustTier = 'white' | 'green' | 'blue' | 'purple' | 'orange';
 
 export interface TrustTierConfig {
   tier: TrustTier;
-  minScore: number; // score is on 0-100 scale
-  maxScore: number; // score is on 0-100 scale
+  minScore: number; // 0-1000 scale
+  maxScore: number; // 0-1000 scale
   label: string;
 }
 
 export const TRUST_TIER_CONFIGS: TrustTierConfig[] = [
-  { tier: 'white', minScore: 0, maxScore: 39, label: 'White' },
-  { tier: 'green', minScore: 40, maxScore: 59, label: 'Green' },
-  { tier: 'blue', minScore: 60, maxScore: 74, label: 'Blue' },
-  { tier: 'purple', minScore: 75, maxScore: 89, label: 'Purple' },
-  { tier: 'orange', minScore: 90, maxScore: 100, label: 'Orange' }
+  { tier: 'white', minScore: 0, maxScore: 399, label: 'White' },
+  { tier: 'green', minScore: 400, maxScore: 599, label: 'Green' },
+  { tier: 'blue', minScore: 600, maxScore: 749, label: 'Blue' },
+  { tier: 'purple', minScore: 750, maxScore: 899, label: 'Purple' },
+  { tier: 'orange', minScore: 900, maxScore: 1000, label: 'Orange' },
 ];
 
 export const getTrustTier = (score: number): TrustTier => {
-  if (score >= 90) return 'orange';
-  if (score >= 75) return 'purple';
-  if (score >= 60) return 'blue';
-  if (score >= 40) return 'green';
+  // score on 0-1000 scale
+  if (score >= 900) return 'orange';
+  if (score >= 750) return 'purple';
+  if (score >= 600) return 'blue';
+  if (score >= 400) return 'green';
   return 'white';
 };
 
@@ -50,5 +51,25 @@ export const getTrustBadgeClass = (score: number): string => {
       return 'text-green-300 border-green-400/40 bg-green-500/10';
     default:
       return 'text-zinc-200 border-zinc-400/40 bg-zinc-500/10';
+  }
+};
+
+export const getTrustStrokeColor = (score: number): string => {
+  switch (getTrustTier(score)) {
+    case 'orange': return '#f97316';
+    case 'purple': return '#a855f7';
+    case 'blue': return '#3b82f6';
+    case 'green': return '#22c55e';
+    default: return '#a1a1aa';
+  }
+};
+
+export const getTrustBadgeBg = (score: number): string => {
+  switch (getTrustTier(score)) {
+    case 'orange': return 'bg-orange-500';
+    case 'purple': return 'bg-purple-500';
+    case 'blue': return 'bg-blue-500';
+    case 'green': return 'bg-green-500';
+    default: return 'bg-zinc-500';
   }
 };

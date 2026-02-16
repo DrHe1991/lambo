@@ -1,10 +1,15 @@
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.models.user import User, Follow
+from app.models.ledger import Ledger
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserBrief
+from app.schemas.ledger import LedgerEntry, BalanceResponse
+from app.services.ledger_service import LedgerService
+from app.services.trust_service import TrustScoreService, dynamic_fee_multiplier, trust_tier
 
 router = APIRouter()
 
@@ -21,8 +26,7 @@ async def list_users(
 
 @router.post('', response_model=UserBrief, status_code=status.HTTP_201_CREATED)
 async def create_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
-    """Create a new user (no password needed)."""
-    # Check if handle already exists
+    """Create a new user (0 sat, 1 free post)."""
     existing = await db.execute(select(User).where(User.handle == user_data.handle))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail='Handle already taken')
@@ -76,6 +80,8 @@ async def get_user(
         bio=user.bio,
         trust_score=user.trust_score,
         created_at=user.created_at,
+        available_balance=user.available_balance,
+        free_posts_remaining=user.free_posts_remaining,
         followers_count=followers_count or 0,
         following_count=following_count or 0,
         is_following=is_following,
@@ -199,3 +205,87 @@ async def get_following(
         .offset(offset)
     )
     return result.scalars().all()
+
+
+# --- Balance & Ledger ---
+
+@router.get('/{user_id}/balance', response_model=BalanceResponse)
+async def get_balance(user_id: int, db: AsyncSession = Depends(get_db)):
+    """Get user's sat balance with 24h net change."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    # Sum all ledger amounts in last 24h
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    result = await db.execute(
+        select(func.coalesce(func.sum(Ledger.amount), 0))
+        .where(and_(Ledger.user_id == user_id, Ledger.created_at >= cutoff))
+    )
+    change_24h = result.scalar_one()
+
+    return BalanceResponse(
+        user_id=user.id,
+        available_balance=user.available_balance,
+        change_24h=change_24h,
+    )
+
+
+@router.get('/{user_id}/ledger', response_model=list[LedgerEntry])
+async def get_ledger(
+    user_id: int,
+    action_type: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get user's transaction history."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    ledger = LedgerService(db)
+    entries = await ledger.get_history(user_id, limit, offset, action_type)
+    return entries
+
+
+# --- Trust Score ---
+
+@router.get('/{user_id}/trust')
+async def get_trust_breakdown(user_id: int, db: AsyncSession = Depends(get_db)):
+    """Get user's TrustScore breakdown (4 dimensions + composite)."""
+    svc = TrustScoreService(db)
+    try:
+        return await svc.get_breakdown(user_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail='User not found')
+
+
+@router.get('/{user_id}/costs')
+async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
+    """Get dynamic action costs for this user (adjusted by K(trust))."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    k = dynamic_fee_multiplier(user.trust_score)
+
+    def apply(base: int) -> int:
+        return max(1, int(round(base * k)))
+
+    return {
+        'user_id': user.id,
+        'trust_score': user.trust_score,
+        'tier': trust_tier(user.trust_score),
+        'fee_multiplier': k,
+        'costs': {
+            'post': apply(200),
+            'question': apply(300),
+            'answer': apply(200),
+            'comment': apply(50),
+            'reply': apply(20),
+            'like_post': apply(10),
+            'like_comment': apply(5),
+        },
+    }
+

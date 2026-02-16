@@ -70,29 +70,29 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full bg-zinc-900 border border-zinc-800 text-white py-3 px-4 rounded-xl"
-            />
+          />
             <input
               type="text"
               placeholder="Handle (e.g. satoshi)"
               value={handle}
               onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
               className="w-full bg-zinc-900 border border-zinc-800 text-white py-3 px-4 rounded-xl"
-            />
+          />
             {error && <p className="text-red-500 text-sm text-center">{error}</p>}
-            <button
+          <button
               onClick={handleCreateUser}
-              disabled={isLoading}
+            disabled={isLoading}
               className="w-full bg-orange-500 text-white font-bold py-3 px-6 rounded-xl flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-50"
-            >
-              {isLoading ? (
+          >
+            {isLoading ? (
                 <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <>
+            ) : (
+              <>
                   <Plus size={18} />
                   <span>Create User</span>
-                </>
-              )}
-            </button>
+              </>
+            )}
+          </button>
             <button
               onClick={() => setShowCreate(false)}
               className="w-full text-zinc-500 text-sm py-2"
@@ -117,6 +117,7 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
               {availableUsers.map((user) => (
                 <button
                   key={user.id}
+                  data-testid={`login-user-${user.handle}`}
                   onClick={() => handleSelectUser(user.id)}
                   disabled={isLoading}
                   className="w-full bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4 active:scale-[0.98] transition-all disabled:opacity-50 hover:border-orange-500/50"
@@ -138,7 +139,7 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
                   </div>
                 </button>
               ))}
-            </div>
+        </div>
 
             {/* Create New User Button */}
             <button

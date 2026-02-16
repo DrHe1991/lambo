@@ -10,17 +10,18 @@ interface PostState {
   error: string | null;
 
   // Actions
-  fetchPosts: (filters?: { post_type?: string; author_id?: number }) => Promise<void>;
+  fetchPosts: (filters?: { post_type?: string; author_id?: number; user_id?: number }) => Promise<void>;
   fetchFeed: (userId: number) => Promise<void>;
-  fetchPost: (postId: number) => Promise<void>;
-  fetchComments: (postId: number) => Promise<void>;
+  fetchPost: (postId: number, userId?: number) => Promise<void>;
+  fetchComments: (postId: number, userId?: number) => Promise<void>;
   createPost: (authorId: number, content: string, postType: string, bounty?: number) => Promise<ApiPost>;
-  likePost: (postId: number, userId: number) => Promise<void>;
-  createComment: (postId: number, authorId: number, content: string, parentId?: number) => Promise<void>;
+  toggleLikePost: (postId: number, userId: number, isLiked: boolean) => Promise<void>;
+  createComment: (postId: number, authorId: number, content: string, parentId?: number) => Promise<ApiComment>;
+  toggleLikeComment: (postId: number, commentId: number, userId: number, isLiked: boolean) => Promise<void>;
   clearCurrentPost: () => void;
 }
 
-export const usePostStore = create<PostState>((set, get) => ({
+export const usePostStore = create<PostState>((set) => ({
   posts: [],
   feedPosts: [],
   currentPost: null,
@@ -48,19 +49,19 @@ export const usePostStore = create<PostState>((set, get) => ({
     }
   },
 
-  fetchPost: async (postId) => {
+  fetchPost: async (postId, userId) => {
     set({ isLoading: true, error: null });
     try {
-      const post = await api.getPost(postId);
+      const post = await api.getPost(postId, userId);
       set({ currentPost: post, isLoading: false });
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
   },
 
-  fetchComments: async (postId) => {
+  fetchComments: async (postId, userId) => {
     try {
-      const comments = await api.getComments(postId);
+      const comments = await api.getComments(postId, userId);
       set({ comments });
     } catch (error) {
       console.error('Failed to fetch comments:', error);
@@ -86,35 +87,50 @@ export const usePostStore = create<PostState>((set, get) => ({
     }
   },
 
-  likePost: async (postId, userId) => {
+  toggleLikePost: async (postId, userId, isLiked) => {
+    const doToggle = isLiked ? api.unlikePost : api.likePost;
     try {
-      const result = await api.likePost(postId, userId);
-      // Update the post in the list
+      const result = await doToggle(postId, userId);
+      const patch = { likes_count: result.likes_count, is_liked: result.is_liked };
       set((state) => ({
-        posts: state.posts.map((p) =>
-          p.id === postId ? { ...p, likes_count: result.likes_count, is_liked: true } : p
-        ),
-        feedPosts: state.feedPosts.map((p) =>
-          p.id === postId ? { ...p, likes_count: result.likes_count, is_liked: true } : p
-        ),
-        currentPost:
-          state.currentPost?.id === postId
-            ? { ...state.currentPost, likes_count: result.likes_count, is_liked: true }
-            : state.currentPost,
+        posts: state.posts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
+        feedPosts: state.feedPosts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
+        currentPost: state.currentPost?.id === postId
+          ? { ...state.currentPost, ...patch }
+          : state.currentPost,
       }));
     } catch (error) {
-      console.error('Failed to like post:', error);
+      throw error;
     }
   },
 
   createComment: async (postId, authorId, content, parentId) => {
+    const comment = await api.createComment(postId, authorId, { content, parent_id: parentId });
+    set((state) => ({
+      comments: [...state.comments, comment],
+      // Update comment count on the post
+      posts: state.posts.map((p) =>
+        p.id === postId ? { ...p, comments_count: p.comments_count + 1 } : p,
+      ),
+      currentPost: state.currentPost?.id === postId
+        ? { ...state.currentPost, comments_count: state.currentPost.comments_count + 1 }
+        : state.currentPost,
+    }));
+    return comment;
+  },
+
+  toggleLikeComment: async (postId, commentId, userId, isLiked) => {
+    const doToggle = isLiked ? api.unlikeComment : api.likeComment;
     try {
-      const comment = await api.createComment(postId, authorId, { content, parent_id: parentId });
+      const result = await doToggle(postId, commentId, userId);
       set((state) => ({
-        comments: [...state.comments, comment],
+        comments: state.comments.map((c) =>
+          c.id === commentId
+            ? { ...c, likes_count: result.likes_count, is_liked: result.is_liked }
+            : c,
+        ),
       }));
     } catch (error) {
-      console.error('Failed to create comment:', error);
       throw error;
     }
   },

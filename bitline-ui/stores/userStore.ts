@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { api, ApiUser } from '../api/client';
+import { api, ApiUser, ApiLedgerEntry } from '../api/client';
 
 interface UserState {
   currentUser: ApiUser | null;
@@ -7,8 +7,8 @@ interface UserState {
   isLoggedIn: boolean;
   isLoading: boolean;
   availableBalance: number;
-  lockedBalance: number;
-  loginStreak: number;
+  change24h: number;
+  ledgerEntries: ApiLedgerEntry[];
 
   // Actions
   setCurrentUser: (user: ApiUser | null) => void;
@@ -16,7 +16,8 @@ interface UserState {
   selectUser: (userId: number) => Promise<void>;
   createUser: (name: string, handle: string) => Promise<void>;
   logout: () => void;
-  updateBalance: (available: number, locked: number) => void;
+  fetchBalance: (userId: number) => Promise<void>;
+  fetchLedger: (userId: number) => Promise<void>;
   loadFromStorage: () => Promise<void>;
 }
 
@@ -25,9 +26,9 @@ export const useUserStore = create<UserState>((set, get) => ({
   availableUsers: [],
   isLoggedIn: false,
   isLoading: false,
-  availableBalance: 1000,
-  lockedBalance: 0,
-  loginStreak: 1,
+  availableBalance: 0,
+  change24h: 0,
+  ledgerEntries: [],
 
   setCurrentUser: (user) => set({ currentUser: user, isLoggedIn: !!user }),
 
@@ -45,14 +46,17 @@ export const useUserStore = create<UserState>((set, get) => ({
   selectUser: async (userId: number) => {
     set({ isLoading: true });
     try {
-      const user = await api.getUser(userId);
+      const [user, bal] = await Promise.all([
+        api.getUser(userId),
+        api.getBalance(userId),
+      ]);
       localStorage.setItem('bitline_user_id', String(user.id));
       localStorage.setItem('bitline_logged_in', 'true');
       set({
         currentUser: user,
         isLoggedIn: true,
-        availableBalance: 1000,
-        lockedBalance: 0,
+        availableBalance: bal.available_balance,
+        change24h: bal.change_24h,
         isLoading: false,
       });
     } catch (error) {
@@ -68,11 +72,12 @@ export const useUserStore = create<UserState>((set, get) => ({
       const user = await api.createUser({ name, handle });
       localStorage.setItem('bitline_user_id', String(user.id));
       localStorage.setItem('bitline_logged_in', 'true');
+      const fullUser = await api.getUser(user.id);
       set({
-        currentUser: user,
+        currentUser: fullUser,
         isLoggedIn: true,
-        availableBalance: 1000,
-        lockedBalance: 0,
+        availableBalance: fullUser.available_balance ?? 0,
+        change24h: 0,
         isLoading: false,
       });
     } catch (error) {
@@ -89,28 +94,55 @@ export const useUserStore = create<UserState>((set, get) => ({
       currentUser: null,
       isLoggedIn: false,
       availableBalance: 0,
-      lockedBalance: 0,
+      change24h: 0,
+      ledgerEntries: [],
     });
   },
 
-  updateBalance: (available, locked) => set({ availableBalance: available, lockedBalance: locked }),
+  fetchBalance: async (userId: number) => {
+    try {
+      const [user, bal] = await Promise.all([
+        api.getUser(userId),
+        api.getBalance(userId),
+      ]);
+      set({
+        currentUser: user,
+        availableBalance: bal.available_balance,
+        change24h: bal.change_24h,
+      });
+    } catch (error) {
+      console.error('Failed to fetch balance:', error);
+    }
+  },
+
+  fetchLedger: async (userId: number) => {
+    try {
+      const entries = await api.getLedger(userId);
+      set({ ledgerEntries: entries });
+    } catch (error) {
+      console.error('Failed to fetch ledger:', error);
+    }
+  },
 
   loadFromStorage: async () => {
     const userId = localStorage.getItem('bitline_user_id');
     const loggedIn = localStorage.getItem('bitline_logged_in');
 
-    // Always fetch available users for the picker
     get().fetchUsers();
 
     if (userId && loggedIn === 'true') {
       set({ isLoading: true });
       try {
-        const user = await api.getUser(parseInt(userId));
+        const id = parseInt(userId);
+        const [user, bal] = await Promise.all([
+          api.getUser(id),
+          api.getBalance(id),
+        ]);
         set({
           currentUser: user,
           isLoggedIn: true,
-          availableBalance: 1000,
-          lockedBalance: 0,
+          availableBalance: bal.available_balance,
+          change24h: bal.change_24h,
           isLoading: false,
         });
       } catch (error) {

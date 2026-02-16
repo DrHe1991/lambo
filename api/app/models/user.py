@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint
+from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, BigInteger
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -16,8 +16,20 @@ class User(Base):
     avatar: Mapped[str | None] = mapped_column(String(500))
     bio: Mapped[str | None] = mapped_column(String(300))
 
-    # Trust score (0-1000)
-    trust_score: Mapped[int] = mapped_column(Integer, default=500)
+    # Trust sub-scores (0-1000 each)
+    creator_score: Mapped[int] = mapped_column(Integer, default=500)
+    curator_score: Mapped[int] = mapped_column(Integer, default=500)
+    juror_score: Mapped[int] = mapped_column(Integer, default=500)
+    risk_score: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Composite trust score (computed from sub-scores)
+    trust_score: Mapped[int] = mapped_column(Integer, default=600)
+
+    # Sat balance (Spend & Earn)
+    available_balance: Mapped[int] = mapped_column(BigInteger, default=0)
+
+    # Every new user gets 1 free public post
+    free_posts_remaining: Mapped[int] = mapped_column(Integer, default=1)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

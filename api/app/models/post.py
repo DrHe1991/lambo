@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text
+from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -34,8 +34,11 @@ class Post(Base):
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
     comments_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    # For questions - bounty amount (P1 feature, prep now)
+    # For questions - bounty amount
     bounty: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    # How much the author paid to publish (0 = free post)
+    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
 
     # AI-generated content flag
     is_ai: Mapped[bool] = mapped_column(default=False)
@@ -54,7 +57,7 @@ class Post(Base):
 
 
 class Comment(Base):
-    """Comment on a post."""
+    """Comment on a post. Also used as answers for questions."""
 
     __tablename__ = 'comments'
 
@@ -71,6 +74,9 @@ class Comment(Base):
     # Engagement
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
 
+    # How much the author paid (comment=50, reply=20, answer=200)
+    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -82,4 +88,34 @@ class Comment(Base):
     )
     parent: Mapped['Comment | None'] = relationship(
         'Comment', back_populates='replies', remote_side=[id]
+    )
+
+
+class PostLike(Base):
+    """Tracks who liked which post (replaces simple counter)."""
+
+    __tablename__ = 'post_likes'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    post_id: Mapped[int] = mapped_column(ForeignKey('posts.id', ondelete='CASCADE'))
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('post_id', 'user_id', name='uq_post_like'),
+    )
+
+
+class CommentLike(Base):
+    """Tracks who liked which comment."""
+
+    __tablename__ = 'comment_likes'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    comment_id: Mapped[int] = mapped_column(ForeignKey('comments.id', ondelete='CASCADE'))
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint('comment_id', 'user_id', name='uq_comment_like'),
     )
