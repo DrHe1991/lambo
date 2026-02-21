@@ -1,10 +1,9 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
-import { MOCK_POSTS, MOCK_CHATS, MOCK_ME, MOCK_USERS } from './constants';
+import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore } from './stores';
-import { api, ApiComment } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine } from 'lucide-react';
+import { api, ApiComment, ApiMessage } from './api/client';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 import { TrustBadge } from './components/TrustBadge';
 import { LoginPage } from './components/LoginPage';
@@ -13,9 +12,10 @@ import { LikeStakeModal } from './components/LikeStakeModal';
 import { ToastContainer, toast } from './components/Toast';
 import { getTrustRingClass, getTrustStrokeColor, getTrustBadgeBg, getTrustTier } from './trustTheme';
 import { ApiTrustBreakdown, ApiUserCosts } from './api/client';
+import { useChatWebSocket } from './hooks/useChatWebSocket';
 
 // Views
-type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'ADD_FRIENDS' | 'GROUP_CHAT' | 'SCAN' | 'TRUST_DETAIL';
+type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'TRUST_DETAIL';
 
 const App: React.FC = () => {
   // Stores
@@ -26,6 +26,7 @@ const App: React.FC = () => {
     availableBalance,
     change24h,
     ledgerEntries,
+    availableUsers,
     loadFromStorage,
     logout,
     fetchBalance,
@@ -54,10 +55,10 @@ const App: React.FC = () => {
     createSession: createApiSession,
   } = useChatStore();
 
-  // Convert API data to UI format
-  const posts: Post[] = apiPosts.length > 0 ? apiPosts.map(apiPostToPost) : MOCK_POSTS;
-  const feedPostsConverted: Post[] = apiFeedPosts.length > 0 ? apiFeedPosts.map(apiPostToPost) : MOCK_POSTS.filter(p => p.author.isFollowing);
-  const chatSessions: ChatSession[] = apiSessions.length > 0 ? apiSessions.map(apiSessionToSession) : MOCK_CHATS;
+  // Convert API data to UI format (no mock fallbacks)
+  const posts: Post[] = apiPosts.map(apiPostToPost);
+  const feedPostsConverted: Post[] = apiFeedPosts.map(apiPostToPost);
+  const chatSessions: ChatSession[] = apiSessions.map(apiSessionToSession);
   const currentMe: User = currentUser ? apiUserToUser(currentUser) : MOCK_ME;
 
   // Local UI state
@@ -78,6 +79,9 @@ const App: React.FC = () => {
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [showChatActions, setShowChatActions] = useState(false);
   const [friendSearch, setFriendSearch] = useState('');
+  const [friendSearchResults, setFriendSearchResults] = useState<User[]>([]);
+  const [isFriendSearching, setIsFriendSearching] = useState(false);
+  const [friendSearchError, setFriendSearchError] = useState<string | null>(null);
   const [addedFriendIds, setAddedFriendIds] = useState<Set<string>>(new Set());
   const [groupChatName, setGroupChatName] = useState('');
   const [groupMemberIds, setGroupMemberIds] = useState<Set<string>>(new Set());
@@ -86,13 +90,67 @@ const App: React.FC = () => {
 
 
   // Chat detail state
-  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string}>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string; messageType: 'text' | 'system'; status: 'sent' | 'pending'}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
+
+  // Use ref to avoid reconnecting WebSocket when selectedChat changes
+  const selectedChatRef = React.useRef(selectedChat);
+  React.useEffect(() => {
+    selectedChatRef.current = selectedChat;
+  }, [selectedChat]);
+
+  // WebSocket message handler - stable reference using ref
+  const handleWebSocketMessage = useCallback((message: ApiMessage) => {
+    console.log('[WS] Received message:', message);
+    const currentChat = selectedChatRef.current;
+    console.log('[WS] Current chat:', currentChat?.id, 'Message session:', message.session_id);
+    
+    if (currentChat && Number(message.session_id) === Number(currentChat.id)) {
+      // User is viewing this chat - add message directly
+      console.log('[WS] Adding message to chat');
+      setChatMessages(prev => {
+        if (prev.some(m => Number(m.id) === Number(message.id))) return prev;
+        
+        // If this is a reply from the other person, remove system warnings
+        const isFromOther = Number(message.sender_id) !== Number(currentUser?.id);
+        let updated = prev;
+        if (isFromOther && message.message_type === 'text') {
+          // Filter out system messages (warnings) since conversation is now established
+          updated = prev.filter(m => m.messageType !== 'system');
+        }
+        
+        return [...updated, { 
+          id: message.id, 
+          senderId: message.sender_id, 
+          content: message.content, 
+          messageType: message.message_type,
+          status: message.status 
+        }];
+      });
+    } else {
+      // User is not viewing this chat - refresh sessions to update unread count
+      console.log('[WS] Refreshing sessions list');
+      if (currentUser?.id) {
+        fetchSessions(currentUser.id);
+      }
+    }
+  }, [currentUser?.id, fetchSessions]);
+
+  // Connect to WebSocket for real-time chat
+  useChatWebSocket({
+    userId: currentUser?.id ?? null,
+    onMessage: handleWebSocketMessage,
+  });
 
   // Trust & dynamic costs state
   const [trustBreakdown, setTrustBreakdown] = useState<ApiTrustBreakdown | null>(null);
   const [userCosts, setUserCosts] = useState<ApiUserCosts | null>(null);
+  
+  // Profile message permission state
+  const [profileMsgPermission, setProfileMsgPermission] = useState<{ permission: string; reason: string; can_message: boolean } | null>(null);
+  const [isFollowingProfile, setIsFollowingProfile] = useState(false);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false);
 
   const LIKE_STAKE = 10; // sat required to like
 
@@ -185,7 +243,13 @@ const App: React.FC = () => {
       setIsLoadingChatMessages(true);
       try {
         const msgs = await api.getMessages(Number(selectedChat.id), currentUser.id);
-        setChatMessages(msgs.map(m => ({ id: m.id, senderId: m.sender_id, content: m.content })));
+        setChatMessages(msgs.map(m => ({ 
+          id: m.id, 
+          senderId: m.sender_id, 
+          content: m.content, 
+          messageType: m.message_type,
+          status: m.status 
+        })));
       } catch (error) {
         console.error('Failed to load messages:', error);
         setChatMessages([]);
@@ -195,6 +259,25 @@ const App: React.FC = () => {
     };
     loadMessages();
   }, [selectedChat?.id, currentUser?.id]);
+
+  // Load profile permission when viewing a user
+  useEffect(() => {
+    const profileUserId = selectedUser ? Number(selectedUser.id) : null;
+    if (currentView === 'USER_PROFILE' && profileUserId && currentUser) {
+      setIsLoadingProfile(true);
+      Promise.all([
+        api.checkMessagePermission(currentUser.id, profileUserId),
+        api.getUser(profileUserId, currentUser.id),
+      ]).then(([perm, user]) => {
+        setProfileMsgPermission(perm);
+        setIsFollowingProfile(user.is_following || false);
+      }).catch(() => {
+        setProfileMsgPermission(null);
+      }).finally(() => {
+        setIsLoadingProfile(false);
+      });
+    }
+  }, [currentView, selectedUser?.id, currentUser?.id]);
 
   // Show login page if not logged in
   if (!isLoggedIn) {
@@ -315,7 +398,7 @@ const App: React.FC = () => {
 
   const renderChat = () => {
     const chatQuickActions = [
-      { id: 'add-friends', label: 'Add Friends', icon: <UserPlus size={14} className="text-orange-400" />, view: 'ADD_FRIENDS' as View },
+      { id: 'my-qr', label: 'My QR Code', icon: <QrCode size={14} className="text-orange-400" />, view: 'MY_QR_CODE' as View },
       { id: 'group-chat', label: 'Group Chat', icon: <Users size={14} className="text-orange-400" />, view: 'GROUP_CHAT' as View },
       { id: 'scan', label: 'Scan', icon: <ScanLine size={14} className="text-orange-400" />, view: 'SCAN' as View }
     ];
@@ -351,36 +434,42 @@ const App: React.FC = () => {
             )}
           </div>
         </div>
-        {chatSessions.map(chat => (
-          <div
-            key={chat.id}
-            className="flex items-center gap-4 mb-6 active:opacity-70"
-            onClick={() => {
-              setShowChatActions(false);
-              setSelectedChat(chat);
-              setCurrentView('CHAT_DETAIL');
-            }}
-          >
-            <div className="relative">
-              <img src={chat.participants[0]?.avatar || `https://picsum.photos/id/${Number(chat.id) + 10}/200/200`} className="w-14 h-14 rounded-full border border-zinc-800 object-cover" />
-              {chat.isGroup && chat.participants[1] && (
-                 <img src={chat.participants[1].avatar || `https://picsum.photos/id/${Number(chat.id) + 11}/200/200`} className="w-8 h-8 rounded-full border-2 border-black absolute -bottom-1 -right-1 object-cover" />
+        {chatSessions.map(chat => {
+          // For DMs, show the OTHER participant (not current user)
+          const otherParticipants = chat.participants.filter(p => String(p.id) !== String(currentMe.id));
+          const displayUser = otherParticipants[0] || chat.participants[0];
+          
+          return (
+            <div
+              key={chat.id}
+              className="flex items-center gap-4 mb-6 active:opacity-70"
+              onClick={() => {
+                setShowChatActions(false);
+                setSelectedChat(chat);
+                setCurrentView('CHAT_DETAIL');
+              }}
+            >
+              <div className="relative">
+                <img src={displayUser?.avatar || `https://picsum.photos/id/${Number(chat.id) + 10}/200/200`} className="w-14 h-14 rounded-full border border-zinc-800 object-cover" />
+                {chat.isGroup && otherParticipants[1] && (
+                   <img src={otherParticipants[1].avatar || `https://picsum.photos/id/${Number(chat.id) + 11}/200/200`} className="w-8 h-8 rounded-full border-2 border-black absolute -bottom-1 -right-1 object-cover" />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="font-bold text-zinc-100">{chat.isGroup ? (chat.name || 'Group Chat') : displayUser?.name}</span>
+                  <span className="text-[10px] text-zinc-500">{chat.timestamp}</span>
+                </div>
+                <p className="text-sm text-zinc-500 truncate">{chat.lastMessage}</p>
+              </div>
+              {chat.unreadCount > 0 && (
+                <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center">
+                  <span className="text-[10px] font-black text-white">{chat.unreadCount}</span>
+                </div>
               )}
             </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between mb-0.5">
-                <span className="font-bold text-zinc-100">{chat.isGroup ? (chat.name || 'Group Chat') : chat.participants[0]?.name}</span>
-                <span className="text-[10px] text-zinc-500">{chat.timestamp}</span>
-              </div>
-              <p className="text-sm text-zinc-500 truncate">{chat.lastMessage}</p>
-            </div>
-            {chat.unreadCount > 0 && (
-              <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center">
-                <span className="text-[10px] font-black text-white">{chat.unreadCount}</span>
-              </div>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -420,74 +509,72 @@ const App: React.FC = () => {
     </div>
   );
 
-  const renderAddFriends = () => {
-    const candidates = MOCK_USERS.filter(u => u.id !== currentMe.id);
-    const filteredFriends = candidates.filter(u => {
-      const query = friendSearch.trim().toLowerCase();
-      if (!query) return true;
-      return u.name.toLowerCase().includes(query) || u.handle.toLowerCase().includes(query);
-    });
+  const handleFriendSearch = async () => {
+    const query = friendSearch.trim();
+    if (!query) {
+      setFriendSearchResults([]);
+      return;
+    }
+    setIsFriendSearching(true);
+    setFriendSearchError(null);
+    try {
+      const results = await api.searchUsers(query);
+      setFriendSearchResults(results.filter(u => u.id !== currentUser?.id).map(apiUserToUser));
+    } catch (err) {
+      setFriendSearchError('Search failed');
+    } finally {
+      setIsFriendSearching(false);
+    }
+  };
 
-    const toggleAddFriend = (userId: string | number) => {
-      const id = String(userId);
-      setAddedFriendIds(prev => {
-        const next = new Set(prev);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        return next;
-      });
+  const renderMyQRCode = () => {
+    const handleCopyHandle = () => {
+      navigator.clipboard.writeText(`@${currentMe.handle}`);
+      toast.success('Handle copied!');
     };
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-lg font-bold uppercase tracking-wide">Add Friends</h2>
+          <h2 className="text-lg font-bold uppercase tracking-wide">My QR Code</h2>
         </div>
-        <div className="p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 flex items-center gap-3 mb-4">
-            <Search size={18} className="text-zinc-500" />
-            <input
-              value={friendSearch}
-              onChange={(e) => setFriendSearch(e.target.value)}
-              placeholder="Search name or handle..."
-              className="bg-transparent border-none outline-none text-sm w-full text-zinc-100"
-            />
+        <div className="flex flex-col items-center justify-center p-8 pt-16">
+          {/* QR Code placeholder - in real app would generate actual QR */}
+          <div className="w-64 h-64 bg-white rounded-3xl p-4 flex items-center justify-center mb-8">
+            <div className="w-full h-full bg-gradient-to-br from-zinc-200 to-zinc-100 rounded-2xl flex items-center justify-center relative">
+              <QrCode size={180} className="text-zinc-800" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-lg">
+                  <Zap className="w-8 h-8 text-white fill-white" />
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {filteredFriends.map(user => {
-              const isAdded = addedFriendIds.has(String(user.id));
-              return (
-                <div key={user.id} className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <img src={user.avatar} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" />
-                    <div>
-                      <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
-                      <span className="text-[11px] text-zinc-500">{user.handle}</span>
-                    </div>
-                  </div>
-                  <button
-                    className={`px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide border ${
-                      isAdded
-                        ? 'bg-zinc-800 text-zinc-300 border-zinc-700'
-                        : 'bg-orange-500/15 text-orange-300 border-orange-500/40'
-                    }`}
-                    onClick={() => toggleAddFriend(user.id)}
-                  >
-                    {isAdded ? 'Added' : 'Add'}
-                  </button>
-                </div>
-              );
-            })}
+          <div className="text-center mb-8">
+            <h3 className="text-2xl font-black text-white mb-1">{currentMe.name}</h3>
+            <p className="text-orange-400 font-bold text-lg">@{currentMe.handle}</p>
           </div>
+
+          <button
+            onClick={handleCopyHandle}
+            className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-xl px-6 py-3"
+          >
+            <Copy size={18} className="text-orange-400" />
+            <span className="text-zinc-300 font-medium">Copy Handle</span>
+          </button>
+
+          <p className="text-zinc-600 text-sm text-center mt-8 px-8">
+            Others can scan this code or search your handle <span className="text-orange-400">@{currentMe.handle}</span> to find you
+          </p>
         </div>
       </div>
     );
   };
 
   const renderGroupChat = () => {
-    const candidates = MOCK_USERS.filter(u => u.id !== currentMe.id);
+    const candidates = availableUsers.filter(u => u.id !== currentUser?.id).map(apiUserToUser);
     const toggleMember = (userId: string | number) => {
       const id = String(userId);
       setGroupMemberIds(prev => {
@@ -685,47 +772,110 @@ const App: React.FC = () => {
   );
   };
 
-  const renderSearch = () => (
-    <div className="fixed inset-0 z-[60] bg-black">
-      <div className="p-4 border-b border-zinc-900 flex items-center gap-4">
-        <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-        <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 flex items-center gap-3">
-          <Search size={18} className="text-zinc-500" />
-          <input 
-            autoFocus
-            placeholder="Search ideas, hunters, questions..." 
-            className="bg-transparent border-none outline-none text-sm w-full text-zinc-100" 
-          />
+  const renderSearch = () => {
+    const handleViewProfile = (user: User) => {
+      setSelectedUser(user);
+      setFriendSearch('');
+      setFriendSearchResults([]);
+      setCurrentView('USER_PROFILE');
+    };
+
+    return (
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+        <div className="p-4 border-b border-zinc-900 flex items-center gap-4">
+          <button onClick={() => { setCurrentView('MAIN'); setFriendSearch(''); setFriendSearchResults([]); }}><ArrowLeft /></button>
+          <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 flex items-center gap-3">
+            <Search size={18} className="text-zinc-500" />
+            <input 
+              autoFocus
+              value={friendSearch}
+              onChange={(e) => setFriendSearch(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleFriendSearch()}
+              placeholder="Search @handle or topics..." 
+              className="bg-transparent border-none outline-none text-sm w-full text-zinc-100" 
+            />
+            {friendSearch.trim() && (
+              <button
+                onClick={handleFriendSearch}
+                disabled={isFriendSearching}
+                className="px-3 py-1 bg-orange-500 text-white text-xs font-bold rounded-lg disabled:opacity-50"
+              >
+                {isFriendSearching ? '...' : 'Go'}
+              </button>
+            )}
+          </div>
         </div>
-      </div>
-      <div className="p-4">
-        <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Trending Now</h3>
-        <div className="flex flex-wrap gap-2 mb-8">
-          {['#Bitcoin2025', '#AI_Moderation', '#SatStaking', '#Privacy', '#L2_Growth'].map(tag => (
-            <span key={tag} className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-bold text-orange-400">
-              {tag}
-            </span>
-          ))}
-        </div>
-        
-        <div className="grid grid-cols-2 gap-3">
-          {MOCK_POSTS.slice(0, 4).map((p, i) => (
-            <div key={i} className="bg-zinc-950 border border-zinc-900 rounded-xl p-3 h-40 overflow-hidden relative">
-              <div className="flex items-center gap-2 mb-2">
-                <img src={p.author.avatar} className="w-5 h-5 rounded-full" />
-                <span className="text-[10px] font-bold text-zinc-500">{p.author.handle}</span>
-              </div>
-              <p className="text-[11px] text-zinc-300 leading-tight">{p.content}</p>
-              <div className="absolute bottom-2 right-2 bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1">
-                 <Heart size={10} className="text-orange-500" />
-                 <span className="text-[10px] font-bold">{p.likes}</span>
+        <div className="p-4">
+          {/* User search results */}
+          {friendSearchResults.length > 0 && (
+            <div className="mb-6">
+              <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3">Users</h3>
+              <div className="space-y-2">
+                {friendSearchResults.map(user => (
+                  <div 
+                    key={user.id} 
+                    className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 flex items-center gap-3"
+                    onClick={() => handleViewProfile(user)}
+                  >
+                    <img 
+                      src={user.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${user.handle}`} 
+                      className="w-10 h-10 rounded-full border border-zinc-700 object-cover" 
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
+                      <span className="text-[11px] text-zinc-500">{user.handle}</span>
+                    </div>
+                    <span className="text-zinc-600 text-xs">→</span>
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
+          )}
+
+          {friendSearchError && (
+            <p className="text-red-400 text-sm text-center py-4 mb-4">{friendSearchError}</p>
+          )}
+
+          {friendSearch.trim() && friendSearchResults.length === 0 && !isFriendSearching && (
+            <p className="text-zinc-500 text-sm text-center py-6 mb-4">
+              No users found for "{friendSearch}"
+            </p>
+          )}
+
+          {/* Show trending when no search */}
+          {!friendSearch.trim() && (
+            <>
+              <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Trending Now</h3>
+              <div className="flex flex-wrap gap-2 mb-8">
+                {['#Bitcoin2025', '#AI_Moderation', '#SatStaking', '#Privacy', '#L2_Growth'].map(tag => (
+                  <span key={tag} className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-bold text-orange-400">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              
+              <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Popular Posts</h3>
+              <div className="grid grid-cols-2 gap-3">
+                {posts.slice(0, 4).map((p, i) => (
+                  <div key={i} className="bg-zinc-950 border border-zinc-900 rounded-xl p-3 h-40 overflow-hidden relative">
+                    <div className="flex items-center gap-2 mb-2">
+                      <img src={p.author.avatar} className="w-5 h-5 rounded-full" />
+                      <span className="text-[10px] font-bold text-zinc-500">{p.author.handle}</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-300 leading-tight">{p.content}</p>
+                    <div className="absolute bottom-2 right-2 bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1">
+                       <Heart size={10} className="text-orange-500" />
+                       <span className="text-[10px] font-bold">{p.likes}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Shared comment-list component used by Post Detail & QA Detail
   const renderCommentItem = (c: ApiComment) => {
@@ -1355,11 +1505,24 @@ const App: React.FC = () => {
           });
         }
 
-        // Send the message
-        const msg = await api.sendMessage(Number(sessionId), currentUser.id, content);
-        setChatMessages(prev => [...prev, { id: msg.id, senderId: msg.sender_id, content: msg.content }]);
+        // Send the message (returns array with user msg + optional system msg)
+        const msgs = await api.sendMessage(Number(sessionId), currentUser.id, content);
+        setChatMessages(prev => {
+          const existingIds = new Set(prev.map(m => Number(m.id)));
+          const newMsgs = msgs
+            .filter(m => !existingIds.has(m.id))
+            .map(m => ({ 
+              id: m.id, 
+              senderId: m.sender_id, 
+              content: m.content, 
+              messageType: m.message_type,
+              status: m.status 
+            }));
+          return [...prev, ...newMsgs];
+        });
       } catch (error) {
-        console.error('Failed to send message:', error);
+          console.error('Failed to send message:', error);
+          toast.error('Failed to send message');
       }
     };
 
@@ -1407,8 +1570,40 @@ const App: React.FC = () => {
               No messages yet. Say hi! 👋
             </div>
           )}
+          {/* Render all messages in chronological order */}
           {chatMessages.map(msg => {
             const isMe = msg.senderId === currentUser?.id || msg.senderId === currentMe.id;
+            const isPending = msg.status === 'pending';
+            const isSystem = msg.messageType === 'system';
+
+            // System message (warning banner style, in chat history)
+            if (isSystem) {
+              return (
+                <div key={msg.id} className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 mx-2">
+                  <p className="text-amber-400 text-xs text-center">
+                    ⚠️ {msg.content}
+                  </p>
+                </div>
+              );
+            }
+
+            // Pending message (not sent yet)
+            if (isPending) {
+              return (
+                <div key={msg.id} className="flex items-end gap-2 justify-end">
+                  <div className="flex flex-col gap-1 max-w-[70%] items-end">
+                    <div className="px-4 py-2.5 text-sm break-words bg-red-900/50 text-red-300 border border-red-500/30 rounded-2xl rounded-br-sm">
+                      {msg.content}
+                    </div>
+                    <span className="text-[10px] text-red-400 flex items-center gap-1">
+                      <X size={10} /> Not sent
+                    </span>
+                  </div>
+                </div>
+              );
+            }
+
+            // Normal text message
             return (
               <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
                 {!isMe && (
@@ -1416,12 +1611,14 @@ const App: React.FC = () => {
                     <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 object-cover" />
                   </button>
                 )}
-                <div className={`max-w-[70%] px-4 py-2.5 text-sm break-words ${
-                  isMe
-                    ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
-                    : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-bl-sm'
-                }`}>
-                  {msg.content}
+                <div className={`flex flex-col gap-1 max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
+                  <div className={`px-4 py-2.5 text-sm break-words ${
+                    isMe
+                        ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
+                        : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-bl-sm'
+                  }`}>
+                    {msg.content}
+                  </div>
                 </div>
               </div>
             );
@@ -1450,8 +1647,56 @@ const App: React.FC = () => {
     );
   };
 
+  const handleFollowToggle = async () => {
+    const profileUserId = selectedUser ? Number(selectedUser.id) : null;
+    if (!currentUser || !profileUserId) return;
+    try {
+      if (isFollowingProfile) {
+        await api.unfollowUser(profileUserId, currentUser.id);
+        setIsFollowingProfile(false);
+        toast.success('Unfollowed');
+      } else {
+        await api.followUser(profileUserId, currentUser.id);
+        setIsFollowingProfile(true);
+        toast.success('Followed!');
+      }
+      // Refresh permission
+      const perm = await api.checkMessagePermission(currentUser.id, profileUserId);
+      setProfileMsgPermission(perm);
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const handleStartChat = async () => {
+    if (!currentUser || !selectedUser) return;
+    try {
+      // Create or get existing session
+      const session = await createApiSession(currentUser.id, [Number(selectedUser.id)]);
+      setSelectedChat({
+        id: String(session.id),
+        participants: session.members.map((m: any) => apiUserToUser(m)),
+        lastMessage: session.last_message || '',
+        timestamp: session.last_message_at ? new Date(session.last_message_at).toLocaleTimeString() : 'now',
+        unreadCount: session.unread_count,
+      });
+      setCurrentView('CHAT_DETAIL');
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   const renderUserProfile = () => {
     if (!selectedUser) return null;
+
+    const getMessageButtonText = () => {
+      if (isLoadingProfile) return '...';
+      return 'Message';
+    };
+
+    // Always allow clicking - will open existing chat or create new one
+    const canMessage = true;
+
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md z-10 flex items-center justify-between">
@@ -1465,22 +1710,33 @@ const App: React.FC = () => {
           <TrustBadge score={selectedUser.trustScore} size="lg" />
           
           <div className="flex gap-4 mt-8 w-full">
-            <button className="flex-1 bg-white text-black font-black py-3 rounded-xl text-sm uppercase italic tracking-tighter">Follow</button>
             <button 
-              className="flex-1 bg-zinc-900 text-white font-black py-3 rounded-xl text-sm uppercase italic tracking-tighter border border-zinc-800"
-              onClick={() => {
-                setSelectedChat({ id: 'new', participants: [selectedUser], lastMessage: '', timestamp: 'now', unreadCount: 0 });
-                setCurrentView('CHAT_DETAIL');
-              }}
+              onClick={handleFollowToggle}
+              className={`flex-1 font-black py-3 rounded-xl text-sm uppercase italic tracking-tighter ${
+                isFollowingProfile 
+                  ? 'bg-zinc-800 text-zinc-300 border border-zinc-700' 
+                  : 'bg-white text-black'
+              }`}
             >
-              Chat
+              {isFollowingProfile ? 'Following ✓' : 'Follow'}
+            </button>
+            <button 
+              className={`flex-1 font-black py-3 rounded-xl text-sm uppercase italic tracking-tighter border ${
+                canMessage 
+                  ? 'bg-orange-500 text-white border-orange-500' 
+                  : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+              }`}
+              onClick={handleStartChat}
+              disabled={!canMessage}
+            >
+              {getMessageButtonText()}
             </button>
           </div>
         </div>
         
         <div className="p-4">
           <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Activity</h3>
-          {MOCK_POSTS.filter(p => p.author.id === selectedUser.id).map(p => (
+          {posts.filter(p => String(p.author.id) === String(selectedUser.id)).map(p => (
             <PostCard key={p.id} post={p} />
           ))}
         </div>
@@ -1489,15 +1745,20 @@ const App: React.FC = () => {
   };
 
   const renderFollowersList = () => {
-    const followerUsers: User[] = [MOCK_USERS[0], MOCK_USERS[2], MOCK_USERS[4], MOCK_USERS[6]];
+    // Use actual users from API (TODO: implement proper followers endpoint)
+    const followerUsers: User[] = availableUsers
+      .filter(u => u.id !== currentUser?.id)
+      .slice(0, 4)
+      .map(apiUserToUser);
     return renderUserListPage('Followers', followerUsers);
   };
 
   const renderFollowingList = () => {
-    const followingUsers = MOCK_POSTS
-      .filter(p => p.author.isFollowing && p.author.id !== 'me')
-      .map(p => p.author)
-      .filter((user, idx, arr) => arr.findIndex(u => u.id === user.id) === idx);
+    // Use actual users from API (TODO: implement proper following endpoint)
+    const followingUsers: User[] = availableUsers
+      .filter(u => u.id !== currentUser?.id)
+      .slice(0, 4)
+      .map(apiUserToUser);
     return renderUserListPage('Following', followingUsers);
   };
 
@@ -1558,7 +1819,7 @@ const App: React.FC = () => {
       {currentView === 'USER_PROFILE' && renderUserProfile()}
       {currentView === 'FOLLOWERS_LIST' && renderFollowersList()}
       {currentView === 'FOLLOWING_LIST' && renderFollowingList()}
-      {currentView === 'ADD_FRIENDS' && renderAddFriends()}
+      {currentView === 'MY_QR_CODE' && renderMyQRCode()}
       {currentView === 'GROUP_CHAT' && renderGroupChat()}
       {currentView === 'SCAN' && renderScan()}
       {currentView === 'SETTINGS' && renderSettings()}

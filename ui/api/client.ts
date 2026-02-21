@@ -149,6 +149,8 @@ export interface ApiMessage {
   sender_id: number;
   sender: ApiUser;
   content: string;
+  message_type: 'text' | 'system';
+  status: 'sent' | 'pending';
   created_at: string;
 }
 
@@ -252,6 +254,18 @@ export const api = {
 
   getFollowing: (userId: number) => apiRequest<ApiUser[]>(`/api/users/${userId}/following`),
 
+  searchUsers: (query: string, limit = 10) =>
+    apiRequest<ApiUser[]>('/api/users/search', { params: { q: query, limit } }),
+
+  getUserByHandle: (handle: string, currentUserId?: number) =>
+    apiRequest<ApiUser>(`/api/users/handle/${handle}`, { params: currentUserId ? { current_user_id: currentUserId } : {} }),
+
+  checkMessagePermission: (senderId: number, recipientId: number) =>
+    apiRequest<{ permission: string; reason: string; can_message: boolean }>(
+      '/api/chat/permission',
+      { params: { sender_id: senderId, recipient_id: recipientId } }
+    ),
+
   getBalance: (userId: number) => apiRequest<ApiBalanceResponse>(`/api/users/${userId}/balance`),
 
   getLedger: (userId: number, limit = 50, offset = 0) =>
@@ -332,7 +346,7 @@ export const api = {
     }),
 
   sendMessage: (sessionId: number, senderId: number, content: string) =>
-    apiRequest<ApiMessage>(`/api/chat/sessions/${sessionId}/messages`, {
+    apiRequest<ApiMessage[]>(`/api/chat/sessions/${sessionId}/messages`, {
       method: 'POST',
       body: { content },
       params: { sender_id: senderId },

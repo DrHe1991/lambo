@@ -13,6 +13,11 @@ class ChatSession(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str | None] = mapped_column(String(100), default=None)
     is_group: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # For DMs: who initiated the conversation (for 1-msg limit tracking)
+    initiated_by: Mapped[int | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), default=None
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -61,6 +66,17 @@ class Message(Base):
     )
     sender_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     content: Mapped[str] = mapped_column(Text)
+
+    # Message type: 'text' (normal) or 'system' (system notification, user-specific)
+    message_type: Mapped[str] = mapped_column(String(20), default='text')
+
+    # Status: 'sent' (delivered) or 'pending' (waiting for recipient to reply/follow)
+    status: Mapped[str] = mapped_column(String(20), default='sent')
+
+    # For system messages: which user should see this (null = all members)
+    visible_to: Mapped[int | None] = mapped_column(
+        ForeignKey('users.id', ondelete='CASCADE'), default=None
+    )
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

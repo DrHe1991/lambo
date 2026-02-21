@@ -78,11 +78,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
         name,
         is_group: isGroup,
       });
-      set((state) => ({
-        sessions: [session, ...state.sessions],
-        currentSession: session,
-        isLoading: false,
-      }));
+      set((state) => {
+        // Check if session already exists (backend returned existing session)
+        const existingIndex = state.sessions.findIndex(s => s.id === session.id);
+        if (existingIndex >= 0) {
+          // Update existing session, move to top
+          const updated = [...state.sessions];
+          updated.splice(existingIndex, 1);
+          return {
+            sessions: [session, ...updated],
+            currentSession: session,
+            isLoading: false,
+          };
+        }
+        // New session - add to top
+        return {
+          sessions: [session, ...state.sessions],
+          currentSession: session,
+          isLoading: false,
+        };
+      });
       return session;
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });

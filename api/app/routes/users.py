@@ -24,6 +24,26 @@ async def list_users(
     return result.scalars().all()
 
 
+@router.get('/search', response_model=list[UserBrief])
+async def search_users(
+    q: str = Query(..., min_length=1, max_length=50),
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search users by handle (exact or prefix match)."""
+    # Strip @ if provided
+    query = q.lstrip('@').lower()
+    
+    # Search by handle prefix (case-insensitive)
+    result = await db.execute(
+        select(User)
+        .where(func.lower(User.handle).like(f'{query}%'))
+        .order_by(User.handle)
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
 @router.post('', response_model=UserBrief, status_code=status.HTTP_201_CREATED)
 async def create_user(user_data: UserCreate, db: AsyncSession = Depends(get_db)):
     """Create a new user (0 sat, 1 free post)."""

@@ -38,6 +38,8 @@ class MessageResponse(BaseModel):
     sender_id: int
     sender: UserBrief
     content: str
+    message_type: str = 'text'  # 'text' or 'system'
+    status: str = 'sent'  # 'sent' or 'pending'
     created_at: datetime
 
     class Config:
