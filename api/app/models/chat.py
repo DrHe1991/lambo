@@ -78,8 +78,38 @@ class Message(Base):
         ForeignKey('users.id', ondelete='CASCADE'), default=None
     )
 
+    # Reply to another message
+    reply_to_id: Mapped[int | None] = mapped_column(
+        ForeignKey('messages.id', ondelete='SET NULL'), default=None
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
     session: Mapped['ChatSession'] = relationship('ChatSession', back_populates='messages')
+    reply_to: Mapped['Message | None'] = relationship(
+        'Message', remote_side='Message.id', foreign_keys=[reply_to_id]
+    )
+    reactions: Mapped[list['MessageReaction']] = relationship(
+        'MessageReaction', back_populates='message', cascade='all, delete-orphan'
+    )
+
+
+class MessageReaction(Base):
+    """Emoji reaction on a message."""
+
+    __tablename__ = 'message_reactions'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey('messages.id', ondelete='CASCADE')
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    emoji: Mapped[str] = mapped_column(String(10))
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    message: Mapped['Message'] = relationship('Message', back_populates='reactions')

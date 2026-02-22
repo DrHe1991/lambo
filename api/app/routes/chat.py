@@ -5,8 +5,8 @@ from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
 from app.models.user import User
-from app.models.chat import ChatSession, ChatMember, Message
-from app.schemas.chat import ChatSessionCreate, ChatSessionResponse, MessageCreate, MessageResponse
+from app.models.chat import ChatSession, ChatMember, Message, MessageReaction
+from app.schemas.chat import ChatSessionCreate, ChatSessionResponse, MessageCreate, MessageResponse, ReactionCreate, ReactionResponse, ReactionInfo, ReplyInfo
 from app.schemas.user import UserBrief
 from app.services.chat_service import ChatService, MessagePermission
 from app.services.ws_manager import manager
@@ -252,6 +252,19 @@ async def send_message(
     elif not can_send:
         raise HTTPException(status_code=403, detail=reason)
 
+    # Build reply info if replying to a message
+    reply_info = None
+    if message_data.reply_to_id:
+        reply_msg = await db.get(Message, message_data.reply_to_id)
+        if reply_msg:
+            reply_sender = await db.get(User, reply_msg.sender_id)
+            reply_info = ReplyInfo(
+                id=reply_msg.id,
+                content=reply_msg.content,
+                sender_id=reply_msg.sender_id,
+                sender_name=reply_sender.name if reply_sender else 'Unknown',
+            )
+
     # Create user message
     message = Message(
         session_id=session_id,
@@ -259,6 +272,7 @@ async def send_message(
         content=message_data.content,
         message_type='text',
         status=msg_status,
+        reply_to_id=message_data.reply_to_id,
     )
     db.add(message)
     await db.flush()
@@ -283,6 +297,7 @@ async def send_message(
         content=message.content,
         message_type='text',
         status=message.status,
+        reply_to=reply_info,
         created_at=message.created_at,
     )
     responses.append(user_msg_response)
@@ -398,6 +413,41 @@ async def get_messages(
     # Reverse to chronological order
     messages = list(reversed(messages))
 
+    # Get reactions for all messages
+    message_ids = [m.id for m in messages]
+    reactions_result = await db.execute(
+        select(MessageReaction, User)
+        .join(User, MessageReaction.user_id == User.id)
+        .where(MessageReaction.message_id.in_(message_ids))
+    )
+    reactions_data = reactions_result.all()
+    
+    # Group reactions by message_id
+    reactions_by_msg: dict[int, list[ReactionInfo]] = {}
+    for reaction, user in reactions_data:
+        if reaction.message_id not in reactions_by_msg:
+            reactions_by_msg[reaction.message_id] = []
+        reactions_by_msg[reaction.message_id].append(
+            ReactionInfo(emoji=reaction.emoji, user_id=user.id, user_name=user.name)
+        )
+
+    # Build reply info map for messages that are replies
+    reply_to_ids = [m.reply_to_id for m in messages if m.reply_to_id]
+    replies_by_id: dict[int, ReplyInfo] = {}
+    if reply_to_ids:
+        reply_msgs_result = await db.execute(
+            select(Message, User)
+            .join(User, Message.sender_id == User.id)
+            .where(Message.id.in_(reply_to_ids))
+        )
+        for reply_msg, reply_sender in reply_msgs_result.all():
+            replies_by_id[reply_msg.id] = ReplyInfo(
+                id=reply_msg.id,
+                content=reply_msg.content,
+                sender_id=reply_sender.id,
+                sender_name=reply_sender.name,
+            )
+
     return [
         MessageResponse(
             id=m.id,
@@ -413,11 +463,155 @@ async def get_messages(
             content=m.content,
             message_type=m.message_type,
             status=m.status,
+            reply_to=replies_by_id.get(m.reply_to_id) if m.reply_to_id else None,
+            reactions=reactions_by_msg.get(m.id, []),
             created_at=m.created_at,
         )
         for m in messages
         if m.sender_id in senders
     ]
+
+
+@router.post('/messages/{message_id}/reactions', response_model=ReactionResponse, status_code=status.HTTP_201_CREATED)
+async def add_reaction(
+    message_id: int,
+    reaction_data: ReactionCreate,
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add a reaction to a message."""
+    # Get message and verify user is member of session
+    message = await db.get(Message, message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail='Message not found')
+
+    membership = await db.execute(
+        select(ChatMember).where(
+            and_(ChatMember.session_id == message.session_id, ChatMember.user_id == user_id)
+        )
+    )
+    if not membership.scalar_one_or_none():
+        raise HTTPException(status_code=403, detail='Not a member of this chat')
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    # Check if user already reacted with this emoji - if so, remove it (toggle)
+    existing = await db.execute(
+        select(MessageReaction).where(
+            and_(
+                MessageReaction.message_id == message_id,
+                MessageReaction.user_id == user_id,
+                MessageReaction.emoji == reaction_data.emoji
+            )
+        )
+    )
+    existing_reaction = existing.scalar_one_or_none()
+
+    members_result = await db.execute(
+        select(ChatMember).where(ChatMember.session_id == message.session_id)
+    )
+    member_ids = [m.user_id for m in members_result.scalars().all()]
+
+    if existing_reaction:
+        await db.delete(existing_reaction)
+        await db.flush()
+        # Broadcast removal to others only (sender uses optimistic update)
+        await manager.broadcast_to_session(
+            member_ids,
+            {
+                'type': 'reaction_removed',
+                'message_id': message_id,
+                'user_id': user_id,
+                'emoji': reaction_data.emoji,
+            },
+            exclude_user=user_id
+        )
+        return ReactionResponse(
+            id=existing_reaction.id,
+            message_id=message_id,
+            user_id=user_id,
+            emoji=reaction_data.emoji,
+            created_at=existing_reaction.created_at
+        )
+
+    # Add new reaction
+    reaction = MessageReaction(
+        message_id=message_id,
+        user_id=user_id,
+        emoji=reaction_data.emoji
+    )
+    db.add(reaction)
+    await db.flush()
+    await db.refresh(reaction)
+
+    # Broadcast to others only (sender uses optimistic update)
+    await manager.broadcast_to_session(
+        member_ids,
+        {
+            'type': 'reaction_added',
+            'message_id': message_id,
+            'user_id': user_id,
+            'user_name': user.name,
+            'emoji': reaction_data.emoji,
+        },
+        exclude_user=user_id
+    )
+
+    return ReactionResponse(
+        id=reaction.id,
+        message_id=reaction.message_id,
+        user_id=reaction.user_id,
+        emoji=reaction.emoji,
+        created_at=reaction.created_at
+    )
+
+
+@router.delete('/messages/{message_id}/reactions')
+async def remove_reaction(
+    message_id: int,
+    emoji: str = Query(...),
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a reaction from a message."""
+    message = await db.get(Message, message_id)
+    if not message:
+        raise HTTPException(status_code=404, detail='Message not found')
+
+    # Find and delete reaction
+    result = await db.execute(
+        select(MessageReaction).where(
+            and_(
+                MessageReaction.message_id == message_id,
+                MessageReaction.user_id == user_id,
+                MessageReaction.emoji == emoji
+            )
+        )
+    )
+    reaction = result.scalar_one_or_none()
+    if not reaction:
+        raise HTTPException(status_code=404, detail='Reaction not found')
+
+    await db.delete(reaction)
+
+    # Broadcast removal
+    members_result = await db.execute(
+        select(ChatMember).where(ChatMember.session_id == message.session_id)
+    )
+    member_ids = [m.user_id for m in members_result.scalars().all()]
+    await manager.broadcast_to_session(
+        member_ids,
+        {
+            'type': 'reaction_removed',
+            'message_id': message_id,
+            'user_id': user_id,
+            'emoji': emoji,
+        }
+    )
+
+    return {'status': 'removed'}
 
 
 @router.websocket('/ws/{user_id}')

@@ -143,6 +143,19 @@ export interface ApiChatSession {
   created_at: string;
 }
 
+export interface ApiReaction {
+  emoji: string;
+  user_id: number;
+  user_name: string;
+}
+
+export interface ApiReplyInfo {
+  id: number;
+  content: string;
+  sender_id: number;
+  sender_name: string;
+}
+
 export interface ApiMessage {
   id: number;
   session_id: number;
@@ -151,6 +164,8 @@ export interface ApiMessage {
   content: string;
   message_type: 'text' | 'system';
   status: 'sent' | 'pending';
+  reply_to: ApiReplyInfo | null;
+  reactions: ApiReaction[];
   created_at: string;
 }
 
@@ -345,11 +360,24 @@ export const api = {
       params: { user_id: userId, before_id: beforeId },
     }),
 
-  sendMessage: (sessionId: number, senderId: number, content: string) =>
+  sendMessage: (sessionId: number, senderId: number, content: string, replyToId?: number) =>
     apiRequest<ApiMessage[]>(`/api/chat/sessions/${sessionId}/messages`, {
       method: 'POST',
-      body: { content },
+      body: { content, reply_to_id: replyToId || null },
       params: { sender_id: senderId },
+    }),
+
+  addReaction: (messageId: number, userId: number, emoji: string) =>
+    apiRequest<{ id: number; message_id: number; user_id: number; emoji: string }>(`/api/chat/messages/${messageId}/reactions`, {
+      method: 'POST',
+      body: { emoji },
+      params: { user_id: userId },
+    }),
+
+  removeReaction: (messageId: number, userId: number, emoji: string) =>
+    apiRequest<{ status: string }>(`/api/chat/messages/${messageId}/reactions`, {
+      method: 'DELETE',
+      params: { user_id: userId, emoji },
     }),
 
   // Rewards

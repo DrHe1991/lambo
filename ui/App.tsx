@@ -3,7 +3,7 @@ import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionT
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode } from 'lucide-react';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 import { TrustBadge } from './components/TrustBadge';
 import { LoginPage } from './components/LoginPage';
@@ -53,6 +53,8 @@ const App: React.FC = () => {
     fetchMessages,
     sendMessage: sendApiMessage,
     createSession: createApiSession,
+    markSessionAsRead,
+    updateSessionLastMessage,
   } = useChatStore();
 
   // Convert API data to UI format (no mock fallbacks)
@@ -90,9 +92,59 @@ const App: React.FC = () => {
 
 
   // Chat detail state
-  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string; messageType: 'text' | 'system'; status: 'sent' | 'pending'}>>([]);
+  type ChatMessageReaction = { emoji: string; user_id: number; user_name: string };
+  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string; messageType: 'text' | 'system'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
+  const [selectedMessageId, setSelectedMessageId] = useState<string | number | null>(null);
+  const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<{id: string | number; content: string} | null>(null);
+  const [showReactorsFor, setShowReactorsFor] = useState<{messageId: string | number; emoji: string} | null>(null);
+  const longPressTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = React.useRef(false);
+  const reactionLongPressTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reactionLongPressTriggered = React.useRef(false);
+  const messageRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
+  const [highlightedMsgId, setHighlightedMsgId] = useState<string | number | null>(null);
+
+  // Scroll to a specific message and briefly highlight it
+  const scrollToMessage = (msgId: number) => {
+    const el = messageRefs.current[String(msgId)];
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      setHighlightedMsgId(msgId);
+      setTimeout(() => setHighlightedMsgId(null), 1500);
+    }
+  };
+
+  // Default emoji reactions
+  const defaultReactions = ['👍', '❤️', '🎉', '😂', '😮', '😢', '😡', '🔥', '👏', '🙏'];
+
+  // Long press handlers for message selection
+  const handleLongPressStart = (msgId: string | number) => {
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setSelectedMessageId(msgId);
+    }, 500); // 500ms for long press
+  };
+
+  const handleLongPressEnd = () => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  };
+
+  const handleMessageClick = (e: React.MouseEvent, msgId: string | number) => {
+    e.stopPropagation();
+    // Only toggle selection if it wasn't a long press
+    if (!longPressTriggered.current) {
+      setSelectedMessageId(prev => prev === msgId ? null : msgId);
+    }
+    longPressTriggered.current = false;
+  };
 
   // Use ref to avoid reconnecting WebSocket when selectedChat changes
   const selectedChatRef = React.useRef(selectedChat);
@@ -125,7 +177,8 @@ const App: React.FC = () => {
           senderId: message.sender_id, 
           content: message.content, 
           messageType: message.message_type,
-          status: message.status 
+          status: message.status,
+          replyTo: message.reply_to ? { id: message.reply_to.id, content: message.reply_to.content, sender_name: message.reply_to.sender_name } : null,
         }];
       });
     } else {
@@ -137,10 +190,39 @@ const App: React.FC = () => {
     }
   }, [currentUser?.id, fetchSessions]);
 
+  // WebSocket reaction handlers (only for OTHER users' reactions; sender uses optimistic update)
+  const handleReactionAdded = useCallback((event: { message_id: number; user_id: number; user_name?: string; emoji: string }) => {
+    setChatMessages(prev => prev.map(m => {
+      if (Number(m.id) === Number(event.message_id)) {
+        const reactions = [...(m.reactions || [])];
+        // Only add if not already exists (safety dedup)
+        if (!reactions.some(r => r.emoji === event.emoji && Number(r.user_id) === Number(event.user_id))) {
+          reactions.push({ emoji: event.emoji, user_id: Number(event.user_id), user_name: event.user_name || 'User' });
+        }
+        return { ...m, reactions };
+      }
+      return m;
+    }));
+  }, []);
+
+  const handleReactionRemoved = useCallback((event: { message_id: number; user_id: number; emoji: string }) => {
+    setChatMessages(prev => prev.map(m => {
+      if (Number(m.id) === Number(event.message_id)) {
+        const reactions = (m.reactions || []).filter(
+          r => !(r.emoji === event.emoji && Number(r.user_id) === Number(event.user_id))
+        );
+        return { ...m, reactions };
+      }
+      return m;
+    }));
+  }, []);
+
   // Connect to WebSocket for real-time chat
   useChatWebSocket({
     userId: currentUser?.id ?? null,
     onMessage: handleWebSocketMessage,
+    onReactionAdded: handleReactionAdded,
+    onReactionRemoved: handleReactionRemoved,
   });
 
   // Trust & dynamic costs state
@@ -248,8 +330,13 @@ const App: React.FC = () => {
           senderId: m.sender_id, 
           content: m.content, 
           messageType: m.message_type,
-          status: m.status 
+          status: m.status,
+          createdAt: m.created_at,
+          replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
+          reactions: m.reactions || []
         })));
+        // Clear unread count after messages are loaded (backend already marked as read)
+        markSessionAsRead(Number(selectedChat.id));
       } catch (error) {
         console.error('Failed to load messages:', error);
         setChatMessages([]);
@@ -307,11 +394,11 @@ const App: React.FC = () => {
     return (
       <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-zinc-800 safe-bottom-nav">
         <div className="max-w-md mx-auto px-4 pt-3 pb-2 grid grid-cols-5 items-end">
-          <button data-testid="nav-feed" onClick={() => setActiveTab('Feed')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <Home size={24} />
             <span className="text-[10px] font-bold">Feed</span>
           </button>
-          <button data-testid="nav-following" onClick={() => setActiveTab('Following')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-following" onClick={() => { setActiveTab('Following'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <Users size={24} />
             <span className="text-[10px] font-bold">Following</span>
           </button>
@@ -326,11 +413,11 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          <button data-testid="nav-chat" onClick={() => setActiveTab('Chat')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-chat" onClick={() => { setActiveTab('Chat'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <MessageCircle size={24} />
             <span className="text-[10px] font-bold">Chat</span>
           </button>
-          <button data-testid="nav-profile" onClick={() => setActiveTab('Profile')} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-profile" onClick={() => { setActiveTab('Profile'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
             <UserIcon size={24} />
             <span className="text-[10px] font-bold">Me</span>
           </button>
@@ -416,21 +503,24 @@ const App: React.FC = () => {
               <Plus size={20} className="text-orange-500" />
             </button>
             {showChatActions && (
-              <div className="absolute right-0 top-12 w-44 bg-zinc-950 border border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20">
-                {chatQuickActions.map(action => (
-                  <button
-                    key={action.id}
-                    className="w-full px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-900 flex items-center gap-2"
-                    onClick={() => {
-                      setShowChatActions(false);
-                      setCurrentView(action.view);
-                    }}
-                  >
-                    {action.icon}
-                    <span>{action.label}</span>
-                  </button>
-                ))}
-              </div>
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowChatActions(false)} />
+                <div className="absolute right-0 top-12 w-44 bg-zinc-950 border border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20">
+                  {chatQuickActions.map(action => (
+                    <button
+                      key={action.id}
+                      className="w-full px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-900 flex items-center gap-2"
+                      onClick={() => {
+                        setShowChatActions(false);
+                        setCurrentView(action.view);
+                      }}
+                    >
+                      {action.icon}
+                      <span>{action.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         </div>
@@ -1483,12 +1573,23 @@ const App: React.FC = () => {
     if (!selectedChat) return null;
     const chatPartner = selectedChat.participants.find(p => p.id !== currentMe.id) || selectedChat.participants[0];
     const isGroup = Boolean(selectedChat.isGroup);
+    const selectedMessage = chatMessages.find(m => m.id === selectedMessageId);
+
+    // Check if message can be retreated (within 3 minutes)
+    const canRetreat = (msg: typeof chatMessages[0]) => {
+      if (!msg.createdAt) return false;
+      const msgTime = new Date(msg.createdAt).getTime();
+      const now = Date.now();
+      return (now - msgTime) < 3 * 60 * 1000; // 3 minutes
+    };
 
     const handleSendMessage = async () => {
       if (!chatMessageInput.trim() || !currentUser) return;
 
       const content = chatMessageInput.trim();
+      const replyId = replyingTo?.id ? Number(replyingTo.id) : undefined;
       setChatMessageInput('');
+      setReplyingTo(null);
 
       try {
         // If this is a new session, create it first
@@ -1505,8 +1606,8 @@ const App: React.FC = () => {
           });
         }
 
-        // Send the message (returns array with user msg + optional system msg)
-        const msgs = await api.sendMessage(Number(sessionId), currentUser.id, content);
+        // Send the message with reply_to_id if replying
+        const msgs = await api.sendMessage(Number(sessionId), currentUser.id, content, replyId);
         setChatMessages(prev => {
           const existingIds = new Set(prev.map(m => Number(m.id)));
           const newMsgs = msgs
@@ -1516,10 +1617,14 @@ const App: React.FC = () => {
               senderId: m.sender_id, 
               content: m.content, 
               messageType: m.message_type,
-              status: m.status 
+              status: m.status,
+              createdAt: m.created_at,
+              replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
             }));
           return [...prev, ...newMsgs];
         });
+        // Update session's last message preview
+        updateSessionLastMessage(Number(sessionId), content);
       } catch (error) {
           console.error('Failed to send message:', error);
           toast.error('Failed to send message');
@@ -1533,11 +1638,165 @@ const App: React.FC = () => {
       }
     };
 
+    const handleMessageAction = (action: string) => {
+      if (!selectedMessage) return;
+      
+      switch (action) {
+        case 'copy':
+          navigator.clipboard.writeText(selectedMessage.content);
+          toast.success('Copied to clipboard');
+          break;
+        case 'reply':
+          setReplyingTo({ id: selectedMessage.id, content: selectedMessage.content });
+          break;
+        case 'forward':
+          toast.info('Forward feature coming soon');
+          break;
+        case 'retreat':
+          if (canRetreat(selectedMessage)) {
+            setChatMessages(prev => prev.filter(m => m.id !== selectedMessage.id));
+            toast.success('Message retreated');
+          } else {
+            toast.error('Can only retreat messages within 3 minutes');
+          }
+          break;
+        case 'delete':
+          setChatMessages(prev => prev.filter(m => m.id !== selectedMessage.id));
+          toast.success('Deleted for you');
+          break;
+      }
+      setSelectedMessageId(null);
+    };
+
+    const handleReaction = async (emoji: string) => {
+      if (!selectedMessage || !currentUser) return;
+      const messageId = selectedMessage.id;
+      const myId = Number(currentUser.id);
+      setSelectedMessageId(null);
+      
+      // Optimistically update UI BEFORE API call
+      const wasAdding = !chatMessages.find(m => Number(m.id) === Number(messageId))
+        ?.reactions?.some(r => Number(r.user_id) === myId && r.emoji === emoji);
+
+      setChatMessages(prev => prev.map(m => {
+        if (Number(m.id) === Number(messageId)) {
+          const reactions = [...(m.reactions || [])];
+          const existingIdx = reactions.findIndex(r => r.emoji === emoji && Number(r.user_id) === myId);
+          if (existingIdx >= 0) {
+            reactions.splice(existingIdx, 1);
+          } else {
+            reactions.push({ emoji, user_id: myId, user_name: currentUser.name });
+          }
+          return { ...m, reactions };
+        }
+        return m;
+      }));
+      
+      try {
+        await api.addReaction(Number(messageId), myId, emoji);
+      } catch (error) {
+        console.error('Failed to add reaction:', error);
+        toast.error('Failed to add reaction');
+        // Revert optimistic update on error
+        setChatMessages(prev => prev.map(m => {
+          if (Number(m.id) === Number(messageId)) {
+            if (wasAdding) {
+              // We added it optimistically, remove it
+              const reactions = (m.reactions || []).filter(
+                r => !(r.emoji === emoji && Number(r.user_id) === myId)
+              );
+              return { ...m, reactions };
+            } else {
+              // We removed it optimistically, re-add it
+              const reactions = [...(m.reactions || []), { emoji, user_id: myId, user_name: currentUser.name }];
+              return { ...m, reactions };
+            }
+          }
+          return m;
+        }));
+      }
+    };
+
+    // Toggle reaction when clicking on existing reaction badge (only affects YOUR reaction)
+    const toggleReactionBadge = async (messageId: string | number, emoji: string) => {
+      if (!currentUser) return;
+      const myId = Number(currentUser.id);
+      
+      // Check if we're adding or removing BEFORE the optimistic update
+      const wasAdding = !chatMessages.find(m => Number(m.id) === Number(messageId))
+        ?.reactions?.some(r => Number(r.user_id) === myId && r.emoji === emoji);
+
+      // Optimistically toggle only MY reaction
+      setChatMessages(prev => prev.map(m => {
+        if (Number(m.id) === Number(messageId)) {
+          const reactions = [...(m.reactions || [])];
+          const existingIdx = reactions.findIndex(r => r.emoji === emoji && Number(r.user_id) === myId);
+          if (existingIdx >= 0) {
+            reactions.splice(existingIdx, 1);
+          } else {
+            reactions.push({ emoji, user_id: myId, user_name: currentUser.name });
+          }
+          return { ...m, reactions };
+        }
+        return m;
+      }));
+      
+      try {
+        await api.addReaction(Number(messageId), myId, emoji);
+      } catch (error) {
+        console.error('Failed to toggle reaction:', error);
+        // Revert optimistic update on error
+        setChatMessages(prev => prev.map(m => {
+          if (Number(m.id) === Number(messageId)) {
+            if (wasAdding) {
+              const reactions = (m.reactions || []).filter(
+                r => !(r.emoji === emoji && Number(r.user_id) === myId)
+              );
+              return { ...m, reactions };
+            } else {
+              const reactions = [...(m.reactions || []), { emoji, user_id: myId, user_name: currentUser.name }];
+              return { ...m, reactions };
+            }
+          }
+          return m;
+        }));
+      }
+    };
+
+    // Long press handlers for reaction badges
+    const handleReactionBadgeLongPressStart = (messageId: string | number, emoji: string) => {
+      reactionLongPressTriggered.current = false;
+      reactionLongPressTimer.current = setTimeout(() => {
+        reactionLongPressTriggered.current = true;
+        setShowReactorsFor({ messageId, emoji });
+      }, 500);
+    };
+
+    const handleReactionBadgeLongPressEnd = () => {
+      if (reactionLongPressTimer.current) {
+        clearTimeout(reactionLongPressTimer.current);
+        reactionLongPressTimer.current = null;
+      }
+    };
+
+    const handleReactionBadgeClick = (e: React.MouseEvent, messageId: string | number, emoji: string) => {
+      e.stopPropagation();
+      if (!reactionLongPressTriggered.current) {
+        toggleReactionBadge(messageId, emoji);
+      }
+      reactionLongPressTriggered.current = false;
+    };
+
+    const handleAttachment = (type: 'camera' | 'album') => {
+      setShowAttachmentPicker(false);
+      toast.info(`${type === 'camera' ? 'Camera' : 'Album'} feature coming soon`);
+    };
+
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col">
         {/* Header */}
         <div className="p-4 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
+          <button onClick={() => { setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }}><ArrowLeft /></button>
           <button
             className="flex items-center gap-3"
             onClick={handleOpenProfile}
@@ -1551,15 +1810,12 @@ const App: React.FC = () => {
             ) : (
               <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-10 h-10 rounded-full border border-zinc-800 object-cover" />
             )}
-            <div className="text-left">
-              <span className="text-sm font-bold block leading-none">{isGroup ? (selectedChat.name || 'Group Chat') : chatPartner?.name}</span>
-              <span className="text-[10px] text-green-500 font-bold uppercase tracking-widest">Active now</span>
-            </div>
+            <span className="text-sm font-bold">{isGroup ? (selectedChat.name || 'Group Chat') : chatPartner?.name}</span>
           </button>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+        <div className="flex-1 overflow-y-auto p-4 space-y-3" onClick={() => { setSelectedMessageId(null); setShowAttachmentPicker(false); }}>
           {isLoadingChatMessages && (
             <div className="flex justify-center py-4">
               <div className="w-6 h-6 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
@@ -1575,6 +1831,7 @@ const App: React.FC = () => {
             const isMe = msg.senderId === currentUser?.id || msg.senderId === currentMe.id;
             const isPending = msg.status === 'pending';
             const isSystem = msg.messageType === 'system';
+            const isSelected = selectedMessageId === msg.id;
 
             // System message (warning banner style, in chat history)
             if (isSystem) {
@@ -1605,43 +1862,234 @@ const App: React.FC = () => {
 
             // Normal text message
             return (
-              <div key={msg.id} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
+              <div key={msg.id} ref={el => { messageRefs.current[String(msg.id)] = el; }} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'} relative transition-colors duration-500 ${highlightedMsgId === msg.id ? 'bg-orange-500/15 rounded-xl' : ''}`}>
                 {!isMe && (
                   <button onClick={handleOpenProfile} className="flex-shrink-0">
                     <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 object-cover" />
                   </button>
                 )}
                 <div className={`flex flex-col gap-1 max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
-                  <div className={`px-4 py-2.5 text-sm break-words ${
-                    isMe
-                        ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
-                        : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-bl-sm'
-                  }`}>
+                  {/* Reply preview - click to scroll to original */}
+                  {msg.replyTo && (
+                    <button
+                      onClick={() => scrollToMessage(msg.replyTo!.id)}
+                      className="text-[10px] text-zinc-500 bg-zinc-900/50 px-2 py-1 rounded-lg border-l-2 border-orange-500 text-left cursor-pointer hover:bg-zinc-800/60 transition-colors max-w-full"
+                    >
+                      <span className="text-orange-400 font-medium">{msg.replyTo.sender_name}</span>
+                      <span className="ml-1 line-clamp-1">↩ {msg.replyTo.content}</span>
+                    </button>
+                  )}
+                  <button
+                    className={`px-4 py-2.5 text-sm break-words text-left select-none ${
+                      isMe
+                          ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
+                          : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-bl-sm'
+                    } ${isSelected ? 'ring-2 ring-orange-400' : ''}`}
+                    onClick={(e) => handleMessageClick(e, msg.id)}
+                    onMouseDown={() => handleLongPressStart(msg.id)}
+                    onMouseUp={handleLongPressEnd}
+                    onMouseLeave={handleLongPressEnd}
+                    onTouchStart={() => handleLongPressStart(msg.id)}
+                    onTouchEnd={handleLongPressEnd}
+                    onContextMenu={(e) => { e.preventDefault(); setSelectedMessageId(msg.id); }}
+                  >
                     {msg.content}
-                  </div>
+                  </button>
+                  {/* Reactions display */}
+                  {msg.reactions && msg.reactions.length > 0 && (
+                    <div className="flex gap-1 flex-wrap relative">
+                      {Object.entries(
+                        msg.reactions.reduce((acc, r) => {
+                          if (!acc[r.emoji]) acc[r.emoji] = [];
+                          acc[r.emoji].push({ user_id: Number(r.user_id), user_name: r.user_name });
+                          return acc;
+                        }, {} as Record<string, Array<{user_id: number; user_name: string}>>)
+                      ).map(([emoji, reactors]) => {
+                        const hasMyReaction = currentUser ? reactors.some(r => Number(r.user_id) === Number(currentUser.id)) : false;
+                        return (
+                          <button
+                            key={emoji}
+                            className={`text-xs px-1.5 py-0.5 rounded-full flex items-center gap-0.5 select-none transition-colors ${
+                              hasMyReaction ? 'bg-orange-500/30 border border-orange-500/50' : 'bg-zinc-800 border border-transparent'
+                            }`}
+                            onClick={(e) => handleReactionBadgeClick(e, msg.id, emoji)}
+                            onMouseDown={() => handleReactionBadgeLongPressStart(msg.id, emoji)}
+                            onMouseUp={handleReactionBadgeLongPressEnd}
+                            onMouseLeave={handleReactionBadgeLongPressEnd}
+                            onTouchStart={() => handleReactionBadgeLongPressStart(msg.id, emoji)}
+                            onTouchEnd={handleReactionBadgeLongPressEnd}
+                          >
+                            <span>{emoji}</span>
+                            {reactors.length > 1 && <span className="text-zinc-400 min-w-[0.75rem] text-center">{reactors.length}</span>}
+                          </button>
+                        );
+                      })}
+                      
+                      {/* Reactors popup on long press */}
+                      {showReactorsFor?.messageId === msg.id && (
+                        <>
+                          <div className="fixed inset-0 z-40" onClick={() => setShowReactorsFor(null)} />
+                          <div className="absolute bottom-full mb-2 left-0 bg-zinc-900 border border-zinc-700 rounded-xl p-3 shadow-xl z-50 min-w-[160px]">
+                            <div className="text-sm font-bold mb-2 flex items-center gap-2">
+                              <span className="text-lg">{showReactorsFor.emoji}</span>
+                              <span className="text-zinc-400">Reactions</span>
+                            </div>
+                            <div className="space-y-2 max-h-40 overflow-y-auto">
+                              {msg.reactions
+                                .filter(r => r.emoji === showReactorsFor.emoji)
+                                .map((r, idx) => (
+                                  <div key={`${r.user_id}-${idx}`} className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold">
+                                      {r.user_name?.charAt(0)?.toUpperCase() || '?'}
+                                    </div>
+                                    <span className="text-sm text-zinc-300">{r.user_name}</span>
+                                    {currentUser && Number(r.user_id) === Number(currentUser.id) && (
+                                      <span className="text-[10px] text-orange-400">(you)</span>
+                                    )}
+                                  </div>
+                                ))
+                              }
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* Message action menu - centered overlay */}
+                {isSelected && (
+                  <>
+                    <div className="fixed inset-0 bg-black/60 z-40" onClick={(e) => { e.stopPropagation(); setSelectedMessageId(null); }} />
+                    <div 
+                      className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Emoji reactions bar */}
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-full px-3 py-2 flex gap-2 mb-3 shadow-xl justify-center">
+                        {defaultReactions.map(emoji => (
+                          <button
+                            key={emoji}
+                            className="text-2xl hover:scale-125 transition-transform active:scale-90"
+                            onClick={() => handleReaction(emoji)}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Action buttons */}
+                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden shadow-xl">
+                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('reply')}>
+                          <Reply size={16} className="text-orange-400" /> Reply
+                        </button>
+                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('forward')}>
+                          <Forward size={16} className="text-orange-400" /> Forward
+                        </button>
+                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('copy')}>
+                          <Copy size={16} className="text-orange-400" /> Copy
+                        </button>
+                        {isMe && canRetreat(msg) && (
+                          <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('retreat')}>
+                            <Undo2 size={16} className="text-amber-400" /> Retreat
+                          </button>
+                        )}
+                        <button className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('delete')}>
+                          <Trash2 size={16} /> Delete for me
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             );
           })}
         </div>
 
+        {/* Reply preview bar */}
+        {replyingTo && (
+          <div className="px-4 py-2 bg-zinc-900 border-t border-zinc-800 flex items-center gap-3">
+            <div className="flex-1 text-sm text-zinc-400 truncate">
+              <span className="text-orange-400">↩ Replying:</span> {replyingTo.content.slice(0, 50)}{replyingTo.content.length > 50 ? '...' : ''}
+            </div>
+            <button onClick={() => setReplyingTo(null)} className="text-zinc-500 hover:text-zinc-300">
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* Attachment picker */}
+        {showAttachmentPicker && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setShowAttachmentPicker(false)} />
+            <div className="absolute bottom-24 right-16 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20">
+              <button 
+                className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3"
+                onClick={() => handleAttachment('camera')}
+              >
+                <Camera size={18} className="text-orange-400" /> Camera
+              </button>
+              <button 
+                className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3"
+                onClick={() => handleAttachment('album')}
+              >
+                <Image size={18} className="text-orange-400" /> Album
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Emoji picker */}
+        {showEmojiPicker && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setShowEmojiPicker(false)} />
+            <div className="absolute bottom-24 right-4 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl p-3 z-20">
+              <div className="grid grid-cols-5 gap-2">
+                {defaultReactions.map(emoji => (
+                  <button
+                    key={emoji}
+                    className="text-2xl hover:scale-110 transition-transform active:scale-90 p-1"
+                    onClick={() => { setChatMessageInput(prev => prev + emoji); setShowEmojiPicker(false); }}
+                  >
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        )}
+
         {/* Input */}
-        <div className="p-4 bg-black border-t border-zinc-900 flex items-center gap-4 safe-bottom-nav">
-          <div className="flex-1 bg-zinc-900 rounded-xl px-4 py-3 flex items-center gap-3">
+        <div className="p-4 bg-black border-t border-zinc-900 flex items-center gap-3 safe-bottom-nav">
+          <div className="flex-1 bg-zinc-900 rounded-xl px-4 py-3 flex items-center">
             <input 
               value={chatMessageInput}
               onChange={(e) => setChatMessageInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Message..." 
+              placeholder={replyingTo ? 'Reply...' : 'Message...'} 
               className="bg-transparent border-none outline-none text-sm w-full" 
             />
           </div>
           <button 
-            onClick={handleSendMessage}
-            className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform duration-200"
+            className="p-2 text-zinc-400 hover:text-orange-400 transition-colors"
+            onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(prev => !prev); setShowAttachmentPicker(false); }}
           >
-            <Send size={18} />
+            <Smile size={22} />
           </button>
+          {chatMessageInput.trim() ? (
+            <button 
+              onClick={handleSendMessage}
+              className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform duration-200"
+            >
+              <Send size={18} />
+            </button>
+          ) : (
+            <button 
+              className="p-2 text-zinc-400 hover:text-orange-400 transition-colors"
+              onClick={(e) => { e.stopPropagation(); setShowAttachmentPicker(prev => !prev); setShowEmojiPicker(false); }}
+            >
+              <Plus size={22} />
+            </button>
+          )}
         </div>
       </div>
     );

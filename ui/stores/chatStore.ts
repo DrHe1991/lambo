@@ -15,6 +15,8 @@ interface ChatState {
   sendMessage: (sessionId: number, senderId: number, content: string) => Promise<void>;
   createSession: (creatorId: number, memberIds: number[], name?: string, isGroup?: boolean) => Promise<ApiChatSession>;
   clearCurrentSession: () => void;
+  markSessionAsRead: (sessionId: number) => void;
+  updateSessionLastMessage: (sessionId: number, content: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -106,4 +108,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearCurrentSession: () => set({ currentSession: null, messages: [] }),
+
+  markSessionAsRead: (sessionId) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId ? { ...s, unread_count: 0 } : s
+      ),
+    }));
+  },
+
+  updateSessionLastMessage: (sessionId, content) => {
+    set((state) => ({
+      sessions: state.sessions.map((s) =>
+        s.id === sessionId 
+          ? { ...s, last_message: content, last_message_at: new Date().toISOString() } 
+          : s
+      ),
+    }));
+  },
 }));
