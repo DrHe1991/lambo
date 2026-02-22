@@ -1,5 +1,5 @@
 {
-  "name": "satline-x-agent",
+  "name": "bitlink-x-agent",
   "version": "1.0.0",
   "description": "AI agent to fetch and rewrite content from X (Twitter)",
   "type": "module",

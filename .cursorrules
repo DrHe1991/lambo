@@ -1,8 +1,8 @@
-# BitLine Project Rules
+# BitLink Project Rules
 
 ## Project Structure
 - `api/` - Python FastAPI backend
-- `bitline-ui/` - React + Capacitor mobile app
+- `ui/` - React + Capacitor mobile app
 - `x-agent/` - Content scraping agent
 
 ## Comments
@@ -19,7 +19,7 @@
 - Max line length: 100 chars
 - Run `ruff check --fix` before committing
 
-## React/TypeScript (bitline-ui/)
+## React/TypeScript (ui/)
 - Use functional components with hooks
 - Use TypeScript strict mode
 - Destructure props at function signature

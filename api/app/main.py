@@ -15,8 +15,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title='BitLine API',
-    description='Backend API for BitLine social platform',
+    title='BitLink API',
+    description='Backend API for BitLink social platform',
     version='0.1.0',
     lifespan=lifespan,
 )
@@ -41,4 +41,4 @@ app.include_router(challenges.router, prefix='/api/challenges', tags=['challenge
 @app.get('/health')
 async def health_check():
     """Health check endpoint."""
-    return {'status': 'ok', 'service': 'bitline-api'}
+    return {'status': 'ok', 'service': 'bitlink-api'}

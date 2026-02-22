@@ -35,7 +35,7 @@ UC=$(jval "$R_C" "['id']"); UD=$(jval "$R_D" "['id']")
 echo "  Alice=$UA, Bob=$UB, Carol=$UC, Dave=$UD"
 
 # Set trust scores & balances
-docker compose exec -T postgres psql -U bitline -d bitline -t -c "
+docker compose exec -T postgres psql -U bitlink -d bitlink -t -c "
   UPDATE users SET trust_score=500, available_balance=5000 WHERE id=$UA;
   UPDATE users SET trust_score=650, available_balance=5000 WHERE id=$UB;
   UPDATE users SET trust_score=950, available_balance=5000 WHERE id=$UC;

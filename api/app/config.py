@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Database
-    database_url: str = 'postgresql+asyncpg://bitline:bitline_dev_password@localhost:5432/bitline'
+    database_url: str = 'postgresql+asyncpg://bitlink:bitlink_dev_password@localhost:5432/bitlink'
 
     # Redis
     redis_url: str = 'redis://localhost:6379/0'

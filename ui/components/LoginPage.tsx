@@ -54,7 +54,7 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
             <Zap className="w-8 h-8 text-white fill-white" />
           </div>
           <h1 className="text-3xl font-black italic tracking-tighter text-white mb-1">
-            BITLINE
+            BITLINK
           </h1>
           <p className="text-zinc-500 text-xs font-medium">
             Dev Mode - Select a user

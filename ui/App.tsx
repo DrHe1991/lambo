@@ -289,7 +289,7 @@ const App: React.FC = () => {
     if (currentView !== 'MAIN') return null;
     return (
       <header className="sticky top-0 z-40 bg-black/80 backdrop-blur-md border-b border-zinc-800 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-xl font-black italic tracking-tighter text-orange-500">BITLINE</h1>
+        <h1 className="text-xl font-black italic tracking-tighter text-orange-500">BITLINK</h1>
         <div className="flex items-center gap-4">
           <Search 
             className="text-zinc-400" 
@@ -1271,8 +1271,8 @@ const App: React.FC = () => {
   };
 
   const renderInvite = () => {
-    const inviteCode = 'BITLINE-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-    const inviteLink = `https://bitline.app/invite/${inviteCode}`;
+    const inviteCode = 'BITLINK-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+    const inviteLink = `https://bitlink.app/invite/${inviteCode}`;
     
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">

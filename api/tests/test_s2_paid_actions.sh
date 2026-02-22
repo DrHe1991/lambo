@@ -26,7 +26,7 @@ U1=$(jval "$R1" "['id']"); U2=$(jval "$R2" "['id']")
 echo "  Alice=$U1, Bob=$U2"
 
 echo "=== Setup: give both 2000 sat ==="
-docker compose exec -T postgres psql -U bitline -d bitline -t -c "UPDATE users SET available_balance=2000 WHERE id IN ($U1,$U2);" > /dev/null
+docker compose exec -T postgres psql -U bitlink -d bitlink -t -c "UPDATE users SET available_balance=2000 WHERE id IN ($U1,$U2);" > /dev/null
 
 echo ""
 echo "── 1. Post creation (free + paid) ──"
@@ -131,7 +131,7 @@ check "Comment is_liked=False after unlike" "False" "$FIRST_LIKED"
 
 echo ""
 echo "── 14. Insufficient balance ──"
-docker compose exec -T postgres psql -U bitline -d bitline -t -c "UPDATE users SET available_balance=5 WHERE id=$U2;" > /dev/null
+docker compose exec -T postgres psql -U bitlink -d bitlink -t -c "UPDATE users SET available_balance=5 WHERE id=$U2;" > /dev/null
 BROKE=$(api POST "/api/posts/$PID2/like?user_id=$U2" 2>&1)
 DETAIL=$(echo "$BROKE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('detail',''))" 2>/dev/null || echo "")
 check "Insufficient balance on like" "Insufficient balance. Need 10 sat." "$DETAIL"

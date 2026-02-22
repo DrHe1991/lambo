@@ -1,6 +1,6 @@
 
 {
-  "name": "BitLine",
+  "name": "BitLink",
   "description": "A mobile social platform built on a Bitcoin sat-staking economy, featuring decentralized moderation and reputation systems.",
   "requestFramePermissions": [
     "camera",

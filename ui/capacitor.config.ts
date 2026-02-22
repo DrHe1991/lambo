@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.satline.app',
-  appName: 'SatLine',
+  appId: 'com.bitlink.app',
+  appName: 'BitLink',
   webDir: 'dist'
 };
 

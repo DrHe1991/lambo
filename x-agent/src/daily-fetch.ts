@@ -41,7 +41,7 @@ async function main() {
   const startTime = Date.now();
   
   log('═══════════════════════════════════════════════════════════════');
-  log('  🚀 SatLine X Agent - Daily Fetch (Timeline Mode)');
+  log('  🚀 BitLink X Agent - Daily Fetch (Timeline Mode)');
   log('═══════════════════════════════════════════════════════════════');
   log(`  📅 Date: ${new Date().toLocaleString()}`);
   log(`  👥 Target influencers: ${INFLUENCERS.length}`);

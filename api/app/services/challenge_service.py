@@ -334,7 +334,7 @@ class ChallengeService:
 
     def _system_prompt(self) -> str:
         return (
-            'You are a content moderator for BitLine, a social platform.\n'
+            'You are a content moderator for BitLink, a social platform.\n'
             'You will receive a reported post/comment along with the author\'s '
             'profile, trust score, recent posts, and violation history.\n\n'
             'Platform rules — content is GUILTY if it contains:\n'

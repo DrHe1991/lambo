@@ -1,4 +1,4 @@
-package com.satline.app;
+package com.bitlink.app;
 
 import com.getcapacitor.BridgeActivity;
 

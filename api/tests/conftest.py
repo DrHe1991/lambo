@@ -8,7 +8,7 @@ from app.config import settings
 
 
 # Test database URL
-TEST_DATABASE_URL = settings.database_url.replace('/bitline', '/bitline_test')
+TEST_DATABASE_URL = settings.database_url.replace('/bitlink', '/bitlink_test')
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSession = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

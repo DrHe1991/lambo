@@ -18,9 +18,9 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_USER: bitline
+          POSTGRES_USER: bitlink
           POSTGRES_PASSWORD: test_password
-          POSTGRES_DB: bitline_test
+          POSTGRES_DB: bitlink_test
         ports:
           - 5432:5432
         options: >-
@@ -49,7 +49,7 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: postgresql+asyncpg://bitline:test_password@localhost:5432/bitline_test
+          DATABASE_URL: postgresql+asyncpg://bitlink:test_password@localhost:5432/bitlink_test
           REDIS_URL: redis://localhost:6379/0
           ENV: test
         run: |
@@ -60,7 +60,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./bitline-ui
+        working-directory: ./ui
 
     steps:
       - uses: actions/checkout@v4
@@ -70,7 +70,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: './bitline-ui/package-lock.json'
+          cache-dependency-path: './ui/package-lock.json'
 
       - name: Install dependencies
         run: npm ci

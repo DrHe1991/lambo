@@ -50,8 +50,8 @@ export const useUserStore = create<UserState>((set, get) => ({
         api.getUser(userId),
         api.getBalance(userId),
       ]);
-      localStorage.setItem('bitline_user_id', String(user.id));
-      localStorage.setItem('bitline_logged_in', 'true');
+      localStorage.setItem('bitlink_user_id', String(user.id));
+      localStorage.setItem('bitlink_logged_in', 'true');
       set({
         currentUser: user,
         isLoggedIn: true,
@@ -70,8 +70,8 @@ export const useUserStore = create<UserState>((set, get) => ({
     set({ isLoading: true });
     try {
       const user = await api.createUser({ name, handle });
-      localStorage.setItem('bitline_user_id', String(user.id));
-      localStorage.setItem('bitline_logged_in', 'true');
+      localStorage.setItem('bitlink_user_id', String(user.id));
+      localStorage.setItem('bitlink_logged_in', 'true');
       const fullUser = await api.getUser(user.id);
       set({
         currentUser: fullUser,
@@ -88,8 +88,8 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('bitline_user_id');
-    localStorage.removeItem('bitline_logged_in');
+    localStorage.removeItem('bitlink_user_id');
+    localStorage.removeItem('bitlink_logged_in');
     set({
       currentUser: null,
       isLoggedIn: false,
@@ -125,8 +125,8 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   loadFromStorage: async () => {
-    const userId = localStorage.getItem('bitline_user_id');
-    const loggedIn = localStorage.getItem('bitline_logged_in');
+    const userId = localStorage.getItem('bitlink_user_id');
+    const loggedIn = localStorage.getItem('bitlink_logged_in');
 
     get().fetchUsers();
 
@@ -147,8 +147,8 @@ export const useUserStore = create<UserState>((set, get) => ({
         });
       } catch (error) {
         console.error('Failed to load user:', error);
-        localStorage.removeItem('bitline_user_id');
-        localStorage.removeItem('bitline_logged_in');
+        localStorage.removeItem('bitlink_user_id');
+        localStorage.removeItem('bitlink_logged_in');
         set({ isLoading: false });
       }
     }

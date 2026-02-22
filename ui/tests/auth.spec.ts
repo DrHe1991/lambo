@@ -11,8 +11,8 @@ test.describe('Authentication', () => {
   test('shows login page with available users', async ({ page }) => {
     await page.goto('/');
     
-    // Should see the BitLine logo/title
-    await expect(page.locator('text=BITLINE')).toBeVisible();
+    // Should see the BitLink logo/title
+    await expect(page.locator('text=BITLINK')).toBeVisible();
     
     // Should see test users (Alice, Bob, Eve)
     await expect(page.getByTestId('login-user-alice')).toBeVisible();

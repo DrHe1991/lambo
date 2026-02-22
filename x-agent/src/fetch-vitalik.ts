@@ -12,7 +12,7 @@ import { TwitterBrowser } from './browser/twitter.js';
 import { INFLUENCERS } from './config.js';
 
 async function main() {
-  console.log('🚀 SatLine X Agent - Fetch Vitalik\'s Tweets\n');
+  console.log('🚀 BitLink X Agent - Fetch Vitalik\'s Tweets\n');
   console.log('='.repeat(50));
 
   const browser = new TwitterBrowser();

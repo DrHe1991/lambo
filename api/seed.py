@@ -98,7 +98,7 @@ async def create_users(db: AsyncSession):
 async def main():
     print()
     print('=' * 50)
-    print('  BitLine Seed Script')
+    print('  BitLink Seed Script')
     print('=' * 50)
     print()
 

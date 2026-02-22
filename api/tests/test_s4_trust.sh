@@ -55,7 +55,7 @@ assert "Post cost > 170 (not too low)" "[ $POST_COST -gt 170 ]"
 
 # ── 4. Give users balance for testing ─────────────────────────────────
 echo ""; echo "── 4. Fund test users ──"
-docker compose exec -T postgres psql -U bitline -d bitline -c \
+docker compose exec -T postgres psql -U bitlink -d bitlink -c \
   "UPDATE users SET available_balance=50000 WHERE id IN ($ALICE_ID,$BOB_ID);" > /dev/null 2>&1
 echo "  Funded Alice & Bob with 50000 sat each"
 
@@ -112,7 +112,7 @@ echo ""; echo "── 8. High trust → lower costs ──"
 # Set Carol to high trust
 CAROL=$(curl -s -X POST "$API/users" -H 'Content-Type: application/json' -d "{\"name\":\"Carol\",\"handle\":\"carol_$TS\"}")
 CAROL_ID=$(jv "$CAROL" "d['id']")
-docker compose exec -T postgres psql -U bitline -d bitline -c \
+docker compose exec -T postgres psql -U bitlink -d bitlink -c \
   "UPDATE users SET creator_score=900, curator_score=900, juror_score=900, risk_score=0, trust_score=950, available_balance=50000, free_posts_remaining=0 WHERE id=$CAROL_ID;" > /dev/null 2>&1
 
 CAROL_COSTS=$(curl -s "$API/users/$CAROL_ID/costs")
@@ -126,7 +126,7 @@ assert "High trust post < 140 sat" "[ $CAROL_POST_COST -lt 140 ]"
 echo ""; echo "── 9. Low trust → higher costs ──"
 DAVE=$(curl -s -X POST "$API/users" -H 'Content-Type: application/json' -d "{\"name\":\"Dave\",\"handle\":\"dave_$TS\"}")
 DAVE_ID=$(jv "$DAVE" "d['id']")
-docker compose exec -T postgres psql -U bitline -d bitline -c \
+docker compose exec -T postgres psql -U bitlink -d bitlink -c \
   "UPDATE users SET creator_score=200, curator_score=200, juror_score=200, risk_score=500, trust_score=200, available_balance=50000, free_posts_remaining=0 WHERE id=$DAVE_ID;" > /dev/null 2>&1
 
 DAVE_COSTS=$(curl -s "$API/users/$DAVE_ID/costs")

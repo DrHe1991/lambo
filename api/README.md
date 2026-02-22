@@ -1,6 +1,6 @@
-# BitLine API
+# BitLink API
 
-Python FastAPI backend for BitLine social platform.
+Python FastAPI backend for BitLink social platform.
 
 ## Quick Start
 

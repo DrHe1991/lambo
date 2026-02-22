@@ -6,7 +6,7 @@ from app.db.database import Base
 
 
 class User(Base):
-    """User model for BitLine platform."""
+    """User model for BitLink platform."""
 
     __tablename__ = 'users'
 

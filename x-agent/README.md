@@ -1,4 +1,4 @@
-# SatLine X Agent 🤖
+# BitLink X Agent 🤖
 
 Automatically fetch tweets from X (Twitter) influencers, recognize content with AI, and rewrite for your platform.
 
@@ -153,6 +153,6 @@ export const BROWSER_CONFIG = {
 
 - [ ] Add more influencer monitoring
 - [ ] Support scheduled auto-run (cron)
-- [ ] Integrate SatLine publishing API
+- [ ] Integrate BitLink publishing API
 - [ ] Add content deduplication
 - [ ] Support Reddit, Zhihu, and other platforms

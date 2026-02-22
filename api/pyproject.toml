@@ -1,7 +1,7 @@
 [project]
-name = "bitline-api"
+name = "bitlink-api"
 version = "0.1.0"
-description = "BitLine Backend API"
+description = "BitLink Backend API"
 requires-python = ">=3.12"
 readme = "README.md"
 

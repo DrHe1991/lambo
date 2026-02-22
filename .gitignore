@@ -1,5 +1,5 @@
 # ========================================
-# BitLine Monorepo .gitignore
+# BitLink Monorepo .gitignore
 # ========================================
 
 # ----------------------------------------
@@ -32,17 +32,17 @@ x-agent/data/
 x-agent/media/
 
 # ----------------------------------------
-# bitline-ui: Android build artifacts
+# ui: Android build artifacts
 # ----------------------------------------
-bitline-ui/android/.gradle/
-bitline-ui/android/build/
-bitline-ui/android/app/build/
-bitline-ui/android/local.properties
-bitline-ui/android/capacitor-cordova-android-plugins/
-bitline-ui/android/app/src/main/assets/public/
-bitline-ui/android/app/src/main/assets/capacitor.config.json
-bitline-ui/android/app/src/main/assets/capacitor.plugins.json
-bitline-ui/android/app/src/main/res/xml/config.xml
+ui/android/.gradle/
+ui/android/build/
+ui/android/app/build/
+ui/android/local.properties
+ui/android/capacitor-cordova-android-plugins/
+ui/android/app/src/main/assets/public/
+ui/android/app/src/main/assets/capacitor.config.json
+ui/android/app/src/main/assets/capacitor.plugins.json
+ui/android/app/src/main/res/xml/config.xml
 
 # ----------------------------------------
 # Logs

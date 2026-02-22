@@ -14,7 +14,7 @@ import { rewriteMultipleTweets } from './ai/rewriter.js';
 import type { ExtractedTweet } from './ai/vision.js';
 
 async function main() {
-  console.log('🚀 SatLine X Agent - Direct Text Extraction Mode');
+  console.log('🚀 BitLink X Agent - Direct Text Extraction Mode');
   console.log('   (No screenshots, no AI vision - much faster!)\n');
   console.log('='.repeat(50));
 

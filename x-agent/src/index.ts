@@ -15,7 +15,7 @@ import { INFLUENCERS, FETCH_CONFIG } from './config.js';
 import type { RewrittenContent } from './ai/rewriter.js';
 
 async function main() {
-  console.log('🚀 SatLine X Agent Starting\n');
+  console.log('🚀 BitLink X Agent Starting\n');
   console.log('=' .repeat(60));
   console.log('📋 Task: Fetch Vitalik\'s latest tweets → AI Recognition → Rewrite');
   console.log('=' .repeat(60));

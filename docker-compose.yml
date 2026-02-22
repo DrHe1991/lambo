@@ -2,18 +2,18 @@ services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
-    container_name: bitline-postgres
+    container_name: bitlink-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: bitline
-      POSTGRES_PASSWORD: bitline_dev_password
-      POSTGRES_DB: bitline
+      POSTGRES_USER: bitlink
+      POSTGRES_PASSWORD: bitlink_dev_password
+      POSTGRES_DB: bitlink
     ports:
       - '5433:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U bitline -d bitline']
+      test: ['CMD-SHELL', 'pg_isready -U bitlink -d bitlink']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,7 +21,7 @@ services:
   # Redis Cache
   redis:
     image: redis:7-alpine
-    container_name: bitline-redis
+    container_name: bitlink-redis
     restart: unless-stopped
     ports:
       - '6379:6379'
@@ -38,12 +38,12 @@ services:
     build:
       context: ./api
       dockerfile: Dockerfile
-    container_name: bitline-api
+    container_name: bitlink-api
     restart: unless-stopped
     ports:
       - '8001:8000'
     environment:
-      DATABASE_URL: postgresql+asyncpg://bitline:bitline_dev_password@postgres:5432/bitline
+      DATABASE_URL: postgresql+asyncpg://bitlink:bitlink_dev_password@postgres:5432/bitlink
       REDIS_URL: redis://redis:6379/0
       ENV: development
       DEBUG: 'false'
@@ -59,16 +59,16 @@ services:
   # React UI
   ui:
     build:
-      context: ./bitline-ui
+      context: ./ui
       dockerfile: Dockerfile
-    container_name: bitline-ui
+    container_name: ui
     restart: unless-stopped
     ports:
       - '3001:3000'
     environment:
       VITE_API_URL: http://localhost:8001
     volumes:
-      - ./bitline-ui:/app
+      - ./ui:/app
       - /app/node_modules
     depends_on:
       - api
