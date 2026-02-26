@@ -478,7 +478,8 @@ class SimulationState:
     daily_metrics: List[DailyMetrics] = field(default_factory=list)
     
     current_day: int = 0
-    reward_pool: float = 0.0
+    reward_pool: float = 0.0  # DEPRECATED: no longer used
+    platform_revenue: float = 0.0  # NEW: platform's 50% cut
     spam_index: float = 0.0
     
     # Pending settlements (day -> list of content_ids)

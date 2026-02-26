@@ -1,10 +1,10 @@
 """
 BitLink Recommendation System
-Handles content exposure, quality inference, and time decay
+Handles content exposure, quality inference, time decay, and quality-based subsidies
 """
 
 import math
-from typing import List, Dict, Optional, TYPE_CHECKING
+from typing import List, Dict, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
@@ -19,6 +19,12 @@ if TYPE_CHECKING:
 BASE_HALF_LIFE_DAYS = 3.0       # Base half-life for content exposure
 QUALITY_HALF_LIFE_BONUS = 4.0   # Max bonus days for high quality content
 ENGAGEMENT_HALF_LIFE_BONUS = 4.0  # Max bonus days for high engagement
+
+# Quality density subsidy parameters
+QUALITY_DENSITY_SUBSIDY_RATIO = 0.10  # 10% of platform revenue for underrated content
+MIN_LIKES_FOR_DENSITY = 2             # Lowered: need at least 2 likes
+DENSITY_THRESHOLD = 0.35              # Lowered: allow more mid-quality content
+LOW_EXPOSURE_PERCENTILE = 0.7         # Expanded: bottom 70% by likes count
 
 # Inferred quality weights
 WEIGHT_ENGAGEMENT = 0.35
@@ -318,4 +324,192 @@ def analyze_inference_accuracy(state: 'SimulationState', current_day: int, sampl
         'median_error': statistics.median(errors),
         'max_error': max(errors),
         'correlation': correlation,
+    }
+
+
+# =============================================================================
+# Quality Density Subsidy System
+# =============================================================================
+
+def calculate_quality_density(content: 'Content', state: 'SimulationState') -> float:
+    """
+    Calculate quality density for a single post based on OBSERVABLE signals only.
+    
+    Quality Density = how "good" each like is, regardless of total like count.
+    High density + low likes = underrated content that deserves subsidy.
+    
+    Returns: float between 0.0 and 1.0+
+    """
+    likes = content.likes
+    
+    if len(likes) < MIN_LIKES_FOR_DENSITY:
+        return 0.0  # Not enough data to evaluate
+    
+    # 1. Liker Trust Score (are high-trust users liking this?)
+    avg_liker_trust = sum(l.liker_trust_score for l in likes) / len(likes)
+    trust_signal = min(1.0, avg_liker_trust / 500)  # 500 trust = 1.0
+    
+    # 2. Cross-circle ratio (are strangers liking this, not just friends?)
+    cross_circle_count = sum(1 for l in likes if l.cross_circle_mult > 1.0)
+    cross_ratio = cross_circle_count / len(likes)
+    
+    # 3. Comment density (does this content spark discussion?)
+    comment_count = len(content.comments) if hasattr(content, 'comments') else 0
+    comment_ratio = min(1.0, comment_count / max(1, len(likes)))
+    
+    # 4. Liker diversity (are likes from many different people, not a small group?)
+    unique_likers = len(set(l.user_id for l in likes))
+    diversity_ratio = unique_likers / len(likes)  # 1.0 if all unique
+    
+    # 5. Author newness bonus (new authors with quality signals deserve boost)
+    author = state.users.get(content.author_id)
+    if author and author.account_age <= 30:
+        newbie_bonus = 0.2
+    else:
+        newbie_bonus = 0.0
+    
+    # Combine signals
+    quality_density = (
+        trust_signal * 0.35 +      # Who likes matters most
+        cross_ratio * 0.25 +       # Strangers > friends
+        comment_ratio * 0.15 +     # Discussion is good
+        diversity_ratio * 0.15 +   # Many people > few people
+        newbie_bonus * 0.10        # Help new creators
+    )
+    
+    return quality_density
+
+
+def identify_underrated_content(
+    state: 'SimulationState',
+    current_day: int,
+    lookback_days: int = 7
+) -> List[Tuple['Content', float]]:
+    """
+    Find content that has high quality density but low total likes.
+    These are the "hidden gems" that deserve subsidy.
+    
+    Returns: List of (content, quality_density) tuples
+    """
+    import statistics
+    
+    # Get recent content
+    recent_content = []
+    for content in state.content.values():
+        age = current_day - content.created_day
+        if 0 < age <= lookback_days and len(content.likes) >= MIN_LIKES_FOR_DENSITY:
+            recent_content.append(content)
+    
+    if not recent_content:
+        return []
+    
+    # Calculate median likes (to define "low exposure")
+    like_counts = [len(c.likes) for c in recent_content]
+    median_likes = statistics.median(like_counts)
+    
+    # Find underrated content
+    underrated = []
+    for content in recent_content:
+        # Must be below median likes (low exposure)
+        if len(content.likes) > median_likes:
+            continue
+        
+        # Exclude content from high-risk authors (cabal members, penalized users)
+        author = state.users.get(content.author_id)
+        if author:
+            # Skip if author has high Risk score
+            if author.reputation.risk > 100:
+                continue
+            # Skip if author is flagged as cabal member
+            if author.cabal_id is not None or author.is_cabal_penalized:
+                continue
+        
+        # Calculate quality density
+        density = calculate_quality_density(content, state)
+        
+        # Must exceed threshold
+        if density >= DENSITY_THRESHOLD:
+            underrated.append((content, density))
+    
+    # Sort by density (highest first)
+    underrated.sort(key=lambda x: -x[1])
+    
+    return underrated
+
+
+def distribute_quality_subsidy(
+    state: 'SimulationState',
+    subsidy_pool: float,
+    current_day: int
+) -> Dict:
+    """
+    Distribute subsidy to underrated high-quality content.
+    
+    Args:
+        state: Simulation state
+        subsidy_pool: Amount available for subsidies (already calculated by caller)
+        current_day: Current day
+    
+    Returns:
+        Dict with subsidy statistics
+    """
+    
+    if subsidy_pool <= 0:
+        return {'pool': 0, 'recipients': 0, 'total_distributed': 0}
+    
+    # Find underrated content
+    underrated = identify_underrated_content(state, current_day)
+    
+    if not underrated:
+        return {'pool': subsidy_pool, 'recipients': 0, 'total_distributed': 0}
+    
+    # Calculate total density for proportional distribution
+    total_density = sum(density for _, density in underrated)
+    
+    # Sort by density to find top 10%
+    underrated_sorted = sorted(underrated, key=lambda x: -x[1])
+    top_10_pct_cutoff = len(underrated_sorted) // 10 if len(underrated_sorted) >= 10 else 1
+    top_10_pct_ids = {c.id for c, _ in underrated_sorted[:top_10_pct_cutoff]}
+    
+    # Import for reputation events
+    import random
+    from config import REPUTATION_EVENTS, TIER_REWARD_MULTIPLIER
+    
+    # Distribute subsidies
+    total_distributed = 0
+    recipients = 0
+    
+    for content, density in underrated:
+        author = state.users.get(content.author_id)
+        if not author:
+            continue
+        
+        # Proportional share based on density
+        share = density / total_density
+        subsidy = subsidy_pool * share
+        
+        author.earn(subsidy)
+        content.reward_earned += subsidy
+        total_distributed += subsidy
+        recipients += 1
+        
+        # 声誉奖励：收到补贴 = Creator 分数增加
+        tier_mult = TIER_REWARD_MULTIPLIER.get(author.trust_tier, 1.0)
+        event = REPUTATION_EVENTS.get('subsidy_received')
+        if event:
+            change = random.uniform(event.min_change, event.max_change)
+            author.reputation.apply_change(event.dimension, change, tier_mult)
+        
+        # 额外奖励：质量密度前 10%
+        if content.id in top_10_pct_ids:
+            event = REPUTATION_EVENTS.get('top_quality_density')
+            if event:
+                change = random.uniform(event.min_change, event.max_change)
+                author.reputation.apply_change(event.dimension, change, tier_mult)
+    
+    return {
+        'pool': subsidy_pool,
+        'recipients': recipients,
+        'total_distributed': total_distributed,
+        'avg_per_content': total_distributed / recipients if recipients > 0 else 0,
     }

@@ -267,97 +267,21 @@ class EconomicEngine:
     # =========================================================================
     
     def settle_rewards(self, day: int, daily_active_users: int = 0):
-        """Settle rewards for all content that's 7 days old"""
+        """
+        DEPRECATED: Reward pool distribution is disabled.
+        Revenue now flows directly: 50% to creator on each like, 50% to platform.
+        This method only marks content as settled.
+        """
         if day not in self.state.pending_settlements:
             return
         
-        settling_content_ids = self.state.pending_settlements[day]
-        settling_content = [
-            self.state.content[cid] for cid in settling_content_ids
-            if cid in self.state.content and 
-            self.state.content[cid].status == ContentStatus.ACTIVE
-        ]
-        
-        if not settling_content:
-            return
-        
-        # Calculate daily pool: fixed platform subsidy + accumulated reward pool
-        daily_pool = self.state.reward_pool + DAILY_PLATFORM_SUBSIDY
-        
-        # Pre-calculate adjusted scores for fair share distribution
-        adjusted_scores = {}
-        for content in settling_content:
-            base_score = content.discovery_score
-            if base_score == 0:
-                adjusted_scores[content.id] = 0
-                continue
-            
-            # Comment bonus
-            comment_count = len(content.comments) if hasattr(content, 'comments') else 0
-            comment_ratio = min(1.0, comment_count / COMMENT_BONUS_THRESHOLD)
-            comment_mult = 1.0 + COMMENT_BONUS_MAX * comment_ratio
-            
-            # Author trust bonus and risk penalty
-            author = self.state.users.get(content.author_id)
-            if author:
-                trust_mult = 1.0 + AUTHOR_TRUST_BONUS_MAX * (author.trust_score / 1000)
-                risk_mult = 1.0 - (author.reputation.risk / 1000)
-            else:
-                trust_mult = 1.0
-                risk_mult = 1.0
-            
-            # Human pledge bonus
-            pledge_mult = HUMAN_PLEDGE_BONUS if (content.human_pledge and not content.is_ai_generated) else 1.0
-            
-            adjusted_scores[content.id] = base_score * comment_mult * trust_mult * risk_mult * pledge_mult
-        
-        total_adjusted = sum(adjusted_scores.values())
-        
-        if total_adjusted == 0:
-            self.state.reward_pool = 0
-            for content in settling_content:
-                content.status = ContentStatus.SETTLED
-            return
-        
-        # Pre-sort by adjusted score for percentile calculations
-        sorted_content = sorted(settling_content, key=lambda c: adjusted_scores[c.id], reverse=True)
-        content_ranks = {c.id: i for i, c in enumerate(sorted_content)}
-        content_count = len(settling_content)
-        
-        # Split pool: 30% base (equal) + 70% performance (by score)
-        # Note: diminishing returns already applied at content level via discovery_score
-        base_pool = daily_pool * BASE_POOL_RATIO
-        perf_pool = daily_pool * PERF_POOL_RATIO
-        base_per_content = base_pool / content_count if content_count > 0 else 0
-        
-        # Distribute rewards based on split pools
-        for content in settling_content:
-            adj_score = adjusted_scores[content.id]
-            if adj_score == 0:
-                content.status = ContentStatus.SETTLED
-                continue
-            
-            perf_share = adj_score / total_adjusted if total_adjusted > 0 else 0
-            post_reward = base_per_content + (perf_share * perf_pool)
-            
-            author = self.state.users.get(content.author_id)
-            if author:
-                author_reward = post_reward * AUTHOR_REWARD_RATIO
-                comment_pool = post_reward * COMMENT_POOL_RATIO
-                
-                author.earn(author_reward)
-                content.reward_earned = author_reward
-                
-                self._apply_content_reputation_fast(content, content_ranks, content_count)
-                self._distribute_comment_rewards(content, comment_pool)
-            else:
-                comment_pool = post_reward * COMMENT_POOL_RATIO
-                self._distribute_comment_rewards(content, comment_pool)
-            
-            content.status = ContentStatus.SETTLED
-        
-        self.state.reward_pool = 0
+        # Just mark content as settled, no reward distribution
+        for cid in self.state.pending_settlements[day]:
+            if cid in self.state.content:
+                self.state.content[cid].status = ContentStatus.SETTLED
         del self.state.pending_settlements[day]
+        return
+        
     
     def _apply_content_reputation_fast(self, content: Content, ranks: dict, total: int):
         """Apply reputation changes using pre-calculated ranks"""

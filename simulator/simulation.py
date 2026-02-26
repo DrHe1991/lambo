@@ -16,8 +16,10 @@ from config import (
     # Anti-manipulation parameters
     CABAL_PENALTY_MULTIPLIER, CABAL_PENALTY_DURATION_DAYS,
     CABAL_DETECTION_RISK_THRESHOLD, VIOLATION_LIKE_PENALTY,
-    # Daily free actions
-    DAILY_FREE_POSTS, DAILY_FREE_COMMENTS, DAILY_FREE_LIKES,
+    # Daily free actions (new users only)
+    DAILY_FREE_POSTS, DAILY_FREE_COMMENTS, DAILY_FREE_LIKES, FREE_TRIAL_DAYS,
+    # Revenue split
+    CREATOR_REVENUE_SHARE,
 )
 from models import (
     User, Content, ContentType, ContentStatus, Like, Challenge,
@@ -182,10 +184,20 @@ class BitLinkSimulator:
         # Settle rewards for content from 7 days ago (use today's DAU)
         self.economic_engine.settle_rewards(day, len(active_users))
         
-        # Update spam index weekly
+        # Update spam index weekly and distribute quality subsidies
         if day % 7 == 0:
             self.economic_engine.update_spam_index()
             self.challenge_engine.detect_cabal_activity()
+            
+            # Distribute ALL platform revenue as quality subsidies
+            from recommendation import distribute_quality_subsidy
+            subsidy_result = distribute_quality_subsidy(
+                self.state,
+                self.state.platform_revenue,  # 100% of revenue
+                day
+            )
+            # Deduct from platform revenue (should be all of it)
+            self.state.platform_revenue -= subsidy_result['total_distributed']
         
         # Calculate trust distribution
         for user in users:
@@ -287,8 +299,10 @@ class BitLinkSimulator:
         """Create a post for user"""
         user.reset_daily_free_actions(day)
         
-        # Check if free post available
-        if user.free_posts_used < DAILY_FREE_POSTS:
+        # Free actions only for new users (first 7 days)
+        is_new_user = user.account_age <= FREE_TRIAL_DAYS
+        
+        if is_new_user and user.free_posts_used < DAILY_FREE_POSTS:
             cost = 0
             user.free_posts_used += 1
         else:
@@ -297,7 +311,8 @@ class BitLinkSimulator:
                 return
             user.spend(cost)
             metrics.total_spent += cost
-            self.state.reward_pool += cost
+            # 50% to platform revenue (no reward pool)
+            self.state.platform_revenue += cost
         
         # Determine content quality
         base_quality = user.profile.content_quality
@@ -338,6 +353,15 @@ class BitLinkSimulator:
         user.posts_created += 1
         user.reputation.record_post()  # 行为证明
         metrics.posts_created += 1
+        
+        # 实时声誉增长：发帖即得 Creator 分数（非违规内容）
+        if not is_violation:
+            from config import REPUTATION_EVENTS, TIER_REWARD_MULTIPLIER
+            event = REPUTATION_EVENTS.get('post_created')
+            if event:
+                tier_mult = TIER_REWARD_MULTIPLIER.get(user.trust_tier, 1.0)
+                change = random.uniform(event.min_change, event.max_change)
+                user.reputation.apply_change(event.dimension, change, tier_mult)
     
     def _sample_content_by_exposure(self, content_list: List[Content], k: int, day: int) -> List[Content]:
         """Sample content weighted by exposure using new recommendation system"""
@@ -348,8 +372,10 @@ class BitLinkSimulator:
         """User gives a like to content"""
         user.reset_daily_free_actions(day)
         
-        # Check if free like available
-        if user.free_likes_used < DAILY_FREE_LIKES:
+        # Free actions only for new users (first 7 days)
+        is_new_user = user.account_age <= FREE_TRIAL_DAYS
+        
+        if is_new_user and user.free_likes_used < DAILY_FREE_LIKES:
             cost = 0
             is_free = True
         else:
@@ -399,18 +425,22 @@ class BitLinkSimulator:
         if content.likes and user.id in {l.user_id for l in content.likes[-10:]}:
             return
         
+        # Get author first (needed for payment)
+        author = self.state.users.get(content.author_id)
+        if not author:
+            return
+        
         # Spend (or use free action)
         if is_free:
             user.free_likes_used += 1
         else:
             user.spend(cost)
             metrics.total_spent += cost
-            self.state.reward_pool += cost
-        
-        # Get author
-        author = self.state.users.get(content.author_id)
-        if not author:
-            return
+            # NEW: 50% to creator, 50% to platform
+            creator_share = cost * CREATOR_REVENUE_SHARE
+            platform_share = cost - creator_share
+            author.earn(creator_share)
+            self.state.platform_revenue += platform_share
         
         # Calculate like weight
         like_order = len(content.likes) + 1
@@ -446,13 +476,23 @@ class BitLinkSimulator:
         user.reputation.record_like()  # 行为证明
         user.record_interaction(author.id)
         metrics.likes_given += 1
+        
+        # 实时声誉增长：点赞即得 Curator 分数
+        from config import REPUTATION_EVENTS, TIER_REWARD_MULTIPLIER
+        event = REPUTATION_EVENTS.get('like_given')
+        if event:
+            tier_mult = TIER_REWARD_MULTIPLIER.get(user.trust_tier, 1.0)
+            change = random.uniform(event.min_change, event.max_change)
+            user.reputation.apply_change(event.dimension, change, tier_mult)
     
     def _create_comment(self, user: User, day: int, metrics: DailyMetrics):
         """User creates a comment"""
         user.reset_daily_free_actions(day)
         
-        # Check if free comment available
-        if user.free_comments_used < DAILY_FREE_COMMENTS:
+        # Free actions only for new users (first 7 days)
+        is_new_user = user.account_age <= FREE_TRIAL_DAYS
+        
+        if is_new_user and user.free_comments_used < DAILY_FREE_COMMENTS:
             cost = 0
             is_free = True
         else:
@@ -484,7 +524,8 @@ class BitLinkSimulator:
         else:
             user.spend(cost)
             metrics.total_spent += cost
-            self.state.reward_pool += cost
+            # 50% to platform (comment fees don't go to content author)
+            self.state.platform_revenue += cost
             actual_cost = cost
         
         # Create comment
@@ -502,6 +543,14 @@ class BitLinkSimulator:
         content.comments.append(comment.id)
         user.comments_made += 1
         metrics.comments_made += 1
+        
+        # 实时声誉增长：评论即得 Curator 分数
+        from config import REPUTATION_EVENTS, TIER_REWARD_MULTIPLIER
+        event = REPUTATION_EVENTS.get('comment_created')
+        if event:
+            tier_mult = TIER_REWARD_MULTIPLIER.get(user.trust_tier, 1.0)
+            change = random.uniform(event.min_change, event.max_change)
+            user.reputation.apply_change(event.dimension, change, tier_mult)
     
     def _initiate_challenge(self, user: User, day: int, metrics: DailyMetrics):
         """User initiates a challenge"""

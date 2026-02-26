@@ -12,10 +12,13 @@ from typing import Dict, List, Tuple
 # Global Constants
 # =============================================================================
 
-# Platform daily subsidy (fixed budget, not per-user emission)
-# ~$100/day at 1 BTC = $100k → 100,000 sat/day
-DAILY_PLATFORM_SUBSIDY = 100_000  # sat per day (fixed)
-DAILY_EMISSION_PER_DAU = 0        # DEPRECATED: no per-user emission
+# Platform subsidy - DISABLED (users pay, creators earn)
+DAILY_PLATFORM_SUBSIDY = 0  # No platform subsidy
+DAILY_EMISSION_PER_DAU = 0  # No per-user emission
+
+# Revenue split: 80% to creator, 20% to platform (for quality subsidies)
+CREATOR_REVENUE_SHARE = 0.80
+PLATFORM_REVENUE_SHARE = 0.20
 
 REWARD_SETTLEMENT_DAYS = 7
 CHALLENGE_WINDOW_DAYS = 7
@@ -32,10 +35,11 @@ BOOST_TO_POOL_RATIO = 0.30
 HUMAN_PLEDGE_BONUS = 1.20
 HUMAN_PLEDGE_PENALTY_MULT = 2.00
 
-# Daily free actions (no cost deducted)
+# Free actions for NEW USERS ONLY (first 7 days)
 DAILY_FREE_POSTS = 1
 DAILY_FREE_COMMENTS = 5
 DAILY_FREE_LIKES = 10
+FREE_TRIAL_DAYS = 7  # Only first 7 days get free actions
 
 # Quality inference bonuses
 COMMENT_BONUS_MAX = 0.5          # Max +50% for high comment count
@@ -47,13 +51,14 @@ AUTHOR_TRUST_BONUS_MAX = 0.3    # Max +30% for high trust author
 # Action Costs (base values in sat)
 # =============================================================================
 
-C_POST = 200
-C_QUESTION = 300
-C_ANSWER = 200
-C_COMMENT = 50
-C_REPLY = 20
-C_LIKE = 10
-C_COMMENT_LIKE = 5
+# Rebalanced: post cost lowered, like cost raised for better creator ROI
+C_POST = 50           # 200 → 50 (easier to post)
+C_QUESTION = 100      # 300 → 100
+C_ANSWER = 50         # 200 → 50
+C_COMMENT = 20        # 50 → 20
+C_REPLY = 10          # 20 → 10
+C_LIKE = 20           # 10 → 20 (more value per like)
+C_COMMENT_LIKE = 10   # 5 → 10
 
 F_L1 = 100  # AI challenge
 F_L2 = 500  # Community jury
@@ -73,11 +78,11 @@ class TrustTier(Enum):
 
 
 TRUST_TIER_RANGES = {
-    TrustTier.WHITE: (0, 150),         # 新手 (~72.5%)
-    TrustTier.GREEN: (151, 200),       # 活跃用户 (~15%)
-    TrustTier.BLUE: (201, 300),        # 优质贡献者 (~8%)
-    TrustTier.PURPLE: (301, 450),      # 精英 (~3.5%)
-    TrustTier.ORANGE: (451, 99999),    # 传奇 (~1%)
+    TrustTier.WHITE: (0, 150),         # 新手 (~70%)
+    TrustTier.GREEN: (151, 250),       # 活跃用户 (~20%)
+    TrustTier.BLUE: (251, 400),        # 优质贡献者 (~5%)
+    TrustTier.PURPLE: (401, 700),      # 精英 (~3%)
+    TrustTier.ORANGE: (701, 99999),    # 传奇 (< 0.5%)
 }
 
 # 等级越高，信誉奖励递减（防止顶部固化，加速新人成长）
@@ -200,18 +205,21 @@ class ReputationChange:
 
 
 REPUTATION_EVENTS = {
-    # Creator - 基础提高（配合等级递减机制）
-    'post_settled_no_violation': ReputationChange('creator', 8, 18),     # 提高基础
-    'post_top_10_percent': ReputationChange('creator', 20, 40),          # 提高
-    'post_top_1_percent': ReputationChange('creator', 50, 100),          # 提高
-    'content_violation': ReputationChange('creator', -60, -20),          # 惩罚不递减
-    'content_cleared': ReputationChange('creator', 10, 25),
-    # Curator - 适度提高
-    'liked_violation': ReputationChange('curator', -8, -2),              # 惩罚不递减
-    'liked_top_10': ReputationChange('curator', 3, 8),
-    'liked_top_1': ReputationChange('curator', 8, 16),
-    'comment_top_3': ReputationChange('curator', 5, 12),
-    # Juror - 保持适度
+    # === 实时声誉增长（每次行为立即生效） ===
+    'post_created': ReputationChange('creator', 1, 3),           # NEW: 发帖即得
+    'like_given': ReputationChange('curator', 0.2, 0.6),         # NEW: 点赞即得
+    'comment_created': ReputationChange('curator', 0.3, 0.8),    # NEW: 评论即得
+    
+    # === 周结算声誉奖励（质量补贴分发时） ===
+    'subsidy_received': ReputationChange('creator', 5, 15),      # NEW: 收到质量补贴
+    'top_quality_density': ReputationChange('creator', 15, 30),  # NEW: 质量密度前10%
+    
+    # === 惩罚（不受等级递减影响） ===
+    'content_violation': ReputationChange('creator', -60, -20),
+    'content_cleared': ReputationChange('creator', 10, 25),        # 被举报后澄清
+    'liked_violation': ReputationChange('curator', -8, -2),
+    
+    # === 陪审和风险 ===
     'jury_correct': ReputationChange('juror', 5, 15),
     'jury_wrong': ReputationChange('juror', -15, -5),
     'jury_absent': ReputationChange('juror', -10, -10),
