@@ -136,10 +136,68 @@ export interface ApiChatSession {
   id: number;
   name: string | null;
   is_group: boolean;
+  avatar: string | null;
+  description: string | null;
+  owner_id: number | null;
   members: ApiUser[];
   last_message: string | null;
   last_message_at: string | null;
   unread_count: number;
+  who_can_send: string;
+  who_can_add: string;
+  join_approval: boolean;
+  member_limit: number | null;
+  created_at: string;
+  user_has_left: boolean;
+}
+
+export interface ApiMemberInfo {
+  user: ApiUser;
+  role: 'owner' | 'admin' | 'member';
+  is_muted: boolean;
+  joined_at: string;
+}
+
+export interface ApiGroupDetail {
+  id: number;
+  name: string | null;
+  avatar: string | null;
+  description: string | null;
+  owner_id: number;
+  members: ApiMemberInfo[];
+  member_count: number;
+  who_can_send: string;
+  who_can_add: string;
+  join_approval: boolean;
+  member_limit: number | null;
+  my_role: 'owner' | 'admin' | 'member';
+  created_at: string;
+}
+
+export interface ApiInviteLink {
+  id: number;
+  code: string;
+  expires_at: string | null;
+  max_uses: number | null;
+  use_count: number;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface ApiInvitePreview {
+  group_name: string | null;
+  avatar: string | null;
+  description: string | null;
+  member_count: number;
+  requires_approval: boolean;
+}
+
+export interface ApiJoinRequest {
+  id: number;
+  session_id: number;
+  user: ApiUser;
+  invite_code: string | null;
+  status: string;
   created_at: string;
 }
 
@@ -378,6 +436,112 @@ export const api = {
     apiRequest<{ status: string }>(`/api/chat/messages/${messageId}/reactions`, {
       method: 'DELETE',
       params: { user_id: userId, emoji },
+    }),
+
+  // Group management
+  getGroupDetail: (sessionId: number, userId: number) =>
+    apiRequest<ApiGroupDetail>(`/api/chat/sessions/${sessionId}/detail`, { params: { user_id: userId } }),
+
+  updateGroup: (sessionId: number, userId: number, data: {
+    name?: string;
+    avatar?: string;
+    description?: string;
+    who_can_send?: string;
+    who_can_add?: string;
+    join_approval?: boolean;
+    member_limit?: number;
+  }) =>
+    apiRequest<ApiChatSession>(`/api/chat/sessions/${sessionId}`, {
+      method: 'PATCH',
+      body: data,
+      params: { user_id: userId },
+    }),
+
+  deleteGroup: (sessionId: number, userId: number) =>
+    apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}`, {
+      method: 'DELETE',
+      params: { user_id: userId },
+    }),
+
+  addMembers: (sessionId: number, userId: number, userIds: number[]) =>
+    apiRequest<{ added: number }>(`/api/chat/sessions/${sessionId}/members`, {
+      method: 'POST',
+      body: { user_ids: userIds },
+      params: { user_id: userId },
+    }),
+
+  removeMember: (sessionId: number, userId: number, targetUserId: number) =>
+    apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}/members/${targetUserId}`, {
+      method: 'DELETE',
+      params: { user_id: userId },
+    }),
+
+  leaveGroup: (sessionId: number, userId: number) =>
+    apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}/leave`, {
+      method: 'POST',
+      params: { user_id: userId },
+    }),
+
+  updateMemberRole: (sessionId: number, userId: number, targetUserId: number, role: 'admin' | 'member') =>
+    apiRequest<{ status: string; role: string }>(`/api/chat/sessions/${sessionId}/members/${targetUserId}/role`, {
+      method: 'PATCH',
+      body: { role },
+      params: { user_id: userId },
+    }),
+
+  muteMember: (sessionId: number, userId: number, targetUserId: number, isMuted: boolean, durationHours?: number) =>
+    apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}/members/${targetUserId}/mute`, {
+      method: 'PATCH',
+      body: { is_muted: isMuted, duration_hours: durationHours },
+      params: { user_id: userId },
+    }),
+
+  transferOwnership: (sessionId: number, userId: number, newOwnerId: number) =>
+    apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}/transfer`, {
+      method: 'POST',
+      body: { new_owner_id: newOwnerId },
+      params: { user_id: userId },
+    }),
+
+  // Invite links
+  createInviteLink: (sessionId: number, userId: number, expiresInDays?: number, maxUses?: number) =>
+    apiRequest<ApiInviteLink>(`/api/chat/sessions/${sessionId}/invite-link`, {
+      method: 'POST',
+      body: { expires_in_days: expiresInDays, max_uses: maxUses },
+      params: { user_id: userId },
+    }),
+
+  getInviteLinks: (sessionId: number, userId: number) =>
+    apiRequest<ApiInviteLink[]>(`/api/chat/sessions/${sessionId}/invite-links`, {
+      params: { user_id: userId },
+    }),
+
+  revokeInviteLink: (code: string, userId: number) =>
+    apiRequest<{ status: string }>(`/api/chat/invite-links/${code}`, {
+      method: 'DELETE',
+      params: { user_id: userId },
+    }),
+
+  previewInvite: (code: string) =>
+    apiRequest<ApiInvitePreview>(`/api/chat/invite/${code}/preview`),
+
+  joinViaInvite: (code: string, userId: number) =>
+    apiRequest<{ status: string; session_id: number }>(`/api/chat/join/${code}`, {
+      method: 'POST',
+      params: { user_id: userId },
+    }),
+
+  // Join requests
+  getJoinRequests: (sessionId: number, userId: number) =>
+    apiRequest<ApiJoinRequest[]>(`/api/chat/sessions/${sessionId}/join-requests`, {
+      params: { user_id: userId },
+    }),
+
+  handleJoinRequest: (sessionId: number, requestId: number, userId: number, action: 'approve' | 'reject') =>
+    apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}/join-requests/${requestId}`, {
+      method: 'POST',
+      body: { action },
+      params: { user_id: userId },
     }),
 
   // Rewards

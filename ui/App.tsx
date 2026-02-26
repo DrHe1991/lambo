@@ -3,7 +3,7 @@ import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionT
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile } from 'lucide-react';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 import { TrustBadge } from './components/TrustBadge';
 import { LoginPage } from './components/LoginPage';
@@ -11,11 +11,11 @@ import { ChallengeModal } from './components/ChallengeModal';
 import { LikeStakeModal } from './components/LikeStakeModal';
 import { ToastContainer, toast } from './components/Toast';
 import { getTrustRingClass, getTrustStrokeColor, getTrustBadgeBg, getTrustTier } from './trustTheme';
-import { ApiTrustBreakdown, ApiUserCosts } from './api/client';
+import { ApiTrustBreakdown, ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest } from './api/client';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
 
 // Views
-type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'TRUST_DETAIL';
+type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'TRUST_DETAIL' | 'GROUP_INFO' | 'JOIN_GROUP';
 
 const App: React.FC = () => {
   // Stores
@@ -96,7 +96,10 @@ const App: React.FC = () => {
   const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string; messageType: 'text' | 'system'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
+  const [removedFromSessions, setRemovedFromSessions] = useState<Set<number>>(new Set());
   const [selectedMessageId, setSelectedMessageId] = useState<string | number | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [emojiPage, setEmojiPage] = useState(0);
   const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [replyingTo, setReplyingTo] = useState<{id: string | number; content: string} | null>(null);
@@ -107,6 +110,28 @@ const App: React.FC = () => {
   const reactionLongPressTriggered = React.useRef(false);
   const messageRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
   const [highlightedMsgId, setHighlightedMsgId] = useState<string | number | null>(null);
+
+  // Group info state
+  const [groupDetail, setGroupDetail] = useState<ApiGroupDetail | null>(null);
+  const [isLoadingGroupDetail, setIsLoadingGroupDetail] = useState(false);
+  const [showMemberActions, setShowMemberActions] = useState<number | null>(null);
+  const [isEditingGroup, setIsEditingGroup] = useState(false);
+  const [settingsMenu, setSettingsMenu] = useState<'who_can_send' | 'who_can_add' | null>(null);
+  const [editGroupName, setEditGroupName] = useState('');
+  const [editGroupDescription, setEditGroupDescription] = useState('');
+  const [showInviteLinks, setShowInviteLinks] = useState(false);
+  const [inviteLinks, setInviteLinks] = useState<ApiInviteLink[]>([]);
+  const [showAddMembersModal, setShowAddMembersModal] = useState(false);
+  const [addMemberSearch, setAddMemberSearch] = useState('');
+  const [addMemberResults, setAddMemberResults] = useState<User[]>([]);
+  const [selectedNewMembers, setSelectedNewMembers] = useState<Set<number>>(new Set());
+  const [inviteCodeInput, setInviteCodeInput] = useState('');
+  const [invitePreview, setInvitePreview] = useState<{ group_name: string | null; avatar: string | null; description: string | null; member_count: number; requires_approval: boolean } | null>(null);
+  const [isJoiningViaInvite, setIsJoiningViaInvite] = useState(false);
+  const [joinRequests, setJoinRequests] = useState<ApiJoinRequest[]>([]);
+  const [isLoadingJoinRequests, setIsLoadingJoinRequests] = useState(false);
+  const [invitableUsers, setInvitableUsers] = useState<User[]>([]);
+  const [isLoadingInvitableUsers, setIsLoadingInvitableUsers] = useState(false);
 
   // Scroll to a specific message and briefly highlight it
   const scrollToMessage = (msgId: number) => {
@@ -122,11 +147,15 @@ const App: React.FC = () => {
   const defaultReactions = ['👍', '❤️', '🎉', '😂', '😮', '😢', '😡', '🔥', '👏', '🙏'];
 
   // Long press handlers for message selection
-  const handleLongPressStart = (msgId: string | number) => {
+  const handleLongPressStart = (msgId: string | number, e: React.MouseEvent | React.TouchEvent) => {
     longPressTriggered.current = false;
+    const target = e.currentTarget as HTMLElement;
     longPressTimer.current = setTimeout(() => {
       longPressTriggered.current = true;
+      const rect = target.getBoundingClientRect();
       setSelectedMessageId(msgId);
+      setMenuPosition({ x: rect.left + rect.width / 2, y: rect.bottom + 8 });
+      setEmojiPage(0);
     }, 500); // 500ms for long press
   };
 
@@ -217,12 +246,45 @@ const App: React.FC = () => {
     }));
   }, []);
 
+  // Handle member removed from group (refresh member list)
+  const handleMemberRemoved = useCallback((event: { session_id: number; user_id?: number }) => {
+    // Refresh sessions to update member lists
+    if (currentUser) {
+      loadChatSessions(currentUser.id);
+    }
+  }, [currentUser]);
+
+  // Handle new members added to group
+  const handleMembersAdded = useCallback((event: { session_id: number; count: number }) => {
+    // Refresh sessions to update member lists
+    if (currentUser) {
+      loadChatSessions(currentUser.id);
+    }
+  }, [currentUser]);
+
+  // Handle when current user is removed from a group
+  const handleYouWereRemoved = useCallback((event: { session_id: number }) => {
+    // Mark this session as removed
+    setRemovedFromSessions(prev => new Set(prev).add(event.session_id));
+    // Refresh messages to get the "You were removed" message
+    if (selectedChat && Number(selectedChat.id) === event.session_id) {
+      loadChatMessages(event.session_id);
+    }
+    // Refresh sessions list
+    if (currentUser) {
+      loadChatSessions(currentUser.id);
+    }
+  }, [selectedChat, currentUser]);
+
   // Connect to WebSocket for real-time chat
   useChatWebSocket({
     userId: currentUser?.id ?? null,
     onMessage: handleWebSocketMessage,
     onReactionAdded: handleReactionAdded,
     onReactionRemoved: handleReactionRemoved,
+    onMemberRemoved: handleMemberRemoved,
+    onMembersAdded: handleMembersAdded,
+    onYouWereRemoved: handleYouWereRemoved,
   });
 
   // Trust & dynamic costs state
@@ -305,6 +367,25 @@ const App: React.FC = () => {
     loadFromStorage();
   }, []);
 
+  // Handle invite deep links
+  useEffect(() => {
+    const path = window.location.pathname;
+    const joinMatch = path.match(/^\/join\/([a-zA-Z0-9_-]+)$/);
+    if (joinMatch && isLoggedIn) {
+      const code = joinMatch[1];
+      setInviteCodeInput(code);
+      setCurrentView('JOIN_GROUP');
+      // Auto-preview
+      api.previewInvite(code).then(preview => {
+        setInvitePreview(preview);
+      }).catch(error => {
+        toast.error((error as Error).message);
+      });
+      // Clear the URL
+      window.history.replaceState({}, '', '/');
+    }
+  }, [isLoggedIn]);
+
   // Fetch posts and chats when logged in
   useEffect(() => {
     if (isLoggedIn && currentUser) {
@@ -314,6 +395,27 @@ const App: React.FC = () => {
       fetchTrustData(currentUser.id);
     }
   }, [isLoggedIn, currentUser?.id]);
+
+  // Load available users when entering group chat creation
+  useEffect(() => {
+    if (currentView === 'GROUP_CHAT' && currentUser) {
+      setIsLoadingInvitableUsers(true);
+      api.searchUsers('', 50)
+        .then(users => {
+          setInvitableUsers(users
+            .filter(u => u.id !== currentUser.id)
+            .map(u => ({
+              id: u.id,
+              name: u.name,
+              handle: u.handle,
+              avatar: u.avatar || `https://picsum.photos/id/${u.id + 10}/200/200`,
+              trustScore: u.trust_score,
+            })) as User[]);
+        })
+        .catch(console.error)
+        .finally(() => setIsLoadingInvitableUsers(false));
+    }
+  }, [currentView, currentUser]);
 
   // Load chat messages when selectedChat changes
   useEffect(() => {
@@ -486,7 +588,8 @@ const App: React.FC = () => {
   const renderChat = () => {
     const chatQuickActions = [
       { id: 'my-qr', label: 'My QR Code', icon: <QrCode size={14} className="text-orange-400" />, view: 'MY_QR_CODE' as View },
-      { id: 'group-chat', label: 'Group Chat', icon: <Users size={14} className="text-orange-400" />, view: 'GROUP_CHAT' as View },
+      { id: 'group-chat', label: 'New Group', icon: <Users size={14} className="text-orange-400" />, view: 'GROUP_CHAT' as View },
+      { id: 'join-group', label: 'Join Group', icon: <UserPlus size={14} className="text-orange-400" />, view: 'JOIN_GROUP' as View },
       { id: 'scan', label: 'Scan', icon: <ScanLine size={14} className="text-orange-400" />, view: 'SCAN' as View }
     ];
 
@@ -664,7 +767,7 @@ const App: React.FC = () => {
   };
 
   const renderGroupChat = () => {
-    const candidates = availableUsers.filter(u => u.id !== currentUser?.id).map(apiUserToUser);
+    const candidates = invitableUsers;
     const toggleMember = (userId: string | number) => {
       const id = String(userId);
       setGroupMemberIds(prev => {
@@ -675,29 +778,41 @@ const App: React.FC = () => {
       });
     };
 
-    const canCreateGroup = groupChatName.trim().length > 0 && groupMemberIds.size >= 2;
+    const canCreateGroup = groupChatName.trim().length > 0 && groupMemberIds.size >= 1;
 
-    const handleCreateGroup = () => {
-      if (!canCreateGroup) return;
-      const selectedMembers = candidates.filter(user => groupMemberIds.has(user.id));
-      setSelectedChat({
-        id: `group-${Date.now()}`,
-        participants: selectedMembers,
-        lastMessage: 'Group created',
-        timestamp: 'now',
-        unreadCount: 0,
-        isGroup: true
-      });
-      setGroupChatName('');
-      setGroupMemberIds(new Set());
-      setCurrentView('CHAT_DETAIL');
+    const handleCreateGroup = async () => {
+      if (!canCreateGroup || !currentUser) return;
+      try {
+        const memberIds = Array.from(groupMemberIds).map(id => Number(id));
+        const session = await api.createChatSession(currentUser.id, {
+          member_ids: memberIds,
+          name: groupChatName.trim(),
+          is_group: true,
+        });
+        const selectedMembers = candidates.filter(user => groupMemberIds.has(String(user.id)));
+        setSelectedChat({
+          id: session.id,
+          name: session.name,
+          participants: selectedMembers,
+          lastMessage: 'Group created',
+          timestamp: 'now',
+          unreadCount: 0,
+          isGroup: true,
+        });
+        setGroupChatName('');
+        setGroupMemberIds(new Set());
+        fetchSessions(currentUser.id);
+        setCurrentView('CHAT_DETAIL');
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
     };
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-lg font-bold uppercase tracking-wide">Group Chat</h2>
+          <h2 className="text-lg font-bold uppercase tracking-wide">New Group</h2>
         </div>
         <div className="p-4">
           <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-2">Group Name</label>
@@ -713,29 +828,44 @@ const App: React.FC = () => {
             <span className="text-xs text-orange-400 font-bold">{groupMemberIds.size} selected</span>
           </div>
 
-          <div className="space-y-3 mb-6">
-            {candidates.map(user => {
-              const selected = groupMemberIds.has(String(user.id));
-              return (
-                <button
-                  key={user.id}
-                  className={`w-full rounded-2xl p-3 border flex items-center justify-between ${
-                    selected ? 'bg-orange-500/10 border-orange-500/40' : 'bg-zinc-900/50 border-zinc-800'
-                  }`}
-                  onClick={() => toggleMember(user.id)}
-                >
-                  <div className="flex items-center gap-3">
-                    <img src={user.avatar} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" />
-                    <div className="text-left">
-                      <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
-                      <span className="text-[11px] text-zinc-500">{user.handle}</span>
+          <p className="text-xs text-zinc-500 mb-4">
+            Only showing users who follow you or have a conversation with you.
+          </p>
+
+          {isLoadingInvitableUsers ? (
+            <div className="flex justify-center py-8">
+              <div className="w-6 h-6 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+            </div>
+          ) : candidates.length === 0 ? (
+            <div className="text-center py-8 text-zinc-500">
+              <p>No contacts available to invite.</p>
+              <p className="text-xs mt-2">Users must follow you or have an established conversation.</p>
+            </div>
+          ) : (
+            <div className="space-y-3 mb-6">
+              {candidates.map(user => {
+                const selected = groupMemberIds.has(String(user.id));
+                return (
+                  <button
+                    key={user.id}
+                    className={`w-full rounded-2xl p-3 border flex items-center justify-between ${
+                      selected ? 'bg-orange-500/10 border-orange-500/40' : 'bg-zinc-900/50 border-zinc-800'
+                    }`}
+                    onClick={() => toggleMember(user.id)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <img src={user.avatar} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" />
+                      <div className="text-left">
+                        <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
+                        <span className="text-[11px] text-zinc-500">{user.handle}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className={`w-5 h-5 rounded-full border-2 ${selected ? 'bg-orange-500 border-orange-500' : 'border-zinc-600'}`} />
-                </button>
-              );
-            })}
-          </div>
+                    <div className={`w-5 h-5 rounded-full border-2 ${selected ? 'bg-orange-500 border-orange-500' : 'border-zinc-600'}`} />
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           <button
             className={`w-full py-3 rounded-xl text-sm font-black uppercase tracking-wide ${
@@ -1666,6 +1796,7 @@ const App: React.FC = () => {
           break;
       }
       setSelectedMessageId(null);
+      setMenuPosition(null);
     };
 
     const handleReaction = async (emoji: string) => {
@@ -1673,6 +1804,7 @@ const App: React.FC = () => {
       const messageId = selectedMessage.id;
       const myId = Number(currentUser.id);
       setSelectedMessageId(null);
+      setMenuPosition(null);
       
       // Optimistically update UI BEFORE API call
       const wasAdding = !chatMessages.find(m => Number(m.id) === Number(messageId))
@@ -1792,6 +1924,22 @@ const App: React.FC = () => {
       toast.info(`${type === 'camera' ? 'Camera' : 'Album'} feature coming soon`);
     };
 
+    // Handler to open group info page
+    const handleOpenGroupInfo = async () => {
+      if (!selectedChat || !currentUser) return;
+      setIsLoadingGroupDetail(true);
+      setCurrentView('GROUP_INFO');
+      try {
+        const detail = await api.getGroupDetail(Number(selectedChat.id), currentUser.id);
+        setGroupDetail(detail);
+      } catch (error) {
+        console.error('Failed to load group detail:', error);
+        toast.error('Failed to load group info');
+      } finally {
+        setIsLoadingGroupDetail(false);
+      }
+    };
+
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col">
         {/* Header */}
@@ -1799,8 +1947,7 @@ const App: React.FC = () => {
           <button onClick={() => { setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }}><ArrowLeft /></button>
           <button
             className="flex items-center gap-3"
-            onClick={handleOpenProfile}
-            disabled={isGroup}
+            onClick={isGroup ? handleOpenGroupInfo : handleOpenProfile}
           >
             {isGroup ? (
               <div className="relative w-10 h-10">
@@ -1810,7 +1957,10 @@ const App: React.FC = () => {
             ) : (
               <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-10 h-10 rounded-full border border-zinc-800 object-cover" />
             )}
-            <span className="text-sm font-bold">{isGroup ? (selectedChat.name || 'Group Chat') : chatPartner?.name}</span>
+            <div className="flex flex-col items-start">
+              <span className="text-sm font-bold">{isGroup ? (selectedChat.name || 'Group Chat') : chatPartner?.name}</span>
+              {isGroup && <span className="text-xs text-zinc-500">{selectedChat.participants.length} members</span>}
+            </div>
           </button>
         </div>
 
@@ -1886,12 +2036,18 @@ const App: React.FC = () => {
                           : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-bl-sm'
                     } ${isSelected ? 'ring-2 ring-orange-400' : ''}`}
                     onClick={(e) => handleMessageClick(e, msg.id)}
-                    onMouseDown={() => handleLongPressStart(msg.id)}
+                    onMouseDown={(e) => handleLongPressStart(msg.id, e)}
                     onMouseUp={handleLongPressEnd}
                     onMouseLeave={handleLongPressEnd}
-                    onTouchStart={() => handleLongPressStart(msg.id)}
+                    onTouchStart={(e) => handleLongPressStart(msg.id, e)}
                     onTouchEnd={handleLongPressEnd}
-                    onContextMenu={(e) => { e.preventDefault(); setSelectedMessageId(msg.id); }}
+                    onContextMenu={(e) => { 
+                      e.preventDefault(); 
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setSelectedMessageId(msg.id); 
+                      setMenuPosition({ x: rect.left + rect.width / 2, y: rect.bottom + 8 }); 
+                      setEmojiPage(0);
+                    }}
                   >
                     {msg.content}
                   </button>
@@ -1957,46 +2113,56 @@ const App: React.FC = () => {
                   )}
                 </div>
 
-                {/* Message action menu - centered overlay */}
-                {isSelected && (
+                {/* Message action menu - positioned below message */}
+                {isSelected && menuPosition && (
                   <>
-                    <div className="fixed inset-0 bg-black/60 z-40" onClick={(e) => { e.stopPropagation(); setSelectedMessageId(null); }} />
+                    <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setSelectedMessageId(null); setMenuPosition(null); }} />
                     <div 
-                      className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50"
+                      className="fixed z-50 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl overflow-hidden"
+                      style={{
+                        left: Math.min(Math.max(menuPosition.x, 120), window.innerWidth - 120),
+                        top: Math.min(menuPosition.y, window.innerHeight - 280),
+                        transform: 'translateX(-50%)',
+                        minWidth: '200px',
+                      }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Emoji reactions bar */}
-                      <div className="bg-zinc-900 border border-zinc-800 rounded-full px-3 py-2 flex gap-2 mb-3 shadow-xl justify-center">
-                        {defaultReactions.map(emoji => (
+                      {/* Emoji reactions row */}
+                      <div className="px-3 py-2 flex items-center gap-1 border-b border-zinc-800">
+                        {defaultReactions.slice(emojiPage * 5, emojiPage * 5 + 5).map(emoji => (
                           <button
                             key={emoji}
-                            className="text-2xl hover:scale-125 transition-transform active:scale-90"
+                            className="text-xl hover:scale-125 transition-transform active:scale-90 p-1"
                             onClick={() => handleReaction(emoji)}
                           >
                             {emoji}
                           </button>
                         ))}
+                        <button
+                          className="text-zinc-400 hover:text-zinc-200 px-2 text-lg font-bold"
+                          onClick={() => setEmojiPage(p => (p + 1) % 2)}
+                        >
+                          ···
+                        </button>
                       </div>
                       {/* Action buttons */}
-                      <div className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden shadow-xl">
-                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('reply')}>
-                          <Reply size={16} className="text-orange-400" /> Reply
+                      <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('reply')}>
+                        <Reply size={16} className="text-orange-400" /> Reply
+                      </button>
+                      <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('forward')}>
+                        <Forward size={16} className="text-orange-400" /> Forward
+                      </button>
+                      <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('copy')}>
+                        <Copy size={16} className="text-orange-400" /> Copy
+                      </button>
+                      {isMe && canRetreat(msg) && (
+                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('retreat')}>
+                          <Undo2 size={16} className="text-amber-400" /> Retreat
                         </button>
-                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('forward')}>
-                          <Forward size={16} className="text-orange-400" /> Forward
-                        </button>
-                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('copy')}>
-                          <Copy size={16} className="text-orange-400" /> Copy
-                        </button>
-                        {isMe && canRetreat(msg) && (
-                          <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('retreat')}>
-                            <Undo2 size={16} className="text-amber-400" /> Retreat
-                          </button>
-                        )}
-                        <button className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('delete')}>
-                          <Trash2 size={16} /> Delete for me
-                        </button>
-                      </div>
+                      )}
+                      <button className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('delete')}>
+                        <Trash2 size={16} /> Delete for me
+                      </button>
                     </div>
                   </>
                 )}
@@ -2059,38 +2225,46 @@ const App: React.FC = () => {
         )}
 
         {/* Input */}
-        <div className="p-4 bg-black border-t border-zinc-900 flex items-center gap-3 safe-bottom-nav">
-          <div className="flex-1 bg-zinc-900 rounded-xl px-4 py-3 flex items-center">
-            <input 
-              value={chatMessageInput}
-              onChange={(e) => setChatMessageInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder={replyingTo ? 'Reply...' : 'Message...'} 
-              className="bg-transparent border-none outline-none text-sm w-full" 
-            />
+        {selectedChat && (removedFromSessions.has(Number(selectedChat.id)) || chatSessions.find(s => Number(s.id) === Number(selectedChat.id))?.userHasLeft) ? (
+          <div className="p-4 bg-black border-t border-zinc-900 safe-bottom-nav">
+            <div className="bg-zinc-900 rounded-xl px-4 py-3 text-center text-zinc-500 text-sm">
+              You were removed from this group
+            </div>
           </div>
-          <button 
-            className="p-2 text-zinc-400 hover:text-orange-400 transition-colors"
-            onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(prev => !prev); setShowAttachmentPicker(false); }}
-          >
-            <Smile size={22} />
-          </button>
-          {chatMessageInput.trim() ? (
-            <button 
-              onClick={handleSendMessage}
-              className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform duration-200"
-            >
-              <Send size={18} />
-            </button>
-          ) : (
+        ) : (
+          <div className="p-4 bg-black border-t border-zinc-900 flex items-center gap-3 safe-bottom-nav">
+            <div className="flex-1 bg-zinc-900 rounded-xl px-4 py-3 flex items-center">
+              <input 
+                value={chatMessageInput}
+                onChange={(e) => setChatMessageInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
+                placeholder={replyingTo ? 'Reply...' : 'Message...'} 
+                className="bg-transparent border-none outline-none text-sm w-full" 
+              />
+            </div>
             <button 
               className="p-2 text-zinc-400 hover:text-orange-400 transition-colors"
-              onClick={(e) => { e.stopPropagation(); setShowAttachmentPicker(prev => !prev); setShowEmojiPicker(false); }}
+              onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(prev => !prev); setShowAttachmentPicker(false); }}
             >
-              <Plus size={22} />
+              <Smile size={22} />
             </button>
-          )}
-        </div>
+            {chatMessageInput.trim() ? (
+              <button 
+                onClick={handleSendMessage}
+                className="bg-orange-500 p-3 rounded-xl text-white active:scale-90 transition-transform duration-200"
+              >
+                <Send size={18} />
+              </button>
+            ) : (
+              <button 
+                className="p-2 text-zinc-400 hover:text-orange-400 transition-colors"
+                onClick={(e) => { e.stopPropagation(); setShowAttachmentPicker(prev => !prev); setShowEmojiPicker(false); }}
+              >
+                <Plus size={22} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   };
@@ -2132,6 +2306,721 @@ const App: React.FC = () => {
     } catch (err) {
       toast.error((err as Error).message);
     }
+  };
+
+  // Join Group via Invite Code
+  const renderJoinGroup = () => {
+    const handlePreview = async () => {
+      if (!inviteCodeInput.trim()) return;
+      try {
+        const preview = await api.previewInvite(inviteCodeInput.trim());
+        setInvitePreview(preview);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleJoin = async () => {
+      if (!inviteCodeInput.trim() || !currentUser) return;
+      setIsJoiningViaInvite(true);
+      try {
+        const result = await api.joinViaInvite(inviteCodeInput.trim(), currentUser.id);
+        
+        if (result.status === 'pending') {
+          toast.success('Join request sent! Waiting for admin approval.');
+          setInviteCodeInput('');
+          setInvitePreview(null);
+          setCurrentView('MAIN');
+        } else {
+          toast.success('Joined the group!');
+          // Refresh sessions and navigate to the new group
+          await fetchSessions(currentUser.id);
+          const session = await api.getChatSession(result.session_id, currentUser.id);
+          setSelectedChat({
+            id: session.id,
+            name: session.name,
+            isGroup: true,
+            participants: session.members.map(m => ({
+              id: m.id,
+              name: m.name,
+              handle: m.handle,
+              avatar: m.avatar,
+              trustScore: m.trust_score,
+            })) as any,
+            lastMessage: session.last_message || '',
+            timestamp: session.last_message_at || session.created_at,
+            unreadCount: 0,
+          });
+          setInviteCodeInput('');
+          setInvitePreview(null);
+          setCurrentView('CHAT_DETAIL');
+        }
+      } catch (error) {
+        toast.error((error as Error).message);
+      } finally {
+        setIsJoiningViaInvite(false);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+        <div className="p-4 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+          <button onClick={() => { setCurrentView('MAIN'); setInvitePreview(null); setInviteCodeInput(''); }}><ArrowLeft /></button>
+          <span className="font-bold">Join Group</span>
+        </div>
+
+        <div className="flex-1 p-4 flex flex-col">
+          {/* Input */}
+          <div className="space-y-3">
+            <label className="text-sm text-zinc-400">Enter invite code</label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={inviteCodeInput}
+                onChange={(e) => setInviteCodeInput(e.target.value)}
+                placeholder="e.g. abc123xyz"
+                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
+              />
+              <button
+                onClick={handlePreview}
+                className="px-4 bg-zinc-800 rounded-xl"
+              >
+                Preview
+              </button>
+            </div>
+          </div>
+
+          {/* Preview */}
+          {invitePreview && (
+            <div className="mt-6 bg-zinc-900/50 rounded-2xl p-6 flex flex-col items-center gap-4">
+              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center">
+                {invitePreview.avatar ? (
+                  <img src={invitePreview.avatar} className="w-20 h-20 rounded-full object-cover" />
+                ) : (
+                  <Users className="w-10 h-10 text-white" />
+                )}
+              </div>
+              <h2 className="text-xl font-bold">{invitePreview.group_name || 'Unnamed Group'}</h2>
+              <p className="text-zinc-500">{invitePreview.member_count} members</p>
+              {invitePreview.description && (
+                <p className="text-zinc-400 text-sm text-center">{invitePreview.description}</p>
+              )}
+              {invitePreview.requires_approval && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 text-amber-400 text-sm">
+                  This group requires admin approval to join
+                </div>
+              )}
+              <button
+                onClick={handleJoin}
+                disabled={isJoiningViaInvite}
+                className="w-full py-3 bg-orange-500 rounded-xl font-bold mt-4 disabled:opacity-50"
+              >
+                {isJoiningViaInvite ? 'Joining...' : (invitePreview.requires_approval ? 'Request to Join' : 'Join Group')}
+              </button>
+            </div>
+          )}
+
+          {/* QR Scan Option */}
+          <div className="mt-auto">
+            <button
+              onClick={() => setCurrentView('SCAN')}
+              className="w-full py-4 bg-zinc-900 rounded-xl flex items-center justify-center gap-2 text-zinc-400"
+            >
+              <ScanLine className="w-5 h-5" />
+              <span>Scan QR Code Instead</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Group Info Page
+  const renderGroupInfo = () => {
+    if (!groupDetail || !selectedChat || !currentUser) return null;
+
+    const isOwner = groupDetail.my_role === 'owner';
+    const isAdmin = groupDetail.my_role === 'admin' || isOwner;
+
+    const handleLeaveGroup = async () => {
+      if (!confirm('Are you sure you want to leave this group?')) return;
+      try {
+        await api.leaveGroup(groupDetail.id, currentUser.id);
+        toast.success('Left the group');
+        setCurrentView('MAIN');
+        setSelectedChat(null);
+        setGroupDetail(null);
+        fetchSessions(currentUser.id);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleDeleteGroup = async () => {
+      if (!confirm('Are you sure you want to DELETE this group? This cannot be undone.')) return;
+      try {
+        await api.deleteGroup(groupDetail.id, currentUser.id);
+        toast.success('Group deleted');
+        setCurrentView('MAIN');
+        setSelectedChat(null);
+        setGroupDetail(null);
+        fetchSessions(currentUser.id);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleSaveGroupEdit = async () => {
+      try {
+        await api.updateGroup(groupDetail.id, currentUser.id, {
+          name: editGroupName,
+          description: editGroupDescription,
+        });
+        setGroupDetail({ ...groupDetail, name: editGroupName, description: editGroupDescription });
+        setIsEditingGroup(false);
+        toast.success('Group updated');
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleUpdateRole = async (targetUserId: number, newRole: 'admin' | 'member') => {
+      try {
+        await api.updateMemberRole(groupDetail.id, currentUser.id, targetUserId, newRole);
+        setGroupDetail({
+          ...groupDetail,
+          members: groupDetail.members.map(m =>
+            m.user.id === targetUserId ? { ...m, role: newRole } : m
+          ),
+        });
+        toast.success(`Role updated to ${newRole}`);
+        setShowMemberActions(null);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleRemoveMember = async (targetUserId: number) => {
+      if (!confirm('Remove this member from the group?')) return;
+      try {
+        await api.removeMember(groupDetail.id, currentUser.id, targetUserId);
+        setGroupDetail({
+          ...groupDetail,
+          members: groupDetail.members.filter(m => m.user.id !== targetUserId),
+          member_count: groupDetail.member_count - 1,
+        });
+        toast.success('Member removed');
+        setShowMemberActions(null);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleMuteMember = async (targetUserId: number, isMuted: boolean) => {
+      try {
+        await api.muteMember(groupDetail.id, currentUser.id, targetUserId, isMuted);
+        setGroupDetail({
+          ...groupDetail,
+          members: groupDetail.members.map(m =>
+            m.user.id === targetUserId ? { ...m, is_muted: isMuted } : m
+          ),
+        });
+        toast.success(isMuted ? 'Member muted' : 'Member unmuted');
+        setShowMemberActions(null);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleTransferOwnership = async (newOwnerId: number) => {
+      if (!confirm('Transfer ownership to this member? You will become an admin.')) return;
+      try {
+        await api.transferOwnership(groupDetail.id, currentUser.id, newOwnerId);
+        toast.success('Ownership transferred');
+        // Reload group detail
+        const detail = await api.getGroupDetail(groupDetail.id, currentUser.id);
+        setGroupDetail(detail);
+        setShowMemberActions(null);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleCreateInviteLink = async () => {
+      try {
+        const link = await api.createInviteLink(groupDetail.id, currentUser.id);
+        setInviteLinks([link, ...inviteLinks]);
+        const fullUrl = `${window.location.origin}/join/${link.code}`;
+        await navigator.clipboard.writeText(fullUrl);
+        toast.success('Invite link copied to clipboard!');
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleLoadInviteLinks = async () => {
+      try {
+        const links = await api.getInviteLinks(groupDetail.id, currentUser.id);
+        setInviteLinks(links);
+        setShowInviteLinks(true);
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleAddMembers = async () => {
+      if (selectedNewMembers.size === 0) return;
+      try {
+        await api.addMembers(groupDetail.id, currentUser.id, Array.from(selectedNewMembers));
+        toast.success('Members added');
+        // Reload group detail
+        const detail = await api.getGroupDetail(groupDetail.id, currentUser.id);
+        setGroupDetail(detail);
+        setShowAddMembersModal(false);
+        setSelectedNewMembers(new Set());
+        setAddMemberSearch('');
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const handleLoadJoinRequests = async () => {
+      setIsLoadingJoinRequests(true);
+      try {
+        const requests = await api.getJoinRequests(groupDetail.id, currentUser.id);
+        setJoinRequests(requests);
+      } catch (error) {
+        toast.error((error as Error).message);
+      } finally {
+        setIsLoadingJoinRequests(false);
+      }
+    };
+
+    const handleJoinRequestAction = async (requestId: number, action: 'approve' | 'reject') => {
+      try {
+        await api.handleJoinRequest(groupDetail.id, requestId, currentUser.id, action);
+        setJoinRequests(joinRequests.filter(r => r.id !== requestId));
+        toast.success(action === 'approve' ? 'Member approved' : 'Request rejected');
+        if (action === 'approve') {
+          // Reload group detail to show new member
+          const detail = await api.getGroupDetail(groupDetail.id, currentUser.id);
+          setGroupDetail(detail);
+        }
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    const getRoleIcon = (role: string) => {
+      if (role === 'owner') return <Crown className="w-4 h-4 text-amber-400" />;
+      if (role === 'admin') return <ShieldCheck className="w-4 h-4 text-blue-400" />;
+      return null;
+    };
+
+    const handleSettingChange = async (setting: 'who_can_send' | 'who_can_add', value: string) => {
+      try {
+        await api.updateGroup(groupDetail.id, currentUser.id, { [setting]: value });
+        setGroupDetail({ ...groupDetail, [setting]: value });
+        setSettingsMenu(null);
+        toast.success('Setting updated');
+      } catch (error) {
+        toast.error((error as Error).message);
+      }
+    };
+
+    return (
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+        {/* Header */}
+        <div className="p-4 bg-black border-b border-zinc-900 flex items-center gap-4">
+          <button onClick={() => setCurrentView('CHAT_DETAIL')} className="p-1">
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <span className="font-bold text-lg flex-1">Group Settings</span>
+        </div>
+
+        {isLoadingGroupDetail ? (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="w-8 h-8 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto pb-8">
+            {/* Members Section */}
+            <div className="p-4">
+              <div className="bg-zinc-900/60 rounded-2xl p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-sm font-medium text-zinc-400 uppercase tracking-wider">
+                    Members · {groupDetail.member_count}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {groupDetail.members.slice(0, 12).map((member) => (
+                    <button
+                      key={member.user.id}
+                      onClick={() => {
+                        if (member.user.id !== currentUser.id) {
+                          setSelectedUser(member.user as any);
+                          setCurrentView('USER_PROFILE');
+                        }
+                      }}
+                      className="flex flex-col items-center w-16 group"
+                    >
+                      <div className="relative mb-1">
+                        <img
+                          src={member.user.avatar || `https://picsum.photos/id/${member.user.id + 10}/200/200`}
+                          className="w-14 h-14 rounded-xl object-cover border-2 border-zinc-800 group-hover:border-orange-500/50 transition-colors"
+                        />
+                        {member.role === 'owner' && (
+                          <div className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center">
+                            <Crown className="w-3 h-3 text-black" />
+                          </div>
+                        )}
+                        {member.role === 'admin' && (
+                          <div className="absolute -top-1 -right-1 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center">
+                            <ShieldCheck className="w-3 h-3 text-white" />
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-xs text-zinc-500 truncate w-full text-center">
+                        {member.user.id === currentUser.id ? 'You' : member.user.name.split(' ')[0]}
+                      </span>
+                    </button>
+                  ))}
+                  {/* Add button */}
+                  {(groupDetail.who_can_add === 'all' || isAdmin) && (
+                    <button
+                      onClick={() => setShowAddMembersModal(true)}
+                      className="flex flex-col items-center w-16 group"
+                    >
+                      <div className="w-14 h-14 rounded-xl border-2 border-dashed border-zinc-700 group-hover:border-orange-500/50 flex items-center justify-center mb-1 transition-colors">
+                        <Plus className="w-6 h-6 text-zinc-600 group-hover:text-orange-500 transition-colors" />
+                      </div>
+                      <span className="text-xs text-zinc-600">Add</span>
+                    </button>
+                  )}
+                  {/* Remove button (admin only) */}
+                  {isAdmin && groupDetail.members.length > 1 && (
+                    <button
+                      onClick={() => setShowMemberActions(-1)}
+                      className="flex flex-col items-center w-16 group"
+                    >
+                      <div className="w-14 h-14 rounded-xl border-2 border-dashed border-zinc-700 group-hover:border-red-500/50 flex items-center justify-center mb-1 transition-colors">
+                        <UserMinus className="w-6 h-6 text-zinc-600 group-hover:text-red-500 transition-colors" />
+                      </div>
+                      <span className="text-xs text-zinc-600">Remove</span>
+                    </button>
+                  )}
+                </div>
+                {groupDetail.member_count > 12 && (
+                  <button className="w-full mt-4 py-2 text-sm text-orange-500 hover:text-orange-400 transition-colors">
+                    View all {groupDetail.member_count} members →
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Settings Section */}
+            <div className="px-4">
+              <div className="bg-zinc-900/60 rounded-2xl overflow-hidden">
+                {/* Group Name */}
+                <button
+                  onClick={() => {
+                    if (isAdmin) {
+                      setEditGroupName(groupDetail.name || '');
+                      setIsEditingGroup(true);
+                    }
+                  }}
+                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                >
+                  <span className="text-zinc-300">Group Name</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500 text-sm max-w-[180px] truncate">{groupDetail.name || 'Unnamed'}</span>
+                    {isAdmin && <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />}
+                  </div>
+                </button>
+
+                <div className="h-px bg-zinc-800 mx-4" />
+
+                {/* Announcement */}
+                <button
+                  onClick={() => {
+                    if (isAdmin) {
+                      setEditGroupDescription(groupDetail.description || '');
+                      setIsEditingGroup(true);
+                    }
+                  }}
+                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                >
+                  <span className="text-zinc-300">Announcement</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-zinc-500 text-sm max-w-[180px] truncate">{groupDetail.description || 'None'}</span>
+                    <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />
+                  </div>
+                </button>
+
+                <div className="h-px bg-zinc-800 mx-4" />
+
+                {/* Invite via Link */}
+                <button
+                  onClick={handleCreateInviteLink}
+                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                >
+                  <span className="text-zinc-300">Invite via Link</span>
+                  <div className="flex items-center gap-2">
+                    <Link className="w-4 h-4 text-orange-500" />
+                  </div>
+                </button>
+
+                {/* Admin Settings */}
+                {isAdmin && (
+                  <>
+                    <div className="h-px bg-zinc-800 mx-4" />
+                    <button
+                      onClick={() => setSettingsMenu('who_can_send')}
+                      className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                    >
+                      <span className="text-zinc-300">Who can send</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-orange-500 text-sm">
+                          {groupDetail.who_can_send === 'all' ? 'Everyone' : 'Admins Only'}
+                        </span>
+                        <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />
+                      </div>
+                    </button>
+
+                    <div className="h-px bg-zinc-800 mx-4" />
+                    <button
+                      onClick={() => setSettingsMenu('who_can_add')}
+                      className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                    >
+                      <span className="text-zinc-300">Who can add members</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-orange-500 text-sm">
+                          {groupDetail.who_can_add === 'all' ? 'Everyone' : 'Admins Only'}
+                        </span>
+                        <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />
+                      </div>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Danger Zone */}
+            <div className="px-4 mt-6">
+              <div className="bg-zinc-900/60 rounded-2xl overflow-hidden">
+                <button
+                  onClick={handleLeaveGroup}
+                  className="w-full px-4 py-4 flex items-center justify-center gap-2 hover:bg-red-500/10 transition-colors"
+                >
+                  <LogOut className="w-5 h-5 text-red-500" />
+                  <span className="text-red-500 font-medium">Leave Group</span>
+                </button>
+                {isOwner && (
+                  <>
+                    <div className="h-px bg-zinc-800 mx-4" />
+                    <button
+                      onClick={handleDeleteGroup}
+                      className="w-full px-4 py-4 flex items-center justify-center gap-2 hover:bg-red-500/10 transition-colors"
+                    >
+                      <Trash2 className="w-5 h-5 text-red-600" />
+                      <span className="text-red-600 font-medium">Delete Group</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Settings Selection Modal */}
+        {settingsMenu && (
+          <>
+            <div className="fixed inset-0 z-[70] bg-black/60" onClick={() => setSettingsMenu(null)} />
+            <div className="fixed bottom-0 left-0 right-0 z-[70] bg-zinc-900 rounded-t-3xl p-4 space-y-2">
+              <div className="w-12 h-1 bg-zinc-700 rounded-full mx-auto mb-4" />
+              <p className="text-center text-zinc-400 text-sm mb-4">
+                {settingsMenu === 'who_can_send' ? 'Who can send messages?' : 'Who can add members?'}
+              </p>
+              <button
+                onClick={() => handleSettingChange(settingsMenu, 'all')}
+                className={`w-full py-4 rounded-xl text-center font-medium transition-colors ${
+                  groupDetail[settingsMenu] === 'all' 
+                    ? 'bg-orange-500 text-white' 
+                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                }`}
+              >
+                Everyone
+              </button>
+              <button
+                onClick={() => handleSettingChange(settingsMenu, 'admins_only')}
+                className={`w-full py-4 rounded-xl text-center font-medium transition-colors ${
+                  groupDetail[settingsMenu] === 'admins_only' 
+                    ? 'bg-orange-500 text-white' 
+                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                }`}
+              >
+                Admins Only
+              </button>
+              <button
+                onClick={() => setSettingsMenu(null)}
+                className="w-full py-4 text-zinc-500 text-center"
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* Edit Group Modal */}
+        {isEditingGroup && (
+          <>
+            <div className="fixed inset-0 z-[70] bg-black/60" onClick={() => setIsEditingGroup(false)} />
+            <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[70] bg-zinc-900 rounded-2xl p-5 space-y-4 max-w-sm mx-auto">
+              <h3 className="font-bold text-lg text-center">Edit Group</h3>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={editGroupName}
+                  onChange={(e) => setEditGroupName(e.target.value)}
+                  placeholder="Group name"
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 focus:border-orange-500 focus:outline-none transition-colors"
+                  autoFocus
+                />
+                <textarea
+                  value={editGroupDescription}
+                  onChange={(e) => setEditGroupDescription(e.target.value)}
+                  placeholder="Announcement (optional)"
+                  rows={3}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 resize-none focus:border-orange-500 focus:outline-none transition-colors"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => setIsEditingGroup(false)} 
+                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleSaveGroupEdit} 
+                  className="flex-1 py-3 bg-orange-500 hover:bg-orange-600 rounded-xl font-bold transition-colors"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* Add Members Modal */}
+        {showAddMembersModal && (
+          <>
+            <div className="fixed inset-0 z-[70] bg-black/60" onClick={() => { setShowAddMembersModal(false); setSelectedNewMembers(new Set()); }} />
+            <div className="fixed bottom-0 left-0 right-0 z-[70] bg-zinc-900 rounded-t-3xl max-h-[80vh] flex flex-col">
+              <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                <span className="font-bold text-lg">Add Members</span>
+                <button 
+                  onClick={() => { setShowAddMembersModal(false); setSelectedNewMembers(new Set()); }}
+                  className="p-2 hover:bg-zinc-800 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="p-4">
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+                  <input
+                    type="text"
+                    value={addMemberSearch}
+                    onChange={async (e) => {
+                      setAddMemberSearch(e.target.value);
+                      try {
+                        const results = await api.searchUsers(e.target.value);
+                        const existingIds = new Set(groupDetail.members.map(m => m.user.id));
+                        setAddMemberResults(results.filter((u: any) => !existingIds.has(u.id)));
+                      } catch (error) {
+                        console.error(error);
+                      }
+                    }}
+                    placeholder="Search users..."
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-12 pr-4 py-3 focus:border-orange-500 focus:outline-none transition-colors"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {addMemberResults.map((user) => (
+                  <button
+                    key={user.id}
+                    onClick={() => {
+                      const newSet = new Set(selectedNewMembers);
+                      if (newSet.has(Number(user.id))) {
+                        newSet.delete(Number(user.id));
+                      } else {
+                        newSet.add(Number(user.id));
+                      }
+                      setSelectedNewMembers(newSet);
+                    }}
+                    className={`w-full p-3 rounded-xl flex items-center gap-3 ${selectedNewMembers.has(Number(user.id)) ? 'bg-orange-500/20 border border-orange-500' : 'bg-zinc-800'}`}
+                  >
+                    <img src={user.avatar || `https://picsum.photos/id/${Number(user.id) + 10}/200/200`} className="w-10 h-10 rounded-full" />
+                    <div className="flex-1 text-left">
+                      <p className="font-medium">{user.name}</p>
+                      <p className="text-zinc-500 text-sm">@{user.handle}</p>
+                    </div>
+                    {selectedNewMembers.has(Number(user.id)) && <Check className="w-5 h-5 text-orange-500" />}
+                  </button>
+                ))}
+              </div>
+              {selectedNewMembers.size > 0 && (
+                <div className="p-4 border-t border-zinc-800">
+                  <button
+                    onClick={handleAddMembers}
+                    className="w-full py-3 bg-orange-500 rounded-xl font-bold"
+                  >
+                    Add {selectedNewMembers.size} Member{selectedNewMembers.size > 1 ? 's' : ''}
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Remove Member Modal */}
+        {showMemberActions === -1 && (
+          <div className="fixed inset-0 z-[70] bg-black/80 flex items-end">
+            <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[60vh] flex flex-col">
+              <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+                <span className="font-bold">Remove Member</span>
+                <button onClick={() => setShowMemberActions(null)}>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto divide-y divide-zinc-800">
+                {groupDetail.members
+                  .filter(m => m.user.id !== currentUser.id && (isOwner || m.role === 'member'))
+                  .map((member) => (
+                    <button
+                      key={member.user.id}
+                      onClick={() => handleRemoveMember(member.user.id)}
+                      className="w-full p-4 flex items-center gap-3 hover:bg-zinc-800"
+                    >
+                      <img
+                        src={member.user.avatar || `https://picsum.photos/id/${member.user.id + 10}/200/200`}
+                        className="w-10 h-10 rounded-full"
+                      />
+                      <div className="flex-1 text-left">
+                        <p className="font-medium">{member.user.name}</p>
+                        <p className="text-zinc-500 text-sm">@{member.user.handle}</p>
+                      </div>
+                      <UserMinus className="w-5 h-5 text-red-400" />
+                    </button>
+                  ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderUserProfile = () => {
@@ -2264,6 +3153,8 @@ const App: React.FC = () => {
       {currentView === 'TRUST_DETAIL' && renderTrustDetail()}
       {currentView === 'INVITE' && renderInvite()}
       {currentView === 'CHAT_DETAIL' && renderChatDetail()}
+      {currentView === 'GROUP_INFO' && renderGroupInfo()}
+      {currentView === 'JOIN_GROUP' && renderJoinGroup()}
       {currentView === 'USER_PROFILE' && renderUserProfile()}
       {currentView === 'FOLLOWERS_LIST' && renderFollowersList()}
       {currentView === 'FOLLOWING_LIST' && renderFollowingList()}

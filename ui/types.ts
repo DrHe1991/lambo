@@ -43,6 +43,7 @@ export interface ChatSession {
   unreadCount: number;
   isGroup?: boolean;
   name?: string | null;
+  userHasLeft?: boolean;
 }
 
 export interface JuryCase {
@@ -130,6 +131,7 @@ export function apiSessionToSession(apiSession: {
   last_message_at: string | null;
   unread_count: number;
   created_at: string;
+  user_has_left?: boolean;
 }): ChatSession {
   return {
     id: apiSession.id,
@@ -139,6 +141,7 @@ export function apiSessionToSession(apiSession: {
     lastMessage: apiSession.last_message || '',
     timestamp: apiSession.last_message_at ? formatTimestamp(apiSession.last_message_at) : formatTimestamp(apiSession.created_at),
     unreadCount: apiSession.unread_count,
+    userHasLeft: apiSession.user_has_left ?? false,
   };
 }
 

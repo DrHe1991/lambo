@@ -1,0 +1,8 @@
+# BitLink Economic Simulator Dependencies
+# No external dependencies required for core simulation
+# All modules use Python standard library only
+
+# Optional: For enhanced visualization (uncomment if needed)
+# matplotlib>=3.7.0
+# pandas>=2.0.0
+# numpy>=1.24.0
