@@ -12,7 +12,7 @@ from app.schemas.post import (
 )
 from app.schemas.user import UserBrief
 from app.services.ledger_service import LedgerService, InsufficientBalance
-from app.services.trust_service import dynamic_fee_multiplier
+from app.services.trust_service import dynamic_fee_multiplier, compute_trust_score
 from app.models.reward import InteractionLog, InteractionType
 
 # Base costs (before K(trust) multiplier) - aligned with simulator
@@ -23,6 +23,14 @@ BASE_COMMENT_COST = 20
 BASE_REPLY_COST = 10
 BASE_LIKE_POST_COST = 20
 BASE_LIKE_COMMENT_COST = 10
+
+
+def _get_fresh_trust(user: User) -> int:
+    """Compute fresh trust score from sub-dimensions."""
+    return compute_trust_score(
+        user.creator_score, user.curator_score,
+        user.juror_score, user.risk_score,
+    )
 
 
 def _apply_k(base_cost: int, trust_score: int) -> int:
@@ -131,7 +139,7 @@ async def create_post(
 
     is_question = post_data.post_type == PostType.QUESTION.value
     raw_cost = BASE_QUESTION_COST if is_question else BASE_POST_COST
-    base_cost = _apply_k(raw_cost, author.trust_score)
+    base_cost = _apply_k(raw_cost, _get_fresh_trust(author))
     action_type = ActionType.SPEND_QUESTION if is_question else ActionType.SPEND_POST
     bounty = post_data.bounty or 0
     ledger = LedgerService(db)
@@ -362,7 +370,7 @@ async def like_post(
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
 
-    like_cost = _apply_k(BASE_LIKE_POST_COST, user.trust_score)
+    like_cost = _apply_k(BASE_LIKE_POST_COST, _get_fresh_trust(user))
     ledger = LedgerService(db)
 
     # 80% to author, 20% to platform
@@ -454,14 +462,15 @@ async def create_comment(
     if is_answer and post.author_id == author_id:
         raise HTTPException(status_code=400, detail='Cannot answer your own question')
 
+    author_trust = _get_fresh_trust(author)
     if is_answer:
-        cost = _apply_k(BASE_ANSWER_COST, author.trust_score)
+        cost = _apply_k(BASE_ANSWER_COST, author_trust)
         action_type = ActionType.SPEND_ANSWER
     elif is_reply:
-        cost = _apply_k(BASE_REPLY_COST, author.trust_score)
+        cost = _apply_k(BASE_REPLY_COST, author_trust)
         action_type = ActionType.SPEND_REPLY
     else:
-        cost = _apply_k(BASE_COMMENT_COST, author.trust_score)
+        cost = _apply_k(BASE_COMMENT_COST, author_trust)
         action_type = ActionType.SPEND_COMMENT
 
     # Validate parent comment and determine recipient
@@ -595,7 +604,7 @@ async def like_comment(
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
 
-    cl_cost = _apply_k(BASE_LIKE_COMMENT_COST, user.trust_score)
+    cl_cost = _apply_k(BASE_LIKE_COMMENT_COST, _get_fresh_trust(user))
     ledger = LedgerService(db)
 
     # 80% to comment author, 20% to platform

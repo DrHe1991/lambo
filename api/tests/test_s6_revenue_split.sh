@@ -36,11 +36,14 @@ CAROL=$(curl -s -X POST "$API/users" -H 'Content-Type: application/json' -d "{\"
 CAROL_ID=$(jv "$CAROL" "d['id']")
 echo "  Carol ID=$CAROL_ID"
 
-# ── 2. Fund users and use up free posts ───────────────────────────────
-echo ""; echo "── 2. Fund users & use free posts ──"
+# ── 2. Fund users, set trust~600, use up free posts ───────────────────
+echo ""; echo "── 2. Fund users & set trust~600 ──"
+# S8: trust = creator*0.6 + curator*0.3 + juror_bonus - risk_penalty
+# For trust≈600: creator=680, curator=610, juror=400, risk=0 → 408+183+10=601
 docker compose exec -T postgres psql -U bitlink -d bitlink -c \
-  "UPDATE users SET available_balance=100000, free_posts_remaining=0 WHERE id IN ($ALICE_ID,$BOB_ID,$CAROL_ID);" > /dev/null 2>&1
-echo "  Funded with 100000 sat, free posts used"
+  "UPDATE users SET available_balance=100000, free_posts_remaining=0, creator_score=680, curator_score=610, juror_score=400, risk_score=0 WHERE id IN ($ALICE_ID,$BOB_ID,$CAROL_ID);" > /dev/null 2>&1 &
+wait $!
+echo "  Funded with 100000 sat, trust~600, free posts used"
 
 # ── 3. Verify new base costs ──────────────────────────────────────────
 echo ""; echo "── 3. Verify updated base costs ──"
@@ -51,11 +54,11 @@ POST_COST=$(jv "$COSTS" "d['costs']['post']")
 LIKE_COST=$(jv "$COSTS" "d['costs']['like_post']")
 COMMENT_COST=$(jv "$COSTS" "d['costs']['comment']")
 
-# With trust=600, K≈0.92, so costs should be close to base
+# With trust≈600, K≈0.92, so costs should be close to base
 # Base: post=50, like=20, comment=20
-assert "Post base ~50 (was 200)" "[ $POST_COST -lt 60 ] && [ $POST_COST -gt 40 ]"
-assert "Like base ~20 (was 10)" "[ $LIKE_COST -lt 25 ] && [ $LIKE_COST -gt 15 ]"
-assert "Comment base ~20 (was 50)" "[ $COMMENT_COST -lt 25 ] && [ $COMMENT_COST -gt 15 ]"
+assert "Post base ~50 (K~0.92)" "[ $POST_COST -lt 60 ] && [ $POST_COST -gt 40 ]"
+assert "Like base ~20 (K~0.92)" "[ $LIKE_COST -lt 25 ] && [ $LIKE_COST -gt 15 ]"
+assert "Comment base ~20 (K~0.92)" "[ $COMMENT_COST -lt 25 ] && [ $COMMENT_COST -gt 15 ]"
 
 # ── 4. Alice creates a post ───────────────────────────────────────────
 echo ""; echo "── 4. Alice creates a post ──"
@@ -98,11 +101,11 @@ assert "Alice earned 80% of like cost" "[ $ALICE_EARNED -eq $EXPECTED_ALICE ]"
 
 # ── 6. Verify platform_revenue table updated ──────────────────────────
 echo ""; echo "── 6. Verify platform_revenue accumulated ──"
-TODAY=$(date +%Y-%m-%d)
+# Check total platform revenue (not just today, as timezone may differ)
 PLATFORM_TOTAL=$(docker compose exec -T postgres psql -U bitlink -d bitlink -t -c \
-  "SELECT COALESCE(SUM(like_revenue),0) FROM platform_revenue WHERE date='$TODAY';" 2>/dev/null | tr -d ' ')
-echo "  Platform like_revenue today: $PLATFORM_TOTAL sat"
-assert "Platform revenue > 0" "[ \"$PLATFORM_TOTAL\" != \"0\" ]"
+  "SELECT COALESCE(SUM(like_revenue),0) FROM platform_revenue;" 2>/dev/null | tr -d ' \n\r')
+echo "  Platform total like_revenue: $PLATFORM_TOTAL sat"
+assert "Platform revenue > 0" "[ \"$PLATFORM_TOTAL\" != \"0\" ] && [ -n \"$PLATFORM_TOTAL\" ]"
 
 # ── 7. Carol comments on Alice's post (80% to Alice) ──────────────────
 echo ""; echo "── 7. Carol comments (80/20 split to post author) ──"

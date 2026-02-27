@@ -36,8 +36,12 @@ R2=$(api POST "/api/users" -d "{\"name\":\"Bob\",\"handle\":\"bob_$TS\"}")
 U1=$(jval "$R1" "['id']"); U2=$(jval "$R2" "['id']")
 echo "  Alice=$U1, Bob=$U2"
 
-echo "=== Setup: give both 2000 sat ==="
-docker compose exec -T postgres psql -U bitlink -d bitlink -t -c "UPDATE users SET available_balance=2000 WHERE id IN ($U1,$U2);" > /dev/null
+echo "=== Setup: give both 2000 sat and set trust~600 (for K=0.92) ==="
+# S8 formula: trust = creator*0.6 + curator*0.3 + juror_bonus - risk_penalty
+# For trust=600: creator=680, curator=610, juror=400, risk=0 → 408 + 183 + 10 = 601
+docker compose exec -T postgres psql -U bitlink -d bitlink -c \
+  "UPDATE users SET available_balance=2000, creator_score=680, curator_score=610, juror_score=400, risk_score=0 WHERE id IN ($U1,$U2);" > /dev/null 2>&1 &
+wait $!
 
 echo ""
 echo "── 1. Post creation (free + paid) ──"

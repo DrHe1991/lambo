@@ -32,32 +32,42 @@ BOB=$(curl -s -X POST "$API/users" -H 'Content-Type: application/json' -d "{\"na
 BOB_ID=$(jv "$BOB" "d['id']")
 echo "  Bob ID=$BOB_ID"
 
-# ── 2. Default trust breakdown ────────────────────────────────────────
-echo ""; echo "── 2. Default trust breakdown ──"
+# ── 2. Default trust breakdown (S8 values) ─────────────────────────────
+echo ""; echo "── 2. Default trust breakdown (S8) ──"
 TRUST=$(curl -s "$API/users/$ALICE_ID/trust")
 echo "  $TRUST"
-assert "Default creator_score=500" "[ $(jv "$TRUST" "d['creator_score']") -eq 500 ]"
-assert "Default curator_score=500" "[ $(jv "$TRUST" "d['curator_score']") -eq 500 ]"
-assert "Default juror_score=500"   "[ $(jv "$TRUST" "d['juror_score']") -eq 500 ]"
-assert "Default risk_score=0"      "[ $(jv "$TRUST" "d['risk_score']") -eq 0 ]"
-assert "Composite trust=600"       "[ $(jv "$TRUST" "d['trust_score']") -eq 600 ]"
-assert "Tier=blue"                 "[ \"$(jv "$TRUST" "d['tier']")\" = 'blue' ]"
+# S8: new defaults - creator=150, curator=150, juror=300, risk=30, trust~135
+assert "Default creator_score=150" "[ $(jv "$TRUST" "d['creator_score']") -eq 150 ]"
+assert "Default curator_score=150" "[ $(jv "$TRUST" "d['curator_score']") -eq 150 ]"
+assert "Default juror_score=300"   "[ $(jv "$TRUST" "d['juror_score']") -eq 300 ]"
+assert "Default risk_score=30"     "[ $(jv "$TRUST" "d['risk_score']") -eq 30 ]"
+assert "Composite trust~135"       "[ $(jv "$TRUST" "d['trust_score']") -ge 130 ] && [ $(jv "$TRUST" "d['trust_score']") -le 140 ]"
+assert "Tier=white"                "[ \"$(jv "$TRUST" "d['tier']")\" = 'white' ]"
 
-# ── 3. Default dynamic costs ──────────────────────────────────────────
-echo ""; echo "── 3. Default costs (trust=600) ──"
+# ── 3. Set trust~470 for K testing (S8 formula) ────────────────────────
+echo ""; echo "── 3. Set users to trust~470 for K testing ──"
+# S8: creator=500, curator=500, juror=500, risk=0 → trust = 500*0.6 + 500*0.3 + (500-300)*0.1 = 470
+docker compose exec -T postgres psql -U bitlink -d bitlink -c \
+  "UPDATE users SET creator_score=500, curator_score=500, juror_score=500, risk_score=0 WHERE id IN ($ALICE_ID,$BOB_ID);" >/dev/null 2>&1 &
+wait $!
+echo "  Set Alice & Bob to trust~470 (S8 formula)"
+
 COSTS=$(curl -s "$API/users/$ALICE_ID/costs")
 echo "  $COSTS"
 K=$(jv "$COSTS" "d['fee_multiplier']")
-assert "Fee multiplier ~0.92" "python3 -c \"assert 0.85 < $K < 0.95, '$K not in range'\""
+TRUST_SCORE=$(jv "$COSTS" "d['trust_score']")
+echo "  Trust=$TRUST_SCORE, K=$K"
+# trust=470 → K = 1.4 - 470/1250 ≈ 1.02
+assert "Fee multiplier ~1.02 (trust~470)" "python3 -c \"assert 0.95 < $K < 1.1, '$K not in range'\""
 POST_COST=$(jv "$COSTS" "d['costs']['post']")
-# S6: base post cost changed from 200 to 50
-assert "Post cost < 50 (discounted)" "[ $POST_COST -lt 50 ]"
-assert "Post cost > 40 (not too low)" "[ $POST_COST -gt 40 ]"
+# S6: base post cost = 50 * 1.02 ≈ 51
+assert "Post cost ~51 (K~1.02)" "[ $POST_COST -ge 49 ] && [ $POST_COST -le 55 ]"
 
-# ── 4. Give users balance for testing ─────────────────────────────────
+# ── 4. Give users balance for testing (keep trust scores from step 3) ───
 echo ""; echo "── 4. Fund test users ──"
 docker compose exec -T postgres psql -U bitlink -d bitlink -c \
-  "UPDATE users SET available_balance=50000 WHERE id IN ($ALICE_ID,$BOB_ID);" > /dev/null 2>&1
+  "UPDATE users SET available_balance=50000, free_posts_remaining=1 WHERE id IN ($ALICE_ID,$BOB_ID);" >/dev/null 2>&1 &
+wait $!
 echo "  Funded Alice & Bob with 50000 sat each"
 
 # ── 5. Dynamic fees actually applied ─────────────────────────────────
@@ -78,7 +88,7 @@ BAL_AFTER_PAID=$(jv "$(curl -s "$API/users/$ALICE_ID/balance")" "d['available_ba
 DEDUCTED=$((BAL_AFTER_FREE - BAL_AFTER_PAID))
 echo "  Post cost_paid=$PAID_COST, deducted=$DEDUCTED"
 assert "Paid post cost matches cost_paid" "[ $DEDUCTED -eq $PAID_COST ]"
-assert "Post cost == K*200 (dynamic)" "[ $PAID_COST -eq $POST_COST ]"
+assert "Post cost == K*50 (dynamic)" "[ $PAID_COST -eq $POST_COST ]"
 
 # ── 6. Like uses dynamic fee ─────────────────────────────────────────
 echo ""; echo "── 6. Like uses dynamic fee ──"
@@ -110,33 +120,39 @@ assert "Comment deduction matches dynamic cost" "[ $COMMENT_DEDUCTED -eq $BOB_CO
 
 # ── 8. High-trust user pays less ──────────────────────────────────────
 echo ""; echo "── 8. High trust → lower costs ──"
-# Set Carol to high trust
+# Set Carol to high trust (S8: creator=1000, curator=800 → trust ~870)
 CAROL=$(curl -s -X POST "$API/users" -H 'Content-Type: application/json' -d "{\"name\":\"Carol\",\"handle\":\"carol_$TS\"}")
 CAROL_ID=$(jv "$CAROL" "d['id']")
 docker compose exec -T postgres psql -U bitlink -d bitlink -c \
-  "UPDATE users SET creator_score=900, curator_score=900, juror_score=900, risk_score=0, trust_score=950, available_balance=50000, free_posts_remaining=0 WHERE id=$CAROL_ID;" > /dev/null 2>&1
+  "UPDATE users SET creator_score=1000, curator_score=800, juror_score=500, risk_score=0, available_balance=50000, free_posts_remaining=0 WHERE id=$CAROL_ID;" >/dev/null 2>&1 &
+wait $!
 
 CAROL_COSTS=$(curl -s "$API/users/$CAROL_ID/costs")
 CAROL_POST_COST=$(jv "$CAROL_COSTS" "d['costs']['post']")
 CAROL_K=$(jv "$CAROL_COSTS" "d['fee_multiplier']")
-echo "  Carol (trust=950): K=$CAROL_K, post=$CAROL_POST_COST sat"
-assert "High trust K < 0.7" "python3 -c \"assert $CAROL_K < 0.7, '$CAROL_K'\""
-assert "High trust post < 140 sat" "[ $CAROL_POST_COST -lt 140 ]"
+CAROL_TRUST=$(jv "$CAROL_COSTS" "d['trust_score']")
+echo "  Carol (trust=$CAROL_TRUST): K=$CAROL_K, post=$CAROL_POST_COST sat"
+# S8: 1000*0.6 + 800*0.3 + 20 = 860 → K = 1.4 - 860/1250 ≈ 0.71
+assert "High trust K < 0.75" "python3 -c \"assert $CAROL_K < 0.75, '$CAROL_K'\""
+assert "High trust post < 40 sat" "[ $CAROL_POST_COST -lt 40 ]"
 
 # ── 9. Low-trust user pays more ──────────────────────────────────────
 echo ""; echo "── 9. Low trust → higher costs ──"
+# S8: creator=100, curator=100, risk=100 → trust ~80 - risk_penalty
 DAVE=$(curl -s -X POST "$API/users" -H 'Content-Type: application/json' -d "{\"name\":\"Dave\",\"handle\":\"dave_$TS\"}")
 DAVE_ID=$(jv "$DAVE" "d['id']")
 docker compose exec -T postgres psql -U bitlink -d bitlink -c \
-  "UPDATE users SET creator_score=200, curator_score=200, juror_score=200, risk_score=500, trust_score=200, available_balance=50000, free_posts_remaining=0 WHERE id=$DAVE_ID;" > /dev/null 2>&1
+  "UPDATE users SET creator_score=100, curator_score=100, juror_score=300, risk_score=100, available_balance=50000, free_posts_remaining=0 WHERE id=$DAVE_ID;" >/dev/null 2>&1 &
+wait $!
 
 DAVE_COSTS=$(curl -s "$API/users/$DAVE_ID/costs")
 DAVE_POST_COST=$(jv "$DAVE_COSTS" "d['costs']['post']")
 DAVE_K=$(jv "$DAVE_COSTS" "d['fee_multiplier']")
-echo "  Dave (trust=200): K=$DAVE_K, post=$DAVE_POST_COST sat"
-assert "Low trust K > 1.2" "python3 -c \"assert $DAVE_K > 1.2, '$DAVE_K'\""
-# S6: base post cost is 50, so low trust post = 50 * 1.24 ≈ 62
-assert "Low trust post > 55 sat" "[ $DAVE_POST_COST -gt 55 ]"
+DAVE_TRUST=$(jv "$DAVE_COSTS" "d['trust_score']")
+echo "  Dave (trust=$DAVE_TRUST): K=$DAVE_K, post=$DAVE_POST_COST sat"
+# S8: 100*0.6 + 100*0.3 - (100/50)^2 = 60 + 30 - 4 = 86 → K ≈ 1.33
+assert "Low trust K > 1.3" "python3 -c \"assert $DAVE_K > 1.3, '$DAVE_K'\""
+assert "Low trust post > 65 sat" "[ $DAVE_POST_COST -gt 65 ]"
 
 # ── 10. UserResponse includes sub-scores ──────────────────────────────
 echo ""; echo "── 10. GET /users/{id} includes sub-scores ──"

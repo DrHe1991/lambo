@@ -16,14 +16,15 @@ class User(Base):
     avatar: Mapped[str | None] = mapped_column(String(500))
     bio: Mapped[str | None] = mapped_column(String(300))
 
-    # Trust sub-scores (0-1000 each)
-    creator_score: Mapped[int] = mapped_column(Integer, default=500)
-    curator_score: Mapped[int] = mapped_column(Integer, default=500)
-    juror_score: Mapped[int] = mapped_column(Integer, default=500)
-    risk_score: Mapped[int] = mapped_column(Integer, default=0)
+    # Trust sub-scores (S8: no hard cap for creator/curator)
+    creator_score: Mapped[int] = mapped_column(Integer, default=150)
+    curator_score: Mapped[int] = mapped_column(Integer, default=150)
+    juror_score: Mapped[int] = mapped_column(Integer, default=300)
+    risk_score: Mapped[int] = mapped_column(Integer, default=30)
 
-    # Composite trust score (computed from sub-scores)
-    trust_score: Mapped[int] = mapped_column(Integer, default=600)
+    # Composite trust score (S8 formula: creator*0.6 + curator*0.3 + juror_bonus - risk_penalty)
+    # New user: 150*0.6 + 150*0.3 + 0 - (30/50)^2 ≈ 135
+    trust_score: Mapped[int] = mapped_column(Integer, default=135)
 
     # Sat balance (Spend & Earn)
     available_balance: Mapped[int] = mapped_column(BigInteger, default=0)

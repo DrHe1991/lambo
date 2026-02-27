@@ -1,34 +1,77 @@
 """TrustScore management — 4 sub-dimensions → composite trust_score.
 
-Formula: TrustScore = 0.30×Creator + 0.25×Curator + 0.25×Juror + 0.20×(1000 - Risk)
-New user: Creator=500, Curator=500, Juror=500, Risk=0 → TrustScore = 550
+Formula (S8): TrustScore = Creator × 0.6 + Curator × 0.3 + Juror_bonus - Risk_penalty
+  - Juror_bonus = max(0, (Juror - 300) × 0.1)
+  - Risk_penalty = (Risk / 50)^2 for Risk <= 100, else 125 + (Risk - 100) × 5
+
+New user: Creator=150, Curator=150, Juror=300, Risk=30 → TrustScore ≈ 135
 """
 from sqlalchemy.ext.asyncio import AsyncSession
+from enum import Enum
 
 from app.models.user import User
 
-# Weights for composite score
-W_CREATOR = 0.30
-W_CURATOR = 0.25
-W_JUROR = 0.25
-W_RISK = 0.20
+# Weights for composite score (S8 formula)
+W_CREATOR = 0.6
+W_CURATOR = 0.3
+JUROR_BASELINE = 300
+JUROR_BONUS_MULT = 0.1
 
-# Clamp bounds
+# Clamp bounds - creator/curator can exceed 1000 (no hard cap)
 SCORE_MIN = 0
-SCORE_MAX = 1000
+SCORE_MAX = 99999  # Effectively no cap for top creators
+
+
+class TrustTier(str, Enum):
+    """Trust tier visual categories."""
+    WHITE = 'white'
+    GREEN = 'green'
+    BLUE = 'blue'
+    PURPLE = 'purple'
+    ORANGE = 'orange'
+
+
+# Trust tier ranges (S8)
+TRUST_TIER_RANGES = {
+    TrustTier.WHITE: (0, 150),
+    TrustTier.GREEN: (151, 250),
+    TrustTier.BLUE: (251, 400),
+    TrustTier.PURPLE: (401, 700),
+    TrustTier.ORANGE: (701, 99999),
+}
+
+# Tier reward multiplier - higher tiers get reduced rewards (diminishing returns)
+TIER_REWARD_MULTIPLIER = {
+    TrustTier.WHITE: 1.0,
+    TrustTier.GREEN: 0.7,
+    TrustTier.BLUE: 0.5,
+    TrustTier.PURPLE: 0.3,
+    TrustTier.ORANGE: 0.15,
+}
 
 
 def compute_trust_score(
     creator: int, curator: int, juror: int, risk: int,
 ) -> int:
-    """Pure function: compute composite TrustScore from sub-dimensions."""
-    raw = (
-        W_CREATOR * creator
-        + W_CURATOR * curator
-        + W_JUROR * juror
-        + W_RISK * (1000 - risk)
-    )
-    return max(SCORE_MIN, min(SCORE_MAX, int(round(raw))))
+    """Compute composite TrustScore from sub-dimensions (S8 formula).
+    
+    Formula: Creator × 0.6 + Curator × 0.3 + Juror_bonus - Risk_penalty
+    """
+    # Base score from creator and curator
+    base = creator * W_CREATOR + curator * W_CURATOR
+    
+    # Juror bonus (only if above baseline)
+    juror_bonus = max(0, (juror - JUROR_BASELINE) * JUROR_BONUS_MULT)
+    
+    # Risk penalty (quadratic for low risk, linear for high risk)
+    if risk <= 100:
+        risk_penalty = (risk / 50) ** 2
+    else:
+        # Dramatic penalty for high risk
+        risk_penalty = 125 + (risk - 100) * 5
+    
+    raw = base + juror_bonus - risk_penalty
+    return max(SCORE_MIN, int(round(raw)))
 
 
 def dynamic_fee_multiplier(trust_score: int) -> float:
@@ -41,16 +84,18 @@ def dynamic_fee_multiplier(trust_score: int) -> float:
 
 
 def trust_tier(trust_score: int) -> str:
-    """Return visual tier name based on TrustScore."""
-    if trust_score >= 900:
-        return 'orange'
-    if trust_score >= 750:
-        return 'purple'
-    if trust_score >= 600:
-        return 'blue'
-    if trust_score >= 400:
-        return 'green'
-    return 'white'
+    """Return visual tier name based on TrustScore (S8 ranges)."""
+    for tier, (low, high) in TRUST_TIER_RANGES.items():
+        if low <= trust_score <= high:
+            return tier.value
+    return TrustTier.WHITE.value
+
+
+def get_tier_multiplier(trust_score: int) -> float:
+    """Get reward multiplier for current tier (higher tiers get less)."""
+    tier_str = trust_tier(trust_score)
+    tier = TrustTier(tier_str)
+    return TIER_REWARD_MULTIPLIER.get(tier, 1.0)
 
 
 class TrustScoreService:

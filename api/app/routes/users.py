@@ -284,11 +284,18 @@ async def get_trust_breakdown(user_id: int, db: AsyncSession = Depends(get_db)):
 @router.get('/{user_id}/costs')
 async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
     """Get dynamic action costs for this user (adjusted by K(trust))."""
+    from app.services.trust_service import compute_trust_score
+    
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
 
-    k = dynamic_fee_multiplier(user.trust_score)
+    # Compute fresh trust score from sub-dimensions (S8)
+    fresh_trust = compute_trust_score(
+        user.creator_score, user.curator_score,
+        user.juror_score, user.risk_score,
+    )
+    k = dynamic_fee_multiplier(fresh_trust)
 
     def apply(base: int) -> int:
         return max(1, int(round(base * k)))
@@ -296,8 +303,8 @@ async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
     # Base costs aligned with simulator (S6)
     return {
         'user_id': user.id,
-        'trust_score': user.trust_score,
-        'tier': trust_tier(user.trust_score),
+        'trust_score': fresh_trust,
+        'tier': trust_tier(fresh_trust),
         'fee_multiplier': k,
         'costs': {
             'post': apply(50),
