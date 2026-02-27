@@ -13,6 +13,7 @@ from app.schemas.post import (
 from app.schemas.user import UserBrief
 from app.services.ledger_service import LedgerService, InsufficientBalance
 from app.services.trust_service import dynamic_fee_multiplier, compute_trust_score
+from app.services.like_weight_service import LikeWeightService
 from app.models.reward import InteractionLog, InteractionType
 
 # Base costs (before K(trust) multiplier) - aligned with simulator
@@ -391,7 +392,23 @@ async def like_post(
             detail=f'Insufficient balance. Need {like_cost} sat.',
         )
 
-    db.add(PostLike(post_id=post_id, user_id=user_id))
+    # Calculate like weight (S9)
+    weight_service = LikeWeightService(db)
+    weights = await weight_service.calculate_like_weight(user_id, post_id)
+
+    # Create like with weight components
+    db.add(PostLike(
+        post_id=post_id,
+        user_id=user_id,
+        w_trust=weights['w_trust'],
+        n_novelty=weights['n_novelty'],
+        s_source=weights['s_source'],
+        ce_entropy=weights['ce_entropy'],
+        cross_circle=weights['cross_circle'],
+        cabal_penalty=weights['cabal_penalty'],
+        total_weight=weights['total_weight'],
+        is_cross_circle=weights['is_cross_circle'],
+    ))
     post.likes_count += 1
     await _log_interaction(db, user_id, post.author_id, InteractionType.LIKE, post_id)
     await db.flush()
@@ -400,6 +417,7 @@ async def like_post(
         'likes_count': post.likes_count,
         'is_liked': True,
         'author_earned': author_share,
+        'like_weight': weights['total_weight'],
     }
 
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Text, UniqueConstraint
+from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Text, UniqueConstraint, Float, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -92,7 +92,7 @@ class Comment(Base):
 
 
 class PostLike(Base):
-    """Tracks who liked which post (replaces simple counter)."""
+    """Tracks who liked which post with full weight components."""
 
     __tablename__ = 'post_likes'
 
@@ -100,6 +100,20 @@ class PostLike(Base):
     post_id: Mapped[int] = mapped_column(ForeignKey('posts.id', ondelete='CASCADE'))
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Weight components (S9) - stored at creation time
+    w_trust: Mapped[float] = mapped_column(Float, default=1.0)        # Liker trust tier weight
+    n_novelty: Mapped[float] = mapped_column(Float, default=1.0)      # Interaction freshness
+    s_source: Mapped[float] = mapped_column(Float, default=1.0)       # Stranger vs follower
+    ce_entropy: Mapped[float] = mapped_column(Float, default=1.0)     # Consensus diversity
+    cross_circle: Mapped[float] = mapped_column(Float, default=1.0)   # Cross-circle bonus
+    cabal_penalty: Mapped[float] = mapped_column(Float, default=1.0)  # Cabal member penalty
+
+    # Computed total weight
+    total_weight: Mapped[float] = mapped_column(Float, default=1.0)
+
+    # Is this a cross-circle like? (liker not following author)
+    is_cross_circle: Mapped[bool] = mapped_column(Boolean, default=False)
 
     __table_args__ = (
         UniqueConstraint('post_id', 'user_id', name='uq_post_like'),

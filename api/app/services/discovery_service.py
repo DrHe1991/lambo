@@ -76,7 +76,11 @@ class DiscoveryService:
         self.db = db
 
     async def calculate_post_score(self, post_id: int) -> float:
-        """Calculate the Discovery Score for a single post."""
+        """Calculate the Discovery Score for a single post.
+        
+        S9: Uses stored total_weight from PostLike (calculated at like time).
+        Falls back to legacy calculation for likes without stored weights.
+        """
         post = await self.db.get(Post, post_id)
         if not post:
             return 0.0
@@ -91,19 +95,25 @@ class DiscoveryService:
         if not likes:
             return 0.0
 
-        author_id = post.author_id
         total_score = 0.0
-
         for like, liker in likes:
-            w = w_trust(liker.trust_score)
-            n = await self._get_novelty(like.user_id, author_id)
-            s = await self._get_source(like.user_id, author_id)
-            total_score += w * n * s
+            # S9: Use stored total_weight if available
+            if like.total_weight and like.total_weight != 1.0:
+                total_score += like.total_weight
+            else:
+                # Legacy fallback: calculate W × N × S
+                w = w_trust(liker.trust_score)
+                n = await self._get_novelty(like.user_id, post.author_id)
+                s = await self._get_source(like.user_id, post.author_id)
+                total_score += w * n * s
 
         return total_score
 
     async def get_post_score_breakdown(self, post_id: int) -> dict:
-        """Return detailed breakdown of Discovery Score for a post."""
+        """Return detailed breakdown of Discovery Score for a post.
+        
+        S9: Includes all weight components stored in PostLike.
+        """
         post = await self.db.get(Post, post_id)
         if not post:
             return {'total': 0.0, 'likes': []}
@@ -118,20 +128,38 @@ class DiscoveryService:
         breakdown = []
         total = 0.0
         for like, liker in likes:
-            w = w_trust(liker.trust_score)
-            n = await self._get_novelty(like.user_id, post.author_id)
-            s = await self._get_source(like.user_id, post.author_id)
-            weight = w * n * s
+            # S9: Use stored weights if available
+            if like.total_weight and like.total_weight != 1.0:
+                weight = like.total_weight
+                breakdown.append({
+                    'user_id': liker.id,
+                    'handle': liker.handle,
+                    'trust_score': liker.trust_score,
+                    'w_trust': like.w_trust,
+                    'n_novelty': like.n_novelty,
+                    's_source': like.s_source,
+                    'ce_entropy': like.ce_entropy,
+                    'cross_circle': like.cross_circle,
+                    'cabal_penalty': like.cabal_penalty,
+                    'is_cross_circle': like.is_cross_circle,
+                    'weight': round(weight, 4),
+                })
+            else:
+                # Legacy fallback
+                w = w_trust(liker.trust_score)
+                n = await self._get_novelty(like.user_id, post.author_id)
+                s = await self._get_source(like.user_id, post.author_id)
+                weight = w * n * s
+                breakdown.append({
+                    'user_id': liker.id,
+                    'handle': liker.handle,
+                    'trust_score': liker.trust_score,
+                    'w_trust': w,
+                    'n_novelty': n,
+                    's_source': s,
+                    'weight': round(weight, 4),
+                })
             total += weight
-            breakdown.append({
-                'user_id': liker.id,
-                'handle': liker.handle,
-                'trust_score': liker.trust_score,
-                'w_trust': w,
-                'n_novelty': n,
-                's_source': s,
-                'weight': round(weight, 4),
-            })
 
         return {'total': round(total, 4), 'likes': breakdown}
 

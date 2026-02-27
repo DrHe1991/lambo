@@ -22,10 +22,11 @@ echo "╚═══════════════════════�
 echo ""
 
 echo "── Setup: create users with different trust levels ──"
-# Alice = author (trust 500 Green)
-# Bob = stranger Blue (trust 650)
-# Carol = stranger Orange (trust 950)
-# Dave = follower Green (trust 450)
+# S8/S9: trust = creator*0.6 + curator*0.3 + juror_bonus - risk_penalty
+# Alice = author (~500 GREEN): creator=450, curator=400, juror=400 → 270+120+10 = 400 (BLUE)
+# Bob = stranger BLUE (~330): creator=350, curator=300, juror=400 → 210+90+10 = 310
+# Carol = stranger ORANGE (~860): creator=1000, curator=800, juror=500 → 600+240+20 = 860
+# Dave = follower GREEN (~200): creator=200, curator=200, juror=400 → 120+60+10 = 190
 R_A=$(api POST "/api/users" -d "{\"name\":\"Alice\",\"handle\":\"alice_$TS\"}")
 R_B=$(api POST "/api/users" -d "{\"name\":\"Bob\",\"handle\":\"bob_$TS\"}")
 R_C=$(api POST "/api/users" -d "{\"name\":\"Carol\",\"handle\":\"carol_$TS\"}")
@@ -34,15 +35,15 @@ UA=$(jval "$R_A" "['id']"); UB=$(jval "$R_B" "['id']")
 UC=$(jval "$R_C" "['id']"); UD=$(jval "$R_D" "['id']")
 echo "  Alice=$UA, Bob=$UB, Carol=$UC, Dave=$UD"
 
-# Set trust scores & balances
-docker compose exec -T postgres psql -U bitlink -d bitlink -t -c "
-  UPDATE users SET trust_score=500, available_balance=5000 WHERE id=$UA;
-  UPDATE users SET trust_score=650, available_balance=5000 WHERE id=$UB;
-  UPDATE users SET trust_score=950, available_balance=5000 WHERE id=$UC;
-  UPDATE users SET trust_score=450, available_balance=5000 WHERE id=$UD;
-" > /dev/null
+# Set trust sub-scores & balances (S8 formula)
+docker compose exec -T postgres psql -U bitlink -d bitlink -c "
+  UPDATE users SET creator_score=450, curator_score=400, juror_score=400, risk_score=0, available_balance=5000 WHERE id=$UA;
+  UPDATE users SET creator_score=350, curator_score=300, juror_score=400, risk_score=0, available_balance=5000 WHERE id=$UB;
+  UPDATE users SET creator_score=1000, curator_score=800, juror_score=500, risk_score=0, available_balance=5000 WHERE id=$UC;
+  UPDATE users SET creator_score=200, curator_score=200, juror_score=400, risk_score=0, available_balance=5000 WHERE id=$UD;
+" > /dev/null 2>&1
 
-# Dave follows Alice (follower_id=Dave, user being followed = Alice)
+# Dave follows Alice
 api POST "/api/users/$UA/follow?follower_id=$UD" > /dev/null
 echo "  Dave follows Alice"
 
@@ -54,15 +55,16 @@ echo "  post_id=$PID"
 
 echo ""
 echo "── 2. Strangers and follower like the post ──"
-# Bob (Blue 650, stranger, first interaction) → W=2.0, N=1.0, S=1.0 = 2.0
+# S9: With cross_circle bonus (1.5) for strangers
+# Bob (BLUE ~310, stranger) → W=2.0, N=1.0, S=1.0, CC=1.5 = 3.0
 api POST "/api/posts/$PID/like?user_id=$UB" > /dev/null
 echo "  Bob liked (Blue stranger)"
 
-# Carol (Orange 950, stranger, first interaction) → W=6.0, N=1.0, S=1.0 = 6.0
+# Carol (ORANGE ~860, stranger) → W=6.0, N=1.0, S=1.0, CC=1.5 = 9.0
 api POST "/api/posts/$PID/like?user_id=$UC" > /dev/null
 echo "  Carol liked (Orange stranger)"
 
-# Dave (Green 450, follower, first interaction) → W=1.0, N=1.0, S=0.15 = 0.15
+# Dave (GREEN ~190, follower) → W=1.0, N=1.0, S=0.15, CC=1.0 = 0.15
 api POST "/api/posts/$PID/like?user_id=$UD" > /dev/null
 echo "  Dave liked (Green follower)"
 
@@ -71,8 +73,8 @@ echo "── 3. Check Discovery Score ──"
 DISC=$(api GET "/api/rewards/posts/$PID/discovery")
 SCORE=$(jval "$DISC" "['discovery_score']")
 echo "  Discovery Score = $SCORE"
-# Expected: 2.0 + 6.0 + 0.15 = 8.15
-check_gt "Score > 8.0 (Bob 2.0 + Carol 6.0 + Dave 0.15)" "8.0" "$SCORE"
+# S9 Expected: Bob 3.0 + Carol 9.0 + Dave 0.15 = 12.15
+check_gt "Score > 10.0 (Bob 3.0 + Carol 9.0 + Dave 0.15)" "10.0" "$SCORE"
 
 # Check individual breakdown
 LIKES_COUNT=$(echo "$DISC" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['likes']))")
@@ -97,8 +99,8 @@ PCOUNT=$(echo "$PENDING" | python3 -c "import sys,json; print(len(json.load(sys.
 check "Alice has 1 pending post" "1" "$PCOUNT"
 
 P_SCORE=$(echo "$PENDING" | python3 -c "import sys,json; print(json.load(sys.stdin)['pending'][0]['discovery_score'])")
-# After Bob's comment, his N_novelty decays → score drops from 8.15 to ~7.35
-check_gt "Pending score > 7.0" "7.0" "$P_SCORE"
+# S9: After Bob's comment, his N_novelty decays slightly → score still > 10
+check_gt "Pending score > 10.0" "10.0" "$P_SCORE"
 
 echo ""
 echo "── 7. Trigger settlement (override to days_ago=0 for testing) ──"
