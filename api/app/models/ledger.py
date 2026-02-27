@@ -17,6 +17,10 @@ class ActionType(str, Enum):
     CHALLENGE_REFUND = 'challenge_refund'
     CHALLENGE_REWARD = 'challenge_reward'
     DEPOSIT = 'deposit'
+    # Direct income from likes/comments (80% split)
+    EARN_LIKE = 'earn_like'
+    EARN_COMMENT = 'earn_comment'
+    EARN_SUBSIDY = 'earn_subsidy'
 
     # Spending
     SPEND_POST = 'spend_post'
@@ -32,6 +36,7 @@ class ActionType(str, Enum):
     FINE = 'fine'
     CHALLENGE_FEE = 'challenge_fee'
     WITHDRAW = 'withdraw'
+    CABAL_PENALTY = 'cabal_penalty'
 
 
 class RefType(str, Enum):

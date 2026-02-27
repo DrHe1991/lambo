@@ -15,14 +15,14 @@ from app.services.ledger_service import LedgerService, InsufficientBalance
 from app.services.trust_service import dynamic_fee_multiplier
 from app.models.reward import InteractionLog, InteractionType
 
-# Base costs (before K(trust) multiplier)
-BASE_POST_COST = 200
-BASE_QUESTION_COST = 300
-BASE_ANSWER_COST = 200
-BASE_COMMENT_COST = 50
-BASE_REPLY_COST = 20
-BASE_LIKE_POST_COST = 10
-BASE_LIKE_COMMENT_COST = 5
+# Base costs (before K(trust) multiplier) - aligned with simulator
+BASE_POST_COST = 50
+BASE_QUESTION_COST = 100
+BASE_ANSWER_COST = 50
+BASE_COMMENT_COST = 20
+BASE_REPLY_COST = 10
+BASE_LIKE_POST_COST = 20
+BASE_LIKE_COMMENT_COST = 10
 
 
 def _apply_k(base_cost: int, trust_score: int) -> int:
@@ -341,7 +341,7 @@ async def like_post(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a post. Costs 10 sat. Idempotent (double-like returns existing)."""
+    """Like a post. Costs 20 sat (80% to author, 20% to platform)."""
     post = await db.get(Post, post_id)
     if not post or post.status != PostStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail='Post not found')
@@ -357,18 +357,25 @@ async def like_post(
     if existing.scalar_one_or_none():
         return {'likes_count': post.likes_count, 'is_liked': True}
 
-    # Spend sat
+    # Get user for trust-based fee calculation
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
 
     like_cost = _apply_k(BASE_LIKE_POST_COST, user.trust_score)
     ledger = LedgerService(db)
+
+    # 80% to author, 20% to platform
     try:
-        await ledger.spend(
-            user_id, like_cost, ActionType.SPEND_LIKE,
-            ref_type=RefType.POST, ref_id=post_id,
-            note=f'Like post ({like_cost} sat)',
+        author_share, platform_share = await ledger.spend_with_split(
+            user_id=user_id,
+            amount=like_cost,
+            author_id=post.author_id,
+            spend_action_type=ActionType.SPEND_LIKE,
+            earn_action_type=ActionType.EARN_LIKE,
+            ref_type=RefType.POST,
+            ref_id=post_id,
+            revenue_source='like',
         )
     except InsufficientBalance:
         raise HTTPException(
@@ -381,7 +388,11 @@ async def like_post(
     await _log_interaction(db, user_id, post.author_id, InteractionType.LIKE, post_id)
     await db.flush()
 
-    return {'likes_count': post.likes_count, 'is_liked': True}
+    return {
+        'likes_count': post.likes_count,
+        'is_liked': True,
+        'author_earned': author_share,
+    }
 
 
 @router.delete('/{post_id}/like', status_code=status.HTTP_200_OK)
@@ -423,7 +434,7 @@ async def create_comment(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a comment / reply / answer. Costs sat based on type."""
+    """Create a comment / reply / answer. 80% to post author, 20% to platform."""
     post = await db.get(Post, post_id)
     if not post or post.status != PostStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail='Post not found')
@@ -446,30 +457,47 @@ async def create_comment(
     if is_answer:
         cost = _apply_k(BASE_ANSWER_COST, author.trust_score)
         action_type = ActionType.SPEND_ANSWER
-        note = 'Answer'
     elif is_reply:
         cost = _apply_k(BASE_REPLY_COST, author.trust_score)
         action_type = ActionType.SPEND_REPLY
-        note = 'Reply'
     else:
         cost = _apply_k(BASE_COMMENT_COST, author.trust_score)
         action_type = ActionType.SPEND_COMMENT
-        note = 'Comment'
 
-    # Validate parent comment
+    # Validate parent comment and determine recipient
+    recipient_id = post.author_id
     if comment_data.parent_id:
         parent = await db.get(Comment, comment_data.parent_id)
         if not parent or parent.post_id != post_id:
             raise HTTPException(status_code=400, detail='Invalid parent comment')
+        # Reply goes to parent comment author
+        recipient_id = parent.author_id
 
-    # Charge
+    # Check if commenting on own content (no split needed)
+    is_self = author_id == recipient_id
+
     ledger = LedgerService(db)
     try:
-        await ledger.spend(
-            author_id, cost, action_type,
-            ref_type=RefType.COMMENT, ref_id=None,
-            note=note,
-        )
+        if is_self:
+            # Self-comment: just spend, no split
+            await ledger.spend(
+                author_id, cost, action_type,
+                ref_type=RefType.COMMENT, ref_id=None,
+            )
+            # Post cost goes to platform
+            await ledger._add_platform_revenue(cost, 'comment')
+        else:
+            # 80% to recipient, 20% to platform
+            await ledger.spend_with_split(
+                user_id=author_id,
+                amount=cost,
+                author_id=recipient_id,
+                spend_action_type=action_type,
+                earn_action_type=ActionType.EARN_COMMENT,
+                ref_type=RefType.COMMENT,
+                ref_id=None,
+                revenue_source='comment',
+            )
     except InsufficientBalance:
         raise HTTPException(
             status_code=402,
@@ -547,7 +575,7 @@ async def like_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a comment. Costs 5 sat."""
+    """Like a comment. Costs 10 sat (80% to author, 20% to platform)."""
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
@@ -569,11 +597,18 @@ async def like_comment(
 
     cl_cost = _apply_k(BASE_LIKE_COMMENT_COST, user.trust_score)
     ledger = LedgerService(db)
+
+    # 80% to comment author, 20% to platform
     try:
-        await ledger.spend(
-            user_id, cl_cost, ActionType.SPEND_COMMENT_LIKE,
-            ref_type=RefType.COMMENT, ref_id=comment_id,
-            note=f'Like comment ({cl_cost} sat)',
+        author_share, _ = await ledger.spend_with_split(
+            user_id=user_id,
+            amount=cl_cost,
+            author_id=comment.author_id,
+            spend_action_type=ActionType.SPEND_COMMENT_LIKE,
+            earn_action_type=ActionType.EARN_LIKE,
+            ref_type=RefType.COMMENT,
+            ref_id=comment_id,
+            revenue_source='like',
         )
     except InsufficientBalance:
         raise HTTPException(
@@ -588,7 +623,11 @@ async def like_comment(
     )
     await db.flush()
 
-    return {'likes_count': comment.likes_count, 'is_liked': True}
+    return {
+        'likes_count': comment.likes_count,
+        'is_liked': True,
+        'author_earned': author_share,
+    }
 
 
 @router.delete(

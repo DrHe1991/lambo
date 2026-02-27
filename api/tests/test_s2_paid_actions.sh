@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Sprint 2 — Paid Actions test suite
+# Sprint 2 — Paid Actions test suite (updated for S6 costs)
 # Tests: PostLike, CommentLike, comment/reply/answer costs, is_liked, unlike
+# NOTE: Costs updated in S6: post=50, like=20, comment=20, reply=10, etc.
+# NOTE: 80/20 split means author gets 80% of likes/comments
 set -euo pipefail
 
 BASE="http://localhost:8001"
@@ -19,6 +21,15 @@ api() {
 
 TS=$(date +%s)
 
+# ── New costs (S6) ──
+# Post: 50 (base) × 0.92 (K=600 trust) = 46
+# Question: 100 × 0.92 = 92
+# Answer: 50 × 0.92 = 46
+# Comment: 20 × 0.92 = 18
+# Reply: 10 × 0.92 = 9
+# Like Post: 20 × 0.92 = 18
+# Like Comment: 10 × 0.92 = 9
+
 echo "=== Setup: create 2 users ==="
 R1=$(api POST "/api/users" -d "{\"name\":\"Alice\",\"handle\":\"alice_$TS\"}")
 R2=$(api POST "/api/users" -d "{\"name\":\"Bob\",\"handle\":\"bob_$TS\"}")
@@ -34,20 +45,23 @@ P1=$(api POST "/api/posts?author_id=$U1" -d '{"content":"Hello!","post_type":"no
 check "Free post cost_paid=0" "0" "$(jval "$P1" "['cost_paid']")"
 
 P2=$(api POST "/api/posts?author_id=$U1" -d '{"content":"Second post","post_type":"note"}')
-check "Paid post cost_paid=200" "200" "$(jval "$P2" "['cost_paid']")"
+# Post cost = 50 × 0.92 = 46
+check "Paid post cost_paid=46" "46" "$(jval "$P2" "['cost_paid']")"
 PID1=$(jval "$P1" "['id']"); PID2=$(jval "$P2" "['id']")
 
 BAL_A=$(jval "$(api GET "/api/users/$U1/balance")" "['available_balance']")
-check "Alice balance after 1 paid post = 1800" "1800" "$BAL_A"
+# 2000 - 46 = 1954
+check "Alice balance after 1 paid post = 1954" "1954" "$BAL_A"
 
 echo ""
-echo "── 2. Like post (10 sat) ──"
+echo "── 2. Like post (20 sat base → 18 with K) ──"
 LR=$(api POST "/api/posts/$PID1/like?user_id=$U2")
 check "Like returns is_liked=True" "True" "$(jval "$LR" "['is_liked']")"
 check "Like count = 1" "1" "$(jval "$LR" "['likes_count']")"
 
+# Bob spends 18, Alice gets 80% = 14
 BAL_B=$(jval "$(api GET "/api/users/$U2/balance")" "['available_balance']")
-check "Bob balance after like = 1990" "1990" "$BAL_B"
+check "Bob balance after like = 1982" "1982" "$BAL_B"  # 2000 - 18
 
 echo ""
 echo "── 3. Double-like is idempotent ──"
@@ -55,7 +69,7 @@ LR2=$(api POST "/api/posts/$PID1/like?user_id=$U2")
 check "Double-like is_liked=True" "True" "$(jval "$LR2" "['is_liked']")"
 check "Double-like count still 1" "1" "$(jval "$LR2" "['likes_count']")"
 BAL_B2=$(jval "$(api GET "/api/users/$U2/balance")" "['available_balance']")
-check "Bob balance unchanged = 1990" "1990" "$BAL_B2"
+check "Bob balance unchanged = 1982" "1982" "$BAL_B2"
 
 echo ""
 echo "── 4. Cannot like own post ──"
@@ -75,40 +89,51 @@ ULR=$(api DELETE "/api/posts/$PID1/like?user_id=$U2")
 check "Unlike is_liked=False" "False" "$(jval "$ULR" "['is_liked']")"
 check "Unlike count = 0" "0" "$(jval "$ULR" "['likes_count']")"
 BAL_B3=$(jval "$(api GET "/api/users/$U2/balance")" "['available_balance']")
-check "Bob no refund = 1990" "1990" "$BAL_B3"
+check "Bob no refund = 1982" "1982" "$BAL_B3"
 
 echo ""
-echo "── 7. Comment costs 50 sat ──"
+echo "── 7. Comment costs 20 sat (18 with K) ──"
 CR=$(api POST "/api/posts/$PID1/comments?author_id=$U2" -d '{"content":"Nice post!"}')
-check "Comment cost_paid=50" "50" "$(jval "$CR" "['cost_paid']")"
+# Comment = 20 × 0.92 = 18
+check "Comment cost_paid=18" "18" "$(jval "$CR" "['cost_paid']")"
 CID=$(jval "$CR" "['id']")
 BAL_B4=$(jval "$(api GET "/api/users/$U2/balance")" "['available_balance']")
-check "Bob after comment = 1940" "1940" "$BAL_B4"
+# 1982 - 18 = 1964
+check "Bob after comment = 1964" "1964" "$BAL_B4"
 
 echo ""
-echo "── 8. Reply costs 20 sat ──"
+echo "── 8. Reply costs 10 sat (9 with K) ──"
+# Alice replies to Bob's comment
+# Alice current: 1954 + 14 (from Bob's like) = 1968
+# Alice pays: 9 (self-comment on own post, goes to platform)
 RR=$(api POST "/api/posts/$PID1/comments?author_id=$U1" -d "{\"content\":\"Thanks!\",\"parent_id\":$CID}")
-check "Reply cost_paid=20" "20" "$(jval "$RR" "['cost_paid']")"
+check "Reply cost_paid=9" "9" "$(jval "$RR" "['cost_paid']")"
 BAL_A2=$(jval "$(api GET "/api/users/$U1/balance")" "['available_balance']")
-check "Alice after reply = 1780" "1780" "$BAL_A2"
+# 1954 + 14 (like) + 14 (comment) - 9 (self reply, 100% to platform) = 1973
+check "Alice after reply = 1973" "1973" "$BAL_A2"
 
 echo ""
-echo "── 9. Answer (question) costs 200 sat ──"
+echo "── 9. Answer (question) costs 50 sat (46 with K) ──"
 QP=$(api POST "/api/posts?author_id=$U1" -d '{"content":"How to scale?","post_type":"question"}')
 QPID=$(jval "$QP" "['id']")
-check "Question cost_paid=300" "300" "$(jval "$QP" "['cost_paid']")"
+# Question = 100 × 0.92 = 92
+check "Question cost_paid=92" "92" "$(jval "$QP" "['cost_paid']")"
 
 ANS=$(api POST "/api/posts/$QPID/comments?author_id=$U2" -d '{"content":"Use rollups"}')
-check "Answer cost_paid=200" "200" "$(jval "$ANS" "['cost_paid']")"
+# Answer = 50 × 0.92 = 46
+check "Answer cost_paid=46" "46" "$(jval "$ANS" "['cost_paid']")"
 AID=$(jval "$ANS" "['id']")
 
 echo ""
-echo "── 10. Like comment (5 sat) ──"
+echo "── 10. Like comment (10 sat base → 9 with K) ──"
+# Alice current: 1973 - 92 (question) + 36 (Bob answer 80%) = 1917
+# Alice likes Bob's comment (CID), pays 9, Bob gets 7
 CLR=$(api POST "/api/posts/$PID1/comments/$CID/like?user_id=$U1")
 check "Comment like is_liked=True" "True" "$(jval "$CLR" "['is_liked']")"
 check "Comment like count = 1" "1" "$(jval "$CLR" "['likes_count']")"
 BAL_A3=$(jval "$(api GET "/api/users/$U1/balance")" "['available_balance']")
-check "Alice after comment-like = 1475" "1475" "$BAL_A3"
+# 1917 - 9 = 1908
+check "Alice after comment-like = 1908" "1908" "$BAL_A3"
 
 echo ""
 echo "── 11. Cannot like own comment ──"
@@ -121,7 +146,7 @@ UCLR=$(api DELETE "/api/posts/$PID1/comments/$CID/like?user_id=$U1")
 check "Comment unlike is_liked=False" "False" "$(jval "$UCLR" "['is_liked']")"
 check "Comment unlike count = 0" "0" "$(jval "$UCLR" "['likes_count']")"
 BAL_A4=$(jval "$(api GET "/api/users/$U1/balance")" "['available_balance']")
-check "Alice no refund = 1475" "1475" "$BAL_A4"
+check "Alice no refund = 1908" "1908" "$BAL_A4"
 
 echo ""
 echo "── 13. Comments list with is_liked ──"
@@ -134,7 +159,7 @@ echo "── 14. Insufficient balance ──"
 docker compose exec -T postgres psql -U bitlink -d bitlink -t -c "UPDATE users SET available_balance=5 WHERE id=$U2;" > /dev/null
 BROKE=$(api POST "/api/posts/$PID2/like?user_id=$U2" 2>&1)
 DETAIL=$(echo "$BROKE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('detail',''))" 2>/dev/null || echo "")
-check "Insufficient balance on like" "Insufficient balance. Need 10 sat." "$DETAIL"
+check "Insufficient balance on like" "Insufficient balance. Need 18 sat." "$DETAIL"
 
 echo ""
 echo "── 15. Ledger entries ──"

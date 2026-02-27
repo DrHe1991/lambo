@@ -90,7 +90,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           >
             <Heart size={18} className={isLiked ? 'fill-current' : ''} />
             <span className="text-xs font-medium">{post.likes}</span>
-            {!isLiked && <span className="text-[10px] text-zinc-600 font-bold">10sat</span>}
+            {!isLiked && <span className="text-[10px] text-zinc-600 font-bold">20sat</span>}
           </button>
           <button className="flex items-center gap-1.5 text-zinc-400 hover:text-blue-400 transition-colors">
             <MessageSquare size={18} />

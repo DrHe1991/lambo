@@ -1159,12 +1159,12 @@ const App: React.FC = () => {
     }
   };
 
-  // Determine comment input cost label
+  // Determine comment input cost label (S6: updated costs)
   const commentCostLabel = () => {
     if (!selectedPost) return '';
-    if (replyTarget) return '20 sat';
-    if (selectedPost.type === 'Question') return '200 sat';
-    return '50 sat';
+    if (replyTarget) return '10 sat';
+    if (selectedPost.type === 'Question') return '50 sat';  // Answer
+    return '20 sat';  // Comment
   };
 
   const renderPostDetail = () => {
@@ -1402,13 +1402,13 @@ const App: React.FC = () => {
             <h3 className="text-xs font-bold uppercase text-zinc-500 tracking-wider mb-3">Your Action Costs</h3>
             <div className="grid grid-cols-2 gap-2">
               {[
-                { label: 'Post', base: 200, cost: uc.costs.post },
-                { label: 'Question', base: 300, cost: uc.costs.question },
-                { label: 'Answer', base: 200, cost: uc.costs.answer },
-                { label: 'Comment', base: 50, cost: uc.costs.comment },
-                { label: 'Reply', base: 20, cost: uc.costs.reply },
-                { label: 'Like Post', base: 10, cost: uc.costs.like_post },
-                { label: 'Like Comment', base: 5, cost: uc.costs.like_comment },
+                { label: 'Post', base: 50, cost: uc.costs.post },
+                { label: 'Question', base: 100, cost: uc.costs.question },
+                { label: 'Answer', base: 50, cost: uc.costs.answer },
+                { label: 'Comment', base: 20, cost: uc.costs.comment },
+                { label: 'Reply', base: 10, cost: uc.costs.reply },
+                { label: 'Like Post', base: 20, cost: uc.costs.like_post },
+                { label: 'Like Comment', base: 10, cost: uc.costs.like_comment },
               ].map((c) => (
                 <div key={c.label} className="bg-zinc-950/50 border border-zinc-900 rounded-xl p-3">
                   <span className="text-[10px] text-zinc-500 font-bold uppercase block">{c.label}</span>
@@ -1660,7 +1660,7 @@ const App: React.FC = () => {
               <span className="text-[11px] text-zinc-500 font-medium">
                 {freePost
                   ? 'free · 1 remaining'
-                  : `${isNote ? (userCosts?.costs.post ?? 200) : (userCosts?.costs.question ?? 300)} sat · ${availableBalance.toLocaleString()} available`
+                  : `${isNote ? (userCosts?.costs.post ?? 50) : (userCosts?.costs.question ?? 100)} sat · ${availableBalance.toLocaleString()} available`
                 }
               </span>
             </div>

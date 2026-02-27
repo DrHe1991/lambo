@@ -6,6 +6,7 @@ from app.models.reward import (
     InteractionLog, RewardPool, PostReward, CommentReward,
 )
 from app.models.challenge import Challenge
+from app.models.revenue import PlatformRevenue
 
 __all__ = [
     'User',
@@ -23,4 +24,5 @@ __all__ = [
     'PostReward',
     'CommentReward',
     'Challenge',
+    'PlatformRevenue',
 ]

@@ -293,19 +293,20 @@ async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
     def apply(base: int) -> int:
         return max(1, int(round(base * k)))
 
+    # Base costs aligned with simulator (S6)
     return {
         'user_id': user.id,
         'trust_score': user.trust_score,
         'tier': trust_tier(user.trust_score),
         'fee_multiplier': k,
         'costs': {
-            'post': apply(200),
-            'question': apply(300),
-            'answer': apply(200),
-            'comment': apply(50),
-            'reply': apply(20),
-            'like_post': apply(10),
-            'like_comment': apply(5),
+            'post': apply(50),
+            'question': apply(100),
+            'answer': apply(50),
+            'comment': apply(20),
+            'reply': apply(10),
+            'like_post': apply(20),
+            'like_comment': apply(10),
         },
     }
 

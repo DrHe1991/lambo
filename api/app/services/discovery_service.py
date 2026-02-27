@@ -61,12 +61,12 @@ def n_novelty(interaction_count: int) -> float:
 S_STRANGER = 1.00
 S_FOLLOWER = 0.15
 
-# Platform daily emission per DAU (sat)
-EMISSION_PER_DAU = 300
-
-# Reward split
+# Reward split (for legacy T+7d settlement, kept for backwards compatibility)
 AUTHOR_SHARE = 0.80
 COMMENT_SHARE = 0.20
+
+# NOTE: Platform emission removed in Sprint 6 (zero subsidy model)
+# All income now comes from user spending with 80/20 split
 
 
 class DiscoveryService:
@@ -353,7 +353,7 @@ class DiscoveryService:
         """Calculate the reward pool for this settlement batch.
 
         Pool = sum of all action fees collected for these posts
-             + platform emission (300 × DAU estimate)
+        NOTE: Platform emission removed in Sprint 6 (zero subsidy model)
         """
         # Sum up cost_paid from these posts
         post_fees = sum(p.cost_paid for p in posts)
@@ -366,16 +366,16 @@ class DiscoveryService:
         )
         comment_fees = result.scalar() or 0
 
-        # Sum up like costs (10 sat per like on these posts)
+        # Sum up like costs (20 sat per like on these posts - updated in S6)
         result = await self.db.execute(
             select(func.count())
             .select_from(PostLike)
             .where(PostLike.post_id.in_(post_ids))
         )
         like_count = result.scalar() or 0
-        like_fees = like_count * 10
+        like_fees = like_count * 20  # Updated from 10 to 20
 
-        # Sum up comment like costs (5 sat per comment like)
+        # Sum up comment like costs (10 sat per comment like - updated in S6)
         comment_ids_q = select(Comment.id).where(Comment.post_id.in_(post_ids))
         result = await self.db.execute(
             select(func.count())
@@ -383,16 +383,12 @@ class DiscoveryService:
             .where(CommentLike.comment_id.in_(comment_ids_q))
         )
         comment_like_count = result.scalar() or 0
-        comment_like_fees = comment_like_count * 5
+        comment_like_fees = comment_like_count * 10  # Updated from 5 to 10
 
         fees_total = int(post_fees) + int(comment_fees) + like_fees + comment_like_fees
 
-        # Platform emission: estimate DAU as unique authors in this batch
-        unique_authors = len(set(p.author_id for p in posts))
-        dau_estimate = max(unique_authors, 1)
-        emission = EMISSION_PER_DAU * dau_estimate
-
-        return fees_total + emission
+        # No more platform emission - zero subsidy model
+        return fees_total
 
     async def _settle_comments(
         self, post_id: int, post_reward_id: int,
