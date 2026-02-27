@@ -16,6 +16,9 @@ email-validator==2.2.0
 # Redis
 redis==5.1.1
 
+# Scheduler
+apscheduler==3.10.4
+
 # Auth (for later)
 python-jose[cryptography]==3.3.0
 bcrypt==4.2.0

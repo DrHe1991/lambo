@@ -73,6 +73,26 @@ services:
     depends_on:
       - api
 
+  # Settlement Worker (background jobs)
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: bitlink-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://bitlink:bitlink_dev_password@postgres:5432/bitlink
+      REDIS_URL: redis://redis:6379/0
+      ENV: development
+    volumes:
+      - ./api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: python -m app.worker.settlement_worker
+
 volumes:
   postgres_data:
   redis_data:

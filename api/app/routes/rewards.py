@@ -8,6 +8,7 @@ from app.db.database import get_db
 from app.models.post import Post
 from app.models.reward import PostReward, RewardPool, SettlementStatus
 from app.services.discovery_service import DiscoveryService
+from app.services.subsidy_service import SubsidyService
 
 router = APIRouter()
 
@@ -149,3 +150,18 @@ async def list_pools(
         }
         for p in pools
     ]
+
+
+@router.post('/subsidy')
+async def run_subsidy_distribution(
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger weekly quality subsidy distribution.
+
+    In production this runs automatically via settlement_worker.
+    Exposed as endpoint for dev/testing.
+    """
+    service = SubsidyService(db)
+    result = await service.distribute_weekly_subsidy()
+    await db.commit()
+    return result
