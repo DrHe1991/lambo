@@ -12,6 +12,31 @@ from statistics import mean
 from config import UserType, TrustTier, get_trust_tier
 from models import SimulationState, User
 
+# BTC 价格常量 (用于 sat → USD 换算)
+BTC_PRICE_USD = 68000  # 1 BTC = $68,000
+SATS_PER_BTC = 100_000_000
+SAT_TO_USD = BTC_PRICE_USD / SATS_PER_BTC  # 1 sat ≈ 0.00068 USD
+
+
+def sat_to_usd(sats: float) -> str:
+    """将 sat 转换为美元字符串"""
+    usd = sats * SAT_TO_USD
+    if abs(usd) >= 1000:
+        return f'${usd:,.0f}'
+    elif abs(usd) >= 1:
+        return f'${usd:.2f}'
+    else:
+        return f'${usd:.4f}'
+
+
+def format_sat_usd(sats: float, show_sign: bool = False) -> str:
+    """格式化 sat 金额并附带美元价值"""
+    usd = sat_to_usd(sats)
+    if show_sign:
+        return f'{sats:+,.0f} sat ({usd})'
+    else:
+        return f'{sats:,.0f} sat ({usd})'
+
 
 class ReportGenerator:
     """Generate clean Markdown reports from simulation state"""
@@ -74,6 +99,7 @@ class ReportGenerator:
     def _overview(self) -> List[str]:
         users = list(self.state.users.values())
         total_balance = sum(u.balance for u in users)
+        avg_balance = total_balance / len(users) if users else 0
         active_users = self.state.daily_metrics[-1].active_users if self.state.daily_metrics else 0
         challenges = list(self.state.challenges.values())
         violations = sum(1 for c in challenges if c.penalty_amount > 0)
@@ -81,10 +107,12 @@ class ReportGenerator:
         return [
             '## 概览',
             '',
+            f'> 💰 汇率: 1 BTC = ${BTC_PRICE_USD:,} USD',
+            '',
             '| 指标 | 数值 |',
             '|------|------|',
-            f'| 用户总余额 | {total_balance:,.0f} sat |',
-            f'| 平均余额 | {total_balance / len(users):,.0f} sat |',
+            f'| 用户总余额 | {format_sat_usd(total_balance)} |',
+            f'| 平均余额 | {format_sat_usd(avg_balance)} |',
             f'| 最终日活 | {active_users} |',
             f'| 内容总数 | {len(self.state.content):,} |',
             f'| 举报总数 | {len(challenges):,} (违规: {violations}) |',
@@ -103,9 +131,12 @@ class ReportGenerator:
         initial = self.audit_data.get('initial_balance', 0)
         deposits = self.audit_data.get('total_deposits', 0)
         external = initial + deposits
-        platform_emission = total_earned - total_spent + total_penalty
+        
+        # 净收益 = 收入 - 支出 - 罚没
+        net_income = total_earned - total_spent - total_penalty
 
-        expected = initial + deposits - total_spent + total_earned - total_penalty
+        # 守恒公式: 最终余额 = 初始余额 + 充值 + 收入 - 支出 - 罚没
+        expected = external + net_income
         diff = total_balance - expected
         is_balanced = abs(diff) < 1
 
@@ -115,22 +146,22 @@ class ReportGenerator:
             '### 外部流入',
             '| 来源 | 金额 |',
             '|------|------|',
-            f'| 初始余额 | {initial:,.0f} sat |',
-            f'| 用户充值 | {deposits:,.0f} sat |',
-            f'| **小计** | **{external:,.0f} sat** |',
+            f'| 初始余额 | {format_sat_usd(initial)} |',
+            f'| 用户充值 | {format_sat_usd(deposits)} |',
+            f'| **小计** | **{format_sat_usd(external)}** |',
             '',
             '### 系统内流转',
             '| 项目 | 金额 |',
             '|------|------|',
-            f'| 用户支出 | {total_spent:,.0f} sat |',
-            f'| 用户收入 | {total_earned:,.0f} sat |',
-            f'| 用户罚没 | {total_penalty:,.0f} sat |',
-            f'| **平台增发** | **{platform_emission:,.0f} sat** |',
+            f'| 用户支出 | {format_sat_usd(total_spent)} |',
+            f'| 用户收入 | {format_sat_usd(total_earned)} |',
+            f'| 用户罚没 | {format_sat_usd(total_penalty)} |',
+            f'| **用户净收益** | **{format_sat_usd(net_income, show_sign=True)}** |',
             '',
             '### 守恒校验',
-            f'- 预期余额: {expected:,.0f} sat',
-            f'- 实际余额: {total_balance:,.0f} sat',
-            f'- 差额: {diff:+,.0f} sat',
+            f'- 预期余额: {format_sat_usd(expected)}',
+            f'- 实际余额: {format_sat_usd(total_balance)}',
+            f'- 差额: {format_sat_usd(diff, show_sign=True)}',
             f'- 状态: {"✅ 守恒" if is_balanced else "⚠️ 存在差额"}',
             '',
         ]
@@ -153,13 +184,13 @@ class ReportGenerator:
             '',
             '| 百分位 | 余额 |',
             '|--------|------|',
-            f'| 10% | {percentile(10):,.0f} sat |',
-            f'| 25% | {percentile(25):,.0f} sat |',
-            f'| 50% | {percentile(50):,.0f} sat |',
-            f'| 75% | {percentile(75):,.0f} sat |',
-            f'| 90% | {percentile(90):,.0f} sat |',
-            f'| 95% | {percentile(95):,.0f} sat |',
-            f'| 99% | {percentile(99):,.0f} sat |',
+            f'| 10% | {format_sat_usd(percentile(10))} |',
+            f'| 25% | {format_sat_usd(percentile(25))} |',
+            f'| 50% | {format_sat_usd(percentile(50))} |',
+            f'| 75% | {format_sat_usd(percentile(75))} |',
+            f'| 90% | {format_sat_usd(percentile(90))} |',
+            f'| 95% | {format_sat_usd(percentile(95))} |',
+            f'| 99% | {format_sat_usd(percentile(99))} |',
             '',
             f'**基尼系数**: {gini:.3f}',
             '',
@@ -189,7 +220,7 @@ class ReportGenerator:
 
         for i, (ut, count, net, trust) in enumerate(results, 1):
             emoji = '🏆' if i <= 3 else ('💀' if net < 0 else '')
-            lines.append(f'| {emoji} {i} | {ut.value} | {count} | {net:+,.0f} sat | {trust:.0f} |')
+            lines.append(f'| {emoji} {i} | {ut.value} | {count} | {format_sat_usd(net, show_sign=True)} | {trust:.0f} |')
 
         lines.append('')
         return lines
@@ -274,7 +305,7 @@ class ReportGenerator:
             lines.extend([
                 '| 指标 | Cabal成员 | 普通用户 |',
                 '|------|-----------|----------|',
-                f'| 平均余额 | {cabal_avg:,.0f} sat | {normal_avg:,.0f} sat |',
+                f'| 平均余额 | {format_sat_usd(cabal_avg)} | {format_sat_usd(normal_avg)} |',
                 f'| 平均Risk | {cabal_risk:.0f} | - |',
                 '',
             ])

@@ -328,6 +328,10 @@ class Content:
     cost_paid: float = 0.0
     reward_earned: float = 0.0
     
+    # Post Boost (花钱买曝光)
+    boost_amount: float = 0.0       # 总 boost 金额 (sat)
+    boost_remaining: float = 0.0    # 当前剩余 boost 值 (每日衰减)
+    
     # Engagement
     likes: List[Like] = field(default_factory=list)
     comments: List[str] = field(default_factory=list)  # List of comment IDs

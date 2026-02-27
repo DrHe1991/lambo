@@ -159,8 +159,10 @@ def get_exposure_weight(content: 'Content', state: 'SimulationState', current_da
     Calculate content exposure weight for recommendation.
     This determines how likely content is to be shown to users.
     
-    exposure_weight = inferred_quality × time_decay × author_multiplier
+    exposure_weight = inferred_quality × time_decay × author_multiplier + boost_bonus
     """
+    from config import BOOST_MAX_MULTIPLIER
+    
     # Base: inferred quality
     inferred_quality = get_inferred_quality(content, state, current_day)
     
@@ -181,6 +183,14 @@ def get_exposure_weight(content: 'Content', state: 'SimulationState', current_da
         author_mult = 1.0
     
     exposure = inferred_quality * decay * author_mult
+    
+    # Post Boost: 花钱买曝光 (additive bonus, capped)
+    boost_remaining = getattr(content, 'boost_remaining', 0)
+    if boost_remaining > 0:
+        # boost_remaining is in "discovery points", add to exposure
+        # Cap the multiplier to avoid paid content dominating
+        boost_mult = min(BOOST_MAX_MULTIPLIER, 1.0 + boost_remaining)
+        exposure *= boost_mult
     
     return max(0.01, exposure)  # Minimum floor to avoid zero
 

@@ -184,6 +184,9 @@ class BitLinkSimulator:
         # Settle rewards for content from 7 days ago (use today's DAU)
         self.economic_engine.settle_rewards(day, len(active_users))
         
+        # Decay boost values daily
+        self._decay_boosts()
+        
         # Update spam index weekly and distribute quality subsidies
         if day % 7 == 0:
             self.economic_engine.update_spam_index()
@@ -214,6 +217,17 @@ class BitLinkSimulator:
                 metrics.orange_count += 1
         
         self.state.daily_metrics.append(metrics)
+    
+    def _decay_boosts(self):
+        """Apply daily decay to all boosted content"""
+        from config import BOOST_DAILY_DECAY
+        
+        for content in self.state.content.values():
+            if content.boost_remaining > 0:
+                content.boost_remaining *= BOOST_DAILY_DECAY
+                # Zero out if negligible
+                if content.boost_remaining < 0.1:
+                    content.boost_remaining = 0
     
     def _get_activity_probability(self, user: User) -> float:
         """Get probability of user being active today"""
@@ -362,6 +376,48 @@ class BitLinkSimulator:
                 tier_mult = TIER_REWARD_MULTIPLIER.get(user.trust_tier, 1.0)
                 change = random.uniform(event.min_change, event.max_change)
                 user.reputation.apply_change(event.dimension, change, tier_mult)
+        
+        # Post Boost: 花钱买曝光
+        self._maybe_boost_post(user, content, day, metrics)
+    
+    def _maybe_boost_post(self, user: User, content: Content, day: int, metrics: DailyMetrics):
+        """Advertiser may boost their post for extra exposure"""
+        from config import (
+            BOOST_SAT_PER_POINT, BOOST_MIN_AMOUNT, BOOST_POOL_SHARE
+        )
+        
+        # Check if user wants to boost
+        boost_rate = getattr(user.profile, 'boost_rate', 0.0)
+        boost_amount_range = getattr(user.profile, 'boost_amount', (0, 0))
+        
+        if boost_rate <= 0 or random.random() > boost_rate:
+            return
+        
+        # Calculate boost amount
+        boost_amount = random.randint(boost_amount_range[0], boost_amount_range[1])
+        if boost_amount < BOOST_MIN_AMOUNT:
+            return
+        
+        if not user.can_afford(boost_amount):
+            # Try with reduced amount
+            boost_amount = min(boost_amount, int(user.balance * 0.3))
+            if boost_amount < BOOST_MIN_AMOUNT:
+                return
+        
+        # Spend and track
+        user.spend(boost_amount)
+        metrics.total_spent += boost_amount
+        
+        # Boost goes: 50% to reward pool (creators), 50% to platform
+        pool_share = boost_amount * BOOST_POOL_SHARE
+        platform_share = boost_amount - pool_share
+        self.state.platform_revenue += platform_share
+        # pool_share goes to reward pool for quality subsidies
+        self.state.platform_revenue += pool_share  # All to platform for redistribution
+        
+        # Set boost on content
+        content.boost_amount = boost_amount
+        content.boost_remaining = boost_amount / BOOST_SAT_PER_POINT  # Convert to discovery points
     
     def _sample_content_by_exposure(self, content_list: List[Content], k: int, day: int) -> List[Content]:
         """Sample content weighted by exposure using new recommendation system"""
@@ -770,6 +826,9 @@ class OrganicGrowthSimulator(BitLinkSimulator):
             
             user = User.create(user_type)
             self.state.add_user(user)
+            
+            # Track new user's initial balance as external inflow
+            self.initial_balance += user.balance
             
             # New user follows some existing users
             if existing_users:

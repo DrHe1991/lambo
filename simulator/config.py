@@ -64,6 +64,17 @@ F_L1 = 100  # AI challenge
 F_L2 = 500  # Community jury
 F_L3 = 1500  # Committee
 
+# =============================================================================
+# Post Boost (花钱买曝光)
+# =============================================================================
+
+# Boost 定价: 每 sat 获得多少 discovery 加成
+BOOST_SAT_PER_POINT = 100        # 100 sat = 1 discovery point
+BOOST_MAX_MULTIPLIER = 5.0       # 最大 5x 曝光加成
+BOOST_DAILY_DECAY = 0.7          # 每天衰减 30% (保持 3-5 天有效期)
+BOOST_MIN_AMOUNT = 1000          # 最低 boost 金额 (~$0.68)
+BOOST_POOL_SHARE = 0.5           # 50% 进入奖励池, 50% 平台收入
+
 
 # =============================================================================
 # Trust Score Tiers
@@ -260,6 +271,7 @@ class UserType(Enum):
     CURATOR = 'curator'
     NORMAL = 'normal'
     LURKER = 'lurker'
+    ADVERTISER = 'advertiser'  # 💰 广告商: 花钱买曝光，平台最大金主
     EXTREME_MARKETER = 'extreme_marketer'  # Clickbait/sensational
     AD_SPAMMER = 'ad_spammer'  # External links/ads
     LOW_QUALITY_CREATOR = 'low_quality_creator'
@@ -285,12 +297,23 @@ class UserBehaviorProfile:
     initial_balance: Tuple[int, int]  # (min, max) initial sat
     monthly_deposit_prob: float
     monthly_deposit_amount: Tuple[int, int]
-    # NEW: Activity intensity (how many hours per day they spend)
+    # Activity intensity
     daily_activity_hours: float  # 0.5 = casual, 8.0 = full-time bot operator
     activity_consistency: float  # 0.0 = random, 1.0 = like clockwork (bots)
+    # Post Boost (花钱买曝光)
+    boost_rate: float = 0.0  # 发帖后 boost 的概率
+    boost_amount: Tuple[int, int] = (0, 0)  # boost 金额范围 (sat)
 
+
+# 真实充值金额设计 (基于 68,000 USD/BTC, 1 USD ≈ 1,470 sat)
+# - $1 ≈ 1,500 sat
+# - $10 ≈ 15,000 sat  
+# - $50 ≈ 75,000 sat
+# - $100 ≈ 150,000 sat (0.1%大哥)
+# - $500 ≈ 735,000 sat (顶级大V)
 
 USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
+    # 顶级大V (0.5%): 充$100-500入场，月充$50-200
     UserType.ELITE_CREATOR: UserBehaviorProfile(
         daily_post_rate=1.0,
         daily_like_rate=15,
@@ -298,16 +321,17 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.95,
         like_quality=0.90,
         cross_circle_rate=0.7,
-        challenge_rate=0.02,        # 偶尔举报，但举报必中
-        challenge_accuracy=0.90,    # 很准
+        challenge_rate=0.02,
+        challenge_accuracy=0.90,
         human_pledge_rate=0.9,
         violation_rate=0.02,
-        initial_balance=(10000, 50000),
+        initial_balance=(150000, 750000),   # $100-500
         monthly_deposit_prob=0.8,
-        monthly_deposit_amount=(5000, 20000),
+        monthly_deposit_amount=(75000, 300000),  # $50-200
         daily_activity_hours=3.0,
         activity_consistency=0.5,
     ),
+    # 活跃创作者 (3%): 充$30-100入场，月充$10-50
     UserType.ACTIVE_CREATOR: UserBehaviorProfile(
         daily_post_rate=1.5,
         daily_like_rate=15,
@@ -315,33 +339,35 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.70,
         like_quality=0.70,
         cross_circle_rate=0.4,
-        challenge_rate=0.02,        # 偶尔举报
-        challenge_accuracy=0.75,    # 较准
+        challenge_rate=0.02,
+        challenge_accuracy=0.75,
         human_pledge_rate=0.5,
         violation_rate=0.08,
-        initial_balance=(5000, 15000),
+        initial_balance=(45000, 150000),    # $30-100
         monthly_deposit_prob=0.6,
-        monthly_deposit_amount=(2000, 10000),
+        monthly_deposit_amount=(15000, 75000),   # $10-50
         daily_activity_hours=3.0,
         activity_consistency=0.5,
     ),
+    # 策展人 (3%): 充$20-80入场，月充$5-30
     UserType.CURATOR: UserBehaviorProfile(
-        daily_post_rate=0.1,         # 0.3 → 0.1 (基本不发帖)
+        daily_post_rate=0.1,
         daily_like_rate=15,
         daily_comment_rate=6,
-        content_quality=0.50,        # 0.70 → 0.50 (偶尔发也一般)
+        content_quality=0.50,
         like_quality=0.85,
         cross_circle_rate=0.6,
         challenge_rate=0.05,
         challenge_accuracy=0.85,
         human_pledge_rate=0.6,
         violation_rate=0.03,
-        initial_balance=(3000, 10000),
+        initial_balance=(30000, 120000),    # $20-80
         monthly_deposit_prob=0.5,
-        monthly_deposit_amount=(1000, 5000),
+        monthly_deposit_amount=(7500, 45000),    # $5-30
         daily_activity_hours=4.0,
         activity_consistency=0.6,
     ),
+    # 普通用户 (25%): 充$5-30入场，月充$2-10
     UserType.NORMAL: UserBehaviorProfile(
         daily_post_rate=0.2,
         daily_like_rate=3,
@@ -349,16 +375,17 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.50,
         like_quality=0.60,
         cross_circle_rate=0.3,
-        challenge_rate=0.005,       # 极少举报（每200天1次）
-        challenge_accuracy=0.60,    # 举报时还算准
+        challenge_rate=0.005,
+        challenge_accuracy=0.60,
         human_pledge_rate=0.2,
         violation_rate=0.10,
-        initial_balance=(1000, 5000),
+        initial_balance=(7500, 45000),      # $5-30
         monthly_deposit_prob=0.2,
-        monthly_deposit_amount=(500, 2000),
+        monthly_deposit_amount=(3000, 15000),    # $2-10
         daily_activity_hours=0.5,
         activity_consistency=0.2,
     ),
+    # 潜水党 (55%): 充$1-10入场，很少充值
     UserType.LURKER: UserBehaviorProfile(
         daily_post_rate=0.02,
         daily_like_rate=0.5,
@@ -366,16 +393,38 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.40,
         like_quality=0.50,
         cross_circle_rate=0.2,
-        challenge_rate=0.001,       # 几乎不举报
+        challenge_rate=0.001,
         challenge_accuracy=0.50,
         human_pledge_rate=0.1,
         violation_rate=0.15,
-        initial_balance=(500, 2000),
+        initial_balance=(1500, 15000),      # $1-10
         monthly_deposit_prob=0.05,
-        monthly_deposit_amount=(200, 1000),
+        monthly_deposit_amount=(1500, 7500),     # $1-5
         daily_activity_hours=0.2,
         activity_consistency=0.1,
     ),
+    # 💰 广告商 (0.5%): 平台最大金主！花钱买曝光
+    # 充$500-2000入场，每月充$200-1000，每帖 boost $10-100
+    UserType.ADVERTISER: UserBehaviorProfile(
+        daily_post_rate=2.0,            # 每天发 2 条广告
+        daily_like_rate=5,              # 偶尔点赞
+        daily_comment_rate=2,           # 偶尔评论
+        content_quality=0.50,           # 内容质量中等（商业内容）
+        like_quality=0.50,              # 点赞质量一般
+        cross_circle_rate=0.8,          # 高跨圈率（想触达更多人）
+        challenge_rate=0.0,             # 不举报
+        challenge_accuracy=0.0,
+        human_pledge_rate=0.3,          # 偶尔 human pledge
+        violation_rate=0.10,            # 低违规（商业内容合规）
+        initial_balance=(750000, 3000000),   # $500-2000 入场 (大金主!)
+        monthly_deposit_prob=0.9,            # 90% 月充值
+        monthly_deposit_amount=(300000, 1500000),  # $200-1000/月
+        daily_activity_hours=4.0,
+        activity_consistency=0.8,
+        boost_rate=0.8,                 # 80% 的帖子会 boost
+        boost_amount=(15000, 150000),   # $10-100 每次 boost
+    ),
+    # 营销狂 (2%): 充$20-80入场，愿意投入营销费用
     UserType.EXTREME_MARKETER: UserBehaviorProfile(
         daily_post_rate=5.0,
         daily_like_rate=2,
@@ -383,16 +432,17 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.20,
         like_quality=0.30,
         cross_circle_rate=0.1,
-        challenge_rate=0.005,       # 不举报，忙着发内容
+        challenge_rate=0.005,
         challenge_accuracy=0.20,
         human_pledge_rate=0.1,
         violation_rate=0.40,
-        initial_balance=(3000, 10000),
+        initial_balance=(30000, 120000),    # $20-80
         monthly_deposit_prob=0.4,
-        monthly_deposit_amount=(2000, 8000),
+        monthly_deposit_amount=(15000, 60000),   # $10-40
         daily_activity_hours=6.0,
         activity_consistency=0.8,
     ),
+    # 广告机器人 (1%): 充$10-50入场，需要成本运营
     UserType.AD_SPAMMER: UserBehaviorProfile(
         daily_post_rate=10.0,
         daily_like_rate=0,
@@ -400,16 +450,17 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.05,
         like_quality=0.10,
         cross_circle_rate=0.05,
-        challenge_rate=0.0,         # 不举报
+        challenge_rate=0.0,
         challenge_accuracy=0.0,
         human_pledge_rate=0.0,
         violation_rate=0.85,
-        initial_balance=(2000, 8000),
+        initial_balance=(15000, 75000),     # $10-50
         monthly_deposit_prob=0.3,
-        monthly_deposit_amount=(1000, 5000),
+        monthly_deposit_amount=(7500, 45000),    # $5-30
         daily_activity_hours=8.0,
         activity_consistency=0.95,
     ),
+    # 低质创作者 (3%): 充$5-30入场
     UserType.LOW_QUALITY_CREATOR: UserBehaviorProfile(
         daily_post_rate=1.5,
         daily_like_rate=5,
@@ -417,16 +468,17 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.25,
         like_quality=0.40,
         cross_circle_rate=0.2,
-        challenge_rate=0.01,        # 很少举报
+        challenge_rate=0.01,
         challenge_accuracy=0.30,
         human_pledge_rate=0.3,
         violation_rate=0.25,
-        initial_balance=(1000, 5000),
+        initial_balance=(7500, 45000),      # $5-30
         monthly_deposit_prob=0.25,
-        monthly_deposit_amount=(500, 3000),
+        monthly_deposit_amount=(3000, 22500),    # $2-15
         daily_activity_hours=2.0,
         activity_consistency=0.4,
     ),
+    # 喷子 (1%): 充$10-50入场，喷人需要成本
     UserType.TOXIC_CREATOR: UserBehaviorProfile(
         daily_post_rate=3.0,
         daily_like_rate=3,
@@ -434,19 +486,20 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.15,
         like_quality=0.20,
         cross_circle_rate=0.05,
-        challenge_rate=0.05,        # 0.30 → 0.05 (偶尔恶意举报)
+        challenge_rate=0.05,
         challenge_accuracy=0.15,
         human_pledge_rate=0.4,
         violation_rate=0.50,
-        initial_balance=(2000, 8000),
+        initial_balance=(15000, 75000),     # $10-50
         monthly_deposit_prob=0.35,
-        monthly_deposit_amount=(1000, 5000),
+        monthly_deposit_amount=(7500, 45000),    # $5-30
         daily_activity_hours=5.0,
         activity_consistency=0.7,
     ),
+    # 韭菜 (5%): 充$3-20入场，容易被骗
     UserType.STUPID_AUDIENCE: UserBehaviorProfile(
         daily_post_rate=0.05,
-        daily_like_rate=4,           # 10 → 4 (偶尔被骗点赞)
+        daily_like_rate=4,
         daily_comment_rate=2,
         content_quality=0.30,
         like_quality=0.25,
@@ -455,12 +508,13 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         challenge_accuracy=0.20,
         human_pledge_rate=0.05,
         violation_rate=0.20,
-        initial_balance=(500, 3000),
+        initial_balance=(4500, 30000),      # $3-20
         monthly_deposit_prob=0.15,
-        monthly_deposit_amount=(300, 1500),
+        monthly_deposit_amount=(2250, 11000),    # $1.5-7.5
         daily_activity_hours=2.0,
         activity_consistency=0.3,
     ),
+    # 恶意举报者 (0.5%): 充$20-80入场，需要本金举报
     UserType.MALICIOUS_CHALLENGER: UserBehaviorProfile(
         daily_post_rate=0.3,
         daily_like_rate=2,
@@ -468,19 +522,20 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         content_quality=0.40,
         like_quality=0.40,
         cross_circle_rate=0.3,
-        challenge_rate=0.90,        # 极高！这是他们的主业
-        challenge_accuracy=0.08,    # 极不准，纯恶意
+        challenge_rate=0.90,
+        challenge_accuracy=0.08,
         human_pledge_rate=0.2,
         violation_rate=0.15,
-        initial_balance=(3000, 10000),
+        initial_balance=(30000, 120000),    # $20-80
         monthly_deposit_prob=0.4,
-        monthly_deposit_amount=(1000, 5000),
+        monthly_deposit_amount=(7500, 45000),    # $5-30
         daily_activity_hours=4.0,
         activity_consistency=0.6,
     ),
+    # 刷量团伙 (1%): 充$30-100入场，有组织的运营资金
     UserType.CABAL_MEMBER: UserBehaviorProfile(
         daily_post_rate=3.0,
-        daily_like_rate=35,          # 80 → 35 (更现实的刷量)
+        daily_like_rate=35,
         daily_comment_rate=15,
         content_quality=0.35,
         like_quality=0.10,
@@ -489,9 +544,9 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
         challenge_accuracy=0.30,
         human_pledge_rate=0.3,
         violation_rate=0.35,
-        initial_balance=(5000, 15000),
+        initial_balance=(45000, 150000),    # $30-100
         monthly_deposit_prob=0.5,
-        monthly_deposit_amount=(2000, 10000),
+        monthly_deposit_amount=(15000, 75000),   # $10-50
         daily_activity_hours=6.0,
         activity_consistency=0.9,
     ),
@@ -505,11 +560,12 @@ USER_PROFILES: Dict[UserType, UserBehaviorProfile] = {
 USER_TYPE_DISTRIBUTION = {
     UserType.ELITE_CREATOR: 0.005,       # 0.5% - 顶级 KOL
     UserType.ACTIVE_CREATOR: 0.03,       # 3% - 定期发帖的活跃创作者
-    UserType.CURATOR: 0.03,              # 3% - 主动点赞评论 (6% → 3%)
-    UserType.NORMAL: 0.25,               # 25% - 偶尔互动的普通人 (补上3%)
+    UserType.CURATOR: 0.03,              # 3% - 主动点赞评论
+    UserType.NORMAL: 0.245,              # 24.5% - 偶尔互动的普通人
     UserType.LURKER: 0.55,               # 55% - 沉默的大多数
+    UserType.ADVERTISER: 0.01,           # 1% - 💰广告商，平台最大金主
     UserType.EXTREME_MARKETER: 0.02,     # 2% - 博眼球/标题党
-    UserType.AD_SPAMMER: 0.01,           # 1% - 广告引流
+    UserType.AD_SPAMMER: 0.005,          # 0.5% - 广告引流 (1% → 0.5%)
     UserType.LOW_QUALITY_CREATOR: 0.03,  # 3% - 想创作但水平不行
     UserType.TOXIC_CREATOR: 0.01,        # 1% - 极端/恶意内容
     UserType.STUPID_AUDIENCE: 0.05,      # 5% - 容易被垃圾吸引
