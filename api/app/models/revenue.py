@@ -18,6 +18,7 @@ class PlatformRevenue(Base):
     comment_revenue: Mapped[int] = mapped_column(BigInteger, default=0)
     post_revenue: Mapped[int] = mapped_column(BigInteger, default=0)
     boost_revenue: Mapped[int] = mapped_column(BigInteger, default=0)
+    challenge_revenue: Mapped[int] = mapped_column(BigInteger, default=0)
 
     # Total = sum of all sources
     total: Mapped[int] = mapped_column(BigInteger, default=0)

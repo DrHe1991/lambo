@@ -1,6 +1,6 @@
 import React from 'react';
 import { Post } from '../types';
-import { Heart, MessageSquare, ShieldAlert, Cpu, Rocket } from 'lucide-react';
+import { Heart, MessageSquare, ShieldAlert, Cpu, Rocket, Zap } from 'lucide-react';
 import { getTrustRingClass, getTrustTier } from '../trustTheme';
 
 interface PostCardProps {
@@ -9,13 +9,15 @@ interface PostCardProps {
   onUserClick?: (userId: string) => void;
   onChallenge?: (post: Post) => void;
   onLike?: (post: Post) => void;
+  onBoost?: (post: Post) => void;
   isLiked?: boolean;
+  isOwner?: boolean;
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, isLiked }) => {
+export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onBoost, isLiked, isOwner }) => {
   const trustTier = getTrustTier(post.author.trustScore);
   const isOrangeTier = trustTier === 'orange';
-  const isBoosted = Boolean(post.isPromoted);
+  const isBoosted = Boolean(post.isPromoted || post.isBoosted);
 
   return (
     <div 
@@ -59,6 +61,11 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
                 <Rocket size={10} /> Sponsored
               </div>
             )}
+            {post.isBoosted && !post.isPromoted && (
+              <div className="flex items-center gap-1 bg-yellow-500/15 border border-yellow-400/50 text-yellow-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                <Zap size={10} /> {post.boostMultiplier?.toFixed(1)}x
+              </div>
+            )}
           </div>
           <span className="text-zinc-500 text-xs">{post.author.handle} · {post.timestamp}</span>
         </div>
@@ -97,14 +104,26 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
             <span className="text-xs font-medium">{post.comments}</span>
           </button>
         </div>
-        <button 
-          data-testid={`report-button-${post.id}`}
-          className="flex items-center gap-1 text-zinc-600 hover:text-red-500 transition-colors"
-          onClick={(e) => { e.stopPropagation(); onChallenge?.(post); }}
-        >
-          <ShieldAlert size={16} />
-          <span className="text-[10px] font-bold uppercase tracking-wider">Report</span>
-        </button>
+        <div className="flex items-center gap-2">
+          {isOwner && (
+            <button 
+              data-testid={`boost-button-${post.id}`}
+              className="flex items-center gap-1 text-zinc-500 hover:text-orange-400 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onBoost?.(post); }}
+            >
+              <Zap size={16} />
+              <span className="text-[10px] font-bold uppercase tracking-wider">Boost</span>
+            </button>
+          )}
+          <button 
+            data-testid={`report-button-${post.id}`}
+            className="flex items-center gap-1 text-zinc-600 hover:text-red-500 transition-colors"
+            onClick={(e) => { e.stopPropagation(); onChallenge?.(post); }}
+          >
+            <ShieldAlert size={16} />
+            <span className="text-[10px] font-bold uppercase tracking-wider">Report</span>
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -9,6 +9,7 @@ from app.models.post import Post
 from app.models.reward import PostReward, RewardPool, SettlementStatus
 from app.services.discovery_service import DiscoveryService
 from app.services.subsidy_service import SubsidyService
+from app.services.cabal_service import CabalDetectionService
 
 router = APIRouter()
 
@@ -163,5 +164,58 @@ async def run_subsidy_distribution(
     """
     service = SubsidyService(db)
     result = await service.distribute_weekly_subsidy()
+    await db.commit()
+    return result
+
+
+@router.post('/cabal/detect')
+async def run_cabal_detection(
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger cabal detection.
+
+    In production this runs weekly via settlement_worker.
+    Exposed as endpoint for dev/testing.
+    """
+    service = CabalDetectionService(db)
+    result = await service.run_detection()
+    await db.commit()
+    return result
+
+
+@router.post('/cabal/{group_id}/penalize')
+async def apply_cabal_penalties(
+    group_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Apply penalties to a detected cabal group."""
+    service = CabalDetectionService(db)
+    result = await service.apply_penalties(group_id)
+    await db.commit()
+    return result
+
+
+@router.get('/cabal/user/{user_id}')
+async def check_user_cabal_status(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Check if a user is in an active cabal."""
+    service = CabalDetectionService(db)
+    return await service.check_user_cabal_status(user_id)
+
+
+@router.post('/boost/decay')
+async def run_boost_decay(
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually trigger boost decay.
+
+    In production this runs daily via settlement_worker.
+    Exposed as endpoint for dev/testing.
+    """
+    from app.services.boost_service import BoostService
+    service = BoostService(db)
+    result = await service.decay_all_boosts()
     await db.commit()
     return result

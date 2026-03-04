@@ -5,8 +5,9 @@ from app.models.ledger import Ledger
 from app.models.reward import (
     InteractionLog, RewardPool, PostReward, CommentReward,
 )
-from app.models.challenge import Challenge
+from app.models.challenge import Challenge, JuryVote
 from app.models.revenue import PlatformRevenue
+from app.models.cabal import CabalGroup, CabalMember
 
 __all__ = [
     'User',
@@ -24,5 +25,8 @@ __all__ = [
     'PostReward',
     'CommentReward',
     'Challenge',
+    'JuryVote',
     'PlatformRevenue',
+    'CabalGroup',
+    'CabalMember',
 ]

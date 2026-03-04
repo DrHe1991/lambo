@@ -9,6 +9,7 @@ import { TrustBadge } from './components/TrustBadge';
 import { LoginPage } from './components/LoginPage';
 import { ChallengeModal } from './components/ChallengeModal';
 import { LikeStakeModal } from './components/LikeStakeModal';
+import { BoostModal } from './components/BoostModal';
 import { ToastContainer, toast } from './components/Toast';
 import { getTrustRingClass, getTrustStrokeColor, getTrustBadgeBg, getTrustTier } from './trustTheme';
 import { ApiTrustBreakdown, ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest } from './api/client';
@@ -79,6 +80,8 @@ const App: React.FC = () => {
   const [showLikeModal, setShowLikeModal] = useState(false);
   const [likeTargetPost, setLikeTargetPost] = useState<Post | null>(null);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  const [showBoostModal, setShowBoostModal] = useState(false);
+  const [boostTargetPost, setBoostTargetPost] = useState<Post | null>(null);
   const [showChatActions, setShowChatActions] = useState(false);
   const [friendSearch, setFriendSearch] = useState('');
   const [friendSearchResults, setFriendSearchResults] = useState<User[]>([]);
@@ -296,7 +299,8 @@ const App: React.FC = () => {
   const [isFollowingProfile, setIsFollowingProfile] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
 
-  const LIKE_STAKE = 10; // sat required to like
+  // Dynamic like cost from backend
+  const LIKE_STAKE = userCosts?.costs?.like_post ?? 20;
 
   // Fetch trust breakdown & dynamic costs
   const fetchTrustData = async (userId: number) => {
@@ -353,6 +357,21 @@ const App: React.FC = () => {
 
   const handleLikeConfirm = async () => {
     if (likeTargetPost) handleLikeToggle(likeTargetPost);
+  };
+
+  // Handle boost button click
+  const handleBoost = (post: Post) => {
+    setBoostTargetPost(post);
+    setShowBoostModal(true);
+  };
+
+  // Handle boost success - refresh balance
+  const handleBoostSuccess = (newBalance: number) => {
+    if (currentUser) {
+      fetchBalance(currentUser.id);
+      fetchPosts({ user_id: currentUser.id });
+    }
+    toast.success('Post boosted!');
   };
 
   // Handle Google Sign-In (placeholder for Phase 2)
@@ -556,7 +575,9 @@ const App: React.FC = () => {
             }}
             onChallenge={handleChallenge}
             onLike={handleLikeRequest}
+            onBoost={handleBoost}
             isLiked={likedPosts.has(String(post.id)) || post.isLiked}
+            isOwner={currentUser?.id === post.author.id}
           />
         ))}
       </div>
@@ -580,6 +601,11 @@ const App: React.FC = () => {
             setSelectedUser(user);
             setCurrentView('USER_PROFILE');
           }}
+          onChallenge={handleChallenge}
+          onLike={handleLikeRequest}
+          onBoost={handleBoost}
+          isLiked={likedPosts.has(String(post.id)) || post.isLiked}
+          isOwner={currentUser?.id === post.author.id}
         />
       ))}
     </div>
@@ -3182,6 +3208,17 @@ const App: React.FC = () => {
         stakeAmount={LIKE_STAKE}
         userBalance={availableBalance}
       />
+
+      {/* Boost Modal */}
+      {showBoostModal && boostTargetPost && currentUser && (
+        <BoostModal
+          post={boostTargetPost}
+          userId={currentUser.id}
+          userBalance={availableBalance}
+          onClose={() => setShowBoostModal(false)}
+          onSuccess={handleBoostSuccess}
+        />
+      )}
       
       {/* Modals */}
       {renderPublishOverlay()}

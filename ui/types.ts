@@ -22,6 +22,9 @@ export interface Post {
   timestamp: string;
   isAI?: boolean;
   isPromoted?: boolean;
+  isBoosted?: boolean;
+  boostMultiplier?: number;
+  boostRemaining?: number;
   type: 'Note' | 'Question';
   bounty?: number;
   status?: string;
@@ -72,7 +75,7 @@ export function apiUserToUser(apiUser: {
     name: apiUser.name,
     handle: apiUser.handle.startsWith('@') ? apiUser.handle : `@${apiUser.handle}`,
     avatar: apiUser.avatar || `https://picsum.photos/id/${apiUser.id + 10}/200/200`,
-    trustScore: Math.round(apiUser.trust_score / 10), // Convert 0-1000 to 0-100 for display
+    trustScore: apiUser.trust_score, // Keep raw score (can exceed 1000 for elite creators)
     isFollowing: apiUser.is_following,
     bio: apiUser.bio,
     followers_count: apiUser.followers_count,
@@ -99,7 +102,13 @@ export function apiPostToPost(apiPost: {
   is_ai: boolean;
   created_at: string;
   is_liked: boolean;
+  boost_amount?: number;
+  boost_remaining?: number;
 }): Post {
+  const boostRemaining = apiPost.boost_remaining ?? 0;
+  const isBoosted = boostRemaining > 0.01;
+  const boostMultiplier = Math.min(5.0, 1.0 + boostRemaining);
+
   return {
     id: apiPost.id,
     author: apiUserToUser(apiPost.author),
@@ -112,6 +121,9 @@ export function apiPostToPost(apiPost: {
     isAI: apiPost.is_ai,
     status: apiPost.status,
     isLiked: apiPost.is_liked,
+    isBoosted,
+    boostMultiplier: isBoosted ? boostMultiplier : undefined,
+    boostRemaining: isBoosted ? boostRemaining : undefined,
   };
 }
 

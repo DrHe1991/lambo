@@ -38,6 +38,9 @@ class ActionType(str, Enum):
     WITHDRAW = 'withdraw'
     CABAL_PENALTY = 'cabal_penalty'
 
+    # Jury system
+    JURY_REWARD = 'jury_reward'
+
 
 class RefType(str, Enum):
     """What entity a ledger entry references."""

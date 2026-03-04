@@ -118,6 +118,8 @@ export interface ApiPost {
   is_ai: boolean;
   created_at: string;
   is_liked: boolean;
+  boost_amount?: number;
+  boost_remaining?: number;
 }
 
 export interface ApiComment {
@@ -287,7 +289,7 @@ export interface ApiChallenge {
   author_id: number;
   reason: string;
   layer: number;
-  status: 'pending' | 'guilty' | 'not_guilty';
+  status: 'pending' | 'guilty' | 'not_guilty' | 'escalated' | 'voting';
   fee_paid: number;
   fine_amount: number;
   ai_verdict: string | null;
@@ -295,6 +297,53 @@ export interface ApiChallenge {
   ai_confidence: number | null;
   created_at: string;
   resolved_at: string | null;
+}
+
+// Boost types (Sprint 12)
+export interface ApiBoostResult {
+  post_id: number;
+  amount_paid: number;
+  boost_points_added: number;
+  total_boost_remaining: number;
+  current_multiplier: number;
+  estimated_duration_days: number;
+}
+
+export interface ApiBoostInfo {
+  post_id: number;
+  boost_amount: number;
+  boost_remaining: number;
+  current_multiplier: number;
+  is_boosted: boolean;
+}
+
+// Challenge L2 types (Sprint 11)
+export interface ApiChallengeFees {
+  layers: { '1': number; '2': number; '3': number };
+  violation_types: Record<string, { multiplier: number; description: string }>;
+  distribution: { reporter: string; jury: string; platform: string };
+}
+
+export interface ApiJuryChallenge {
+  id: number;
+  content_type: string;
+  content_id: number;
+  reason: string;
+  violation_type: string;
+  challenger_id: number;
+  author_id: number;
+  votes_guilty: number;
+  votes_not_guilty: number;
+  jury_size: number;
+  voting_deadline: string;
+  created_at: string;
+}
+
+export interface ApiJuryVoteResult {
+  vote_recorded: boolean;
+  current_votes: number;
+  required_votes: number;
+  status: string;
 }
 
 // API methods
@@ -567,4 +616,28 @@ export const api = {
 
   listChallenges: (filters?: { content_type?: string; content_id?: number; user_id?: number; author_id?: number }) =>
     apiRequest<ApiChallenge[]>('/api/challenges', { params: filters }),
+
+  // Boost (Sprint 12)
+  boostPost: (postId: number, userId: number, amount: number) =>
+    apiRequest<ApiBoostResult>(`/api/posts/${postId}/boost`, {
+      method: 'POST',
+      params: { user_id: userId, amount },
+    }),
+
+  getBoostInfo: (postId: number) =>
+    apiRequest<ApiBoostInfo>(`/api/posts/${postId}/boost`),
+
+  // Challenge L2 Jury (Sprint 11)
+  getChallengeFees: (userId: number) =>
+    apiRequest<ApiChallengeFees>(`/api/challenges/fees`, { params: { user_id: userId } }),
+
+  getPendingJuryChallenges: (userId: number) =>
+    apiRequest<ApiJuryChallenge[]>(`/api/challenges/jury/${userId}/pending`),
+
+  castJuryVote: (challengeId: number, userId: number, voteGuilty: boolean, reasoning?: string) =>
+    apiRequest<ApiJuryVoteResult>(`/api/challenges/${challengeId}/vote`, {
+      method: 'POST',
+      body: { vote_guilty: voteGuilty, reasoning },
+      params: { user_id: userId },
+    }),
 };

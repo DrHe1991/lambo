@@ -7,20 +7,21 @@ export interface TrustTierConfig {
   label: string;
 }
 
+// Backend-aligned thresholds (Sprint 8)
 export const TRUST_TIER_CONFIGS: TrustTierConfig[] = [
-  { tier: 'white', minScore: 0, maxScore: 399, label: 'White' },
-  { tier: 'green', minScore: 400, maxScore: 599, label: 'Green' },
-  { tier: 'blue', minScore: 600, maxScore: 749, label: 'Blue' },
-  { tier: 'purple', minScore: 750, maxScore: 899, label: 'Purple' },
-  { tier: 'orange', minScore: 900, maxScore: 1000, label: 'Orange' },
+  { tier: 'white', minScore: 0, maxScore: 150, label: 'White' },
+  { tier: 'green', minScore: 151, maxScore: 250, label: 'Green' },
+  { tier: 'blue', minScore: 251, maxScore: 400, label: 'Blue' },
+  { tier: 'purple', minScore: 401, maxScore: 700, label: 'Purple' },
+  { tier: 'orange', minScore: 701, maxScore: 99999, label: 'Orange' },
 ];
 
 export const getTrustTier = (score: number): TrustTier => {
-  // score on 0-1000 scale
-  if (score >= 900) return 'orange';
-  if (score >= 750) return 'purple';
-  if (score >= 600) return 'blue';
-  if (score >= 400) return 'green';
+  // Score can exceed 1000 for elite creators
+  if (score >= 701) return 'orange';
+  if (score >= 401) return 'purple';
+  if (score >= 251) return 'blue';
+  if (score >= 151) return 'green';
   return 'white';
 };
 

@@ -14,6 +14,7 @@ from app.schemas.user import UserBrief
 from app.services.ledger_service import LedgerService, InsufficientBalance
 from app.services.trust_service import dynamic_fee_multiplier, compute_trust_score
 from app.services.like_weight_service import LikeWeightService
+from app.services.boost_service import BoostService
 from app.models.reward import InteractionLog, InteractionType
 
 # Base costs (before K(trust) multiplier) - aligned with simulator
@@ -253,6 +254,13 @@ async def get_posts(
     return [build_post_response(p, is_liked=p.id in liked_ids) for p in posts]
 
 
+def _boost_score(post: Post) -> float:
+    """Calculate feed score with boost multiplier."""
+    base_score = post.created_at.timestamp()
+    boost_mult = min(5.0, 1.0 + (post.boost_remaining or 0))
+    return base_score * boost_mult
+
+
 @router.get('/feed', response_model=list[PostResponse])
 async def get_feed(
     user_id: int = Query(...),
@@ -260,9 +268,14 @@ async def get_feed(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get feed for a user (posts from followed users)."""
+    """Get feed for a user (posts from followed users).
+    
+    Posts are sorted by recency × boost multiplier.
+    Boosted posts get up to 5x visibility boost.
+    """
     from app.models.user import Follow
 
+    # Get more posts than needed, then sort by boost score
     query = (
         select(Post)
         .options(selectinload(Post.author))
@@ -270,12 +283,15 @@ async def get_feed(
         .where(Follow.follower_id == user_id)
         .where(Post.status == PostStatus.ACTIVE.value)
         .order_by(desc(Post.created_at))
-        .limit(limit)
-        .offset(offset)
+        .limit(limit * 3)  # Fetch extra for re-ranking
     )
 
     result = await db.execute(query)
     posts = list(result.scalars().all())
+
+    # Re-sort by boost score
+    posts.sort(key=_boost_score, reverse=True)
+    posts = posts[offset:offset + limit]
 
     liked_ids = await _check_post_liked(db, [p.id for p in posts], user_id)
     return [build_post_response(p, is_liked=p.id in liked_ids) for p in posts]
@@ -686,3 +702,47 @@ async def unlike_comment(
     await db.flush()
 
     return {'likes_count': comment.likes_count, 'is_liked': False}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  BOOST ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════════════
+
+@router.post('/{post_id}/boost')
+async def boost_post(
+    post_id: int,
+    amount: int = Query(..., ge=1000, description='Amount in sat (min 1000)'),
+    user_id: int = Query(..., description='User paying for boost'),
+    db: AsyncSession = Depends(get_db),
+):
+    """Boost a post for increased visibility.
+    
+    - Minimum boost: 1000 sat (~$0.68)
+    - 100 sat = 1 boost point
+    - Max 5x visibility multiplier
+    - Decays 30% daily
+    - Only author can boost their own posts
+    """
+    service = BoostService(db)
+    result = await service.boost_post(post_id, user_id, amount)
+    await db.commit()
+
+    if 'error' in result:
+        raise HTTPException(status_code=400, detail=result['error'])
+
+    return result
+
+
+@router.get('/{post_id}/boost')
+async def get_boost_info(
+    post_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get boost info for a post."""
+    service = BoostService(db)
+    result = await service.get_post_boost_info(post_id)
+
+    if not result:
+        raise HTTPException(status_code=404, detail='Post not found')
+
+    return result

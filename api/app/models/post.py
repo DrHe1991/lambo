@@ -43,6 +43,10 @@ class Post(Base):
     # AI-generated content flag
     is_ai: Mapped[bool] = mapped_column(default=False)
 
+    # Boost (paid promotion)
+    boost_amount: Mapped[int] = mapped_column(BigInteger, default=0)  # Total sat spent on boost
+    boost_remaining: Mapped[float] = mapped_column(Float, default=0.0)  # Remaining boost points
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
