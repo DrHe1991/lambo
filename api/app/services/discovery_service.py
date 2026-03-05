@@ -17,25 +17,25 @@ from app.models.reward import (
     PoolStatus, SettlementStatus,
 )
 from app.services.ledger_service import LedgerService
-from app.services.trust_service import TrustScoreService
+from app.services.trust_service import TrustScoreService, trust_tier, TrustTier
 
 
-# ── W_trust — trust tier weights ──────────────────────────────────────────────
+# ── W_trust — trust tier weights (aligned with TRUST_TIER_RANGES) ─────────────
 
-W_TRUST_TABLE = [
-    (0, 399, 0.5),     # White
-    (400, 599, 1.0),   # Green
-    (600, 749, 2.0),   # Blue
-    (750, 899, 3.5),   # Purple
-    (900, 1000, 6.0),  # Orange
-]
+TRUST_TIER_WEIGHTS = {
+    TrustTier.WHITE: 0.5,
+    TrustTier.GREEN: 1.0,
+    TrustTier.BLUE: 2.0,
+    TrustTier.PURPLE: 3.5,
+    TrustTier.ORANGE: 6.0,
+}
 
 
 def w_trust(trust_score: int) -> float:
-    for lo, hi, w in W_TRUST_TABLE:
-        if lo <= trust_score <= hi:
-            return w
-    return 0.5
+    """Get like weight based on trust tier (uses correct TRUST_TIER_RANGES)."""
+    tier_str = trust_tier(trust_score)
+    tier = TrustTier(tier_str)
+    return TRUST_TIER_WEIGHTS.get(tier, 0.5)
 
 
 # ── N_novelty — interaction freshness decay ───────────────────────────────────
@@ -245,58 +245,33 @@ class DiscoveryService:
             pool.total_pool += pool_amount
             pool.post_count += len(posts)
 
-        ledger = LedgerService(self.db)
-        total_distributed = 0
+        # NOTE: Reward distribution disabled - revenue now flows directly via
+        # spend_with_split (80% to creator on each like). Settlement only tracks
+        # scores and updates trust. This aligns with simulator's model.
         settled_posts = []
 
         for post in posts:
             score = scores[post.id]
 
-            # Calculate post reward based on share of total scores
-            if total_scores > 0 and score > 0:
-                post_reward_amount = int((score / total_scores) * pool_amount)
-            else:
-                post_reward_amount = 0
-
-            author_reward = int(post_reward_amount * AUTHOR_SHARE)
-            comment_pool_amount = post_reward_amount - author_reward
-
-            # Create PostReward record
+            # Create PostReward record (for tracking only, no payment)
             pr = PostReward(
                 post_id=post.id,
                 pool_id=pool.id,
                 discovery_score=score,
-                author_reward=author_reward,
-                comment_pool=comment_pool_amount,
+                author_reward=0,  # No additional reward - paid directly on like
+                comment_pool=0,
                 status=SettlementStatus.SETTLED.value,
                 settled_at=datetime.utcnow(),
             )
             self.db.add(pr)
             await self.db.flush()
 
-            # Pay author
-            if author_reward > 0:
-                await ledger.earn(
-                    post.author_id, author_reward,
-                    ActionType.REWARD_POST,
-                    ref_type=RefType.POST, ref_id=post.id,
-                    note=f'Post reward (score={score:.2f})',
-                )
-                total_distributed += author_reward
-
-            # Distribute comment pool
-            if comment_pool_amount > 0:
-                distributed_comments = await self._settle_comments(
-                    post.id, pr.id, comment_pool_amount, ledger,
-                )
-                total_distributed += distributed_comments
-
             settled_posts.append({
                 'post_id': post.id,
                 'author_id': post.author_id,
                 'discovery_score': round(score, 4),
-                'author_reward': author_reward,
-                'comment_pool': comment_pool_amount,
+                'author_reward': 0,
+                'comment_pool': 0,
             })
 
         # ── Trust score updates after settlement ─────────────────────────
@@ -329,7 +304,7 @@ class DiscoveryService:
                 for (like,) in like_result.all():
                     await trust_svc.update_curator(like.user_id, 1, 'liked rewarded post')
 
-        pool.total_distributed = total_distributed
+        pool.total_distributed = 0  # No pool distribution - direct payments only
         pool.status = PoolStatus.SETTLED.value
         pool.settled_at = datetime.utcnow()
 
@@ -337,7 +312,7 @@ class DiscoveryService:
             'settle_date': settle_date_str,
             'posts_settled': len(posts),
             'pool': pool_amount,
-            'total_distributed': total_distributed,
+            'total_distributed': 0,  # Direct payments, no pool distribution
             'total_scores': round(total_scores, 4),
             'posts': settled_posts,
         }

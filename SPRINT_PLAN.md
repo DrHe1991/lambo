@@ -1,7 +1,7 @@
 ## Sprint Plan — Spend & Earn Implementation
 
 > Based on `simulator/SYSTEM_DESIGN.md` (模拟器验证版).
-> Sprint 1-11 后端已完成. Sprint 12+ 为前端集成和新功能.
+> Sprint 1-13 已完成. 举报仅用 L1 (LLM) 判决.
 
 ---
 
@@ -20,10 +20,11 @@
 | S9 Like Weight | ✅ 完成 | 8/8 | 完整点赞权重计算 |
 | S10 Cabal Detection | ✅ 完成 | 11/11 | 自动检测 + 惩罚 |
 | S11 Challenge L2 | ✅ 完成 | 11/11 | 社区陪审 + 投票 |
-| **S12 Boost** | ⏳ 待做 | - | 付费曝光 |
-| **S13 前端集成** | ⏳ 待做 | - | 更新 UI 对齐新后端 |
+| S12 Boost | ✅ 完成 | 16/16 | 付费曝光 |
+| S13 前端集成 | ✅ 完成 | - | 成本/Trust/Boost UI |
+| **S15 AINFT** | 📋 计划中 | - | LLM 支付集成 |
 
-**总测试**: 149/149 通过 ✅
+**总测试**: 165/165 通过 ✅
 
 ---
 
@@ -271,58 +272,84 @@
 
 ---
 
-## Sprint 12 — Boost 付费曝光 ⏳
+## Sprint 12 — Boost 付费曝光 ✅
 
 > Goal: 广告商可以付费提升曝光
 
-### 待完成内容
+### 完成内容
 
-- [ ] 添加字段到 `posts`:
+- [x] 添加字段到 `posts`:
   - `boost_amount BIGINT`
   - `boost_remaining FLOAT`
-- [ ] `POST /posts/{id}/boost`:
+- [x] `POST /posts/{id}/boost`:
   - 最低 1000 sat
   - 50% 进平台池，50% 运营收入
-- [ ] Feed 排序考虑 Boost:
+  - 只有作者可以 boost 自己的帖子
+- [x] `GET /posts/{id}/boost` 获取 boost 信息
+- [x] Feed 排序考虑 Boost:
   ```python
   boost_mult = min(5.0, 1.0 + post.boost_remaining)
   ```
-- [ ] 每日衰减 30%
-- [ ] 前端: Boost 按钮 + 预算输入 + 确认弹窗
+- [x] 每日衰减 30% (settlement_worker 每日 5AM UTC)
+- [x] `POST /rewards/boost/decay` 手动触发衰减
+- [x] 数据库迁移 `m3n4o5p6q7r8_add_boost_columns.py`
 
-**预计**: 3-4 天
+**测试**: `bash api/tests/test_s12_boost.sh` — 16/16 ✅
 
 ---
 
-## Sprint 13 — 前端集成 ⏳
+## Sprint 13 — 前端集成 ✅
 
 > Goal: UI 对齐新后端功能
 
-### 待完成内容
+### 完成内容
 
-- [ ] 更新成本显示 (50/20/20/10 sat)
-- [ ] Trust 详情页更新 (新公式/阈值)
-- [ ] 陪审投票 UI
-- [ ] Cabal 状态显示
-- [ ] 质量补贴通知
-- [ ] Boost 按钮
+- [x] 更新成本显示 (50/20/20/10 sat) — Trust 详情页动态费用
+- [x] Trust 详情页更新 (新公式/阈值) — 四维分数展示
+- [x] Boost 按钮 — `BoostModal` 完整实现
+
+> Note: L2 陪审投票 UI 暂不实现，举报仅用 L1 (LLM) 判决
 
 ---
 
-## Sprint 14 — 上诉机制 ⏳
+## Sprint 14 — 上诉机制 ⏸️ 暂缓
 
 > Goal: L1 判决后可上诉到 L2
+> 
+> **暂缓原因**: 当前举报仅用 L1 (LLM) 判决，不实现 L2 陪审
 
-### 待完成内容
+### 预留内容 (未来可启用)
 
 - [ ] `POST /challenges/{id}/escalate`
 - [ ] 仅 L1 结果后 24h 内可上诉
-- [ ] 陪审团资格筛选:
-  - Trust >= 400
-  - 30 天无违规
-  - 排除相关方
-- [ ] 加权投票 (按 Trust 分数)
+- [ ] 陪审团资格筛选
+- [ ] 加权投票
 - [ ] 72h 投票超时处理
+
+---
+
+## Sprint 15 — AINFT LLM 支付集成 📋 计划中
+
+> Goal: 通过 AINFT 平台支付举报判决的 LLM token 费用
+> 
+> **背景**: 举报功能使用 LLM (L1) 进行自动判决，会消耗 AI token。
+> 计划集成 [AINFT](https://ainft.com/) 平台，用平台绑定的钱包支付推理费用。
+
+### 关于 AINFT
+
+AINFT 是基于 TRON 区块链的 AI + 区块链生态系统：
+- **AI Agent 框架** — 支持多 Agent 系统
+- **去中心化 AI 模型平台** — 模型训练和推理
+- **钱包支付** — 通过 NFT 代币支付 AI 服务费用
+- 官网: https://ainft.com/
+- 白皮书: https://ainft.com/whitepaper/AINFT%20White%20Paper.pdf
+
+### 预留内容 (未来实现)
+
+- [ ] AINFT 钱包集成
+- [ ] 举报时通过 AINFT 支付 LLM 推理费用
+- [ ] 费用追踪和账单记录
+- [ ] 用户 sat 余额 → AINFT 代币兑换 (可选)
 
 ---
 
@@ -337,20 +364,19 @@
 | **S9** | ✅ 完成 | 点赞权重 |
 | **S10** | ✅ 完成 | Cabal 检测 |
 | **S11** | ✅ 完成 | 社区陪审 |
-| **S12** | ⏳ 待做 | Boost 付费曝光 |
-| **S13** | ⏳ 待做 | 前端集成 |
-| **S14** | ⏳ 待做 | 上诉机制 |
+| **S12** | ✅ 完成 | Boost 付费曝光 |
+| **S13** | ✅ 完成 | 前端集成 |
+| **S14** | ⏸️ 暂缓 | 上诉机制 (依赖 L2 陪审) |
+| **S15** | 📋 计划中 | AINFT LLM 支付集成 |
 
 ### 依赖关系
 
 ```
-S1-S11 ✅ (后端核心完成)
+S1-S13 ✅ (后端 + 前端核心完成)
      │
-     ↓
-S12 (Boost) ──→ S13 (前端集成)
+     ├──→ S14 ⏸️ (上诉机制 - 暂缓，依赖 L2 陪审)
      │
-     ↓
-S14 (上诉机制)
+     └──→ S15 📋 (AINFT LLM 支付 - 计划中)
 ```
 
 ---
@@ -366,7 +392,7 @@ for t in api/tests/test_s*.sh; do
   echo ""
 done
 
-# 当前: 149/149 通过 ✅
+# 当前: 165/165 通过 ✅
 ```
 
 ---
@@ -381,5 +407,6 @@ done
 | `api/app/services/challenge_service.py` | 举报/陪审系统 |
 | `api/app/services/like_weight_service.py` | 点赞权重 |
 | `api/app/services/subsidy_service.py` | 质量补贴 |
+| `api/app/services/boost_service.py` | Boost 付费曝光 |
 | `api/app/worker/settlement_worker.py` | 定时任务调度 |
 | `simulator/SYSTEM_DESIGN.md` | 经济模型设计文档 |

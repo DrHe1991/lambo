@@ -710,7 +710,7 @@ def main():
     
     start_time = time.time()
     
-    sim = BitLinkSimulator(scale=1000, days=120)
+    sim = BitLinkSimulator(scale=SIMULATION_SCALE, days=SIMULATION_DAYS)
     print("Simulator created, initializing...", flush=True)
     sim.initialize()
     

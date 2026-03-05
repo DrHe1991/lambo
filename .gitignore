@@ -100,6 +100,7 @@ env/
 # Simulator results
 # ----------------------------------------
 simulator/results/
+api/tests/simulation_reports/
 
 # ----------------------------------------
 # Misc

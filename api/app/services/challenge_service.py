@@ -22,8 +22,8 @@ from app.models.ledger import Ledger, ActionType, RefType
 from app.models.revenue import PlatformRevenue
 from app.services.trust_service import TrustScoreService, compute_trust_score
 
-# AI confidence threshold for auto-resolution
-AI_CONFIDENCE_THRESHOLD = 0.85
+# AI confidence threshold for auto-resolution (lowered from 0.85 to enable L1 judgments)
+AI_CONFIDENCE_THRESHOLD = 0.70
 # Jury voting period
 JURY_VOTING_HOURS = 48
 # Minimum jury size

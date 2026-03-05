@@ -17,7 +17,7 @@ from app.models.ledger import Ledger, ActionType, RefType
 # Subsidy parameters (aligned with simulator)
 SUBSIDY_RATIO = 1.0              # 100% of platform revenue goes to subsidies
 MIN_LIKES_FOR_SUBSIDY = 2        # Need at least 2 likes to qualify
-QUALITY_DENSITY_THRESHOLD = 0.15  # Lower threshold: allow more content to qualify
+QUALITY_DENSITY_THRESHOLD = 0.15  # Quality density threshold
 LOW_EXPOSURE_PERCENTILE = 0.7    # Bottom 70% by likes get considered
 CONTENT_AGE_MIN_DAYS = 1         # Must be at least 1 day old
 CONTENT_AGE_MAX_DAYS = 30        # Max 30 days old
