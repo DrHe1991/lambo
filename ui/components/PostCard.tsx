@@ -38,11 +38,11 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           aria-label={`View ${post.author.name} profile`}
         >
           <img 
-            src={post.author.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(post.author.name)}&backgroundColor=f97316`} 
+            src={post.author.avatar || `https://i.pravatar.cc/150?u=${encodeURIComponent(post.author.name)}`} 
             className="w-full h-full rounded-full object-cover border border-zinc-900"
             alt={post.author.name}
             onError={(e) => {
-              (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(post.author.name)}&backgroundColor=f97316`;
+              (e.target as HTMLImageElement).src = `https://i.pravatar.cc/150?u=${encodeURIComponent(post.author.name)}`;
             }}
           />
         </button>

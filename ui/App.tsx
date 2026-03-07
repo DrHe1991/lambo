@@ -18,13 +18,18 @@ import { useChatWebSocket } from './hooks/useChatWebSocket';
 // Views
 type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'TRUST_DETAIL' | 'GROUP_INFO' | 'JOIN_GROUP';
 
-// Avatar fallback helper
+// Avatar fallback - real human photos via Pravatar, seeded by name hash for consistency
 const getAvatarUrl = (avatar: string | null | undefined, name: string): string => {
-  return avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=f97316`;
+  if (avatar) return avatar;
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  return `https://i.pravatar.cc/150?u=${Math.abs(hash)}`;
 };
 
 const handleAvatarError = (e: React.SyntheticEvent<HTMLImageElement>, name: string) => {
-  (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=f97316`;
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+  (e.target as HTMLImageElement).src = `https://i.pravatar.cc/150?u=${Math.abs(hash)}`;
 };
 
 const App: React.FC = () => {
@@ -46,9 +51,12 @@ const App: React.FC = () => {
   const {
     posts: apiPosts,
     feedPosts: apiFeedPosts,
+    feedHasMore,
+    feedLoading,
     comments: apiComments,
     fetchPosts,
     fetchFeed,
+    loadMoreFeed,
     fetchComments,
     createPost: createApiPost,
     createComment: createApiComment,
@@ -123,6 +131,7 @@ const App: React.FC = () => {
   const reactionLongPressTriggered = React.useRef(false);
   const messageRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
   const [highlightedMsgId, setHighlightedMsgId] = useState<string | number | null>(null);
+  const feedSentinelRef = React.useRef<HTMLDivElement>(null);
 
   // Group info state
   const [groupDetail, setGroupDetail] = useState<ApiGroupDetail | null>(null);
@@ -425,6 +434,22 @@ const App: React.FC = () => {
     }
   }, [isLoggedIn, currentUser?.id]);
 
+  // Infinite scroll: observe sentinel to load more feed posts
+  useEffect(() => {
+    const sentinel = feedSentinelRef.current;
+    if (!sentinel || !currentUser) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          loadMoreFeed(currentUser.id);
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [currentUser, feedHasMore, feedLoading, loadMoreFeed]);
+
   // Load available users when entering group chat creation
   useEffect(() => {
     if (currentView === 'GROUP_CHAT' && currentUser) {
@@ -569,7 +594,7 @@ const App: React.FC = () => {
           <Zap className="text-white fill-white" size={24} />
         </div>
 
-        {posts.map(post => (
+        {feedPostsConverted.map(post => (
           <PostCard 
             key={post.id} 
             post={post} 
@@ -579,7 +604,7 @@ const App: React.FC = () => {
               fetchComments(Number(p.id), currentUser?.id);
             }}
             onUserClick={(id) => {
-              const user = posts.find(p => p.author.id === id)?.author || currentMe;
+              const user = feedPostsConverted.find(p => p.author.id === id)?.author || currentMe;
               setSelectedUser(user);
               setCurrentView('USER_PROFILE');
             }}
@@ -590,6 +615,16 @@ const App: React.FC = () => {
             isOwner={currentUser?.id === post.author.id}
           />
         ))}
+
+        {feedLoading && (
+          <div className="flex justify-center py-6">
+            <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        )}
+        {!feedHasMore && feedPostsConverted.length > 0 && (
+          <p className="text-center text-zinc-600 text-xs py-6">No more posts</p>
+        )}
+        <div ref={feedSentinelRef} className="h-1" />
       </div>
     </div>
   );
@@ -618,6 +653,15 @@ const App: React.FC = () => {
           isOwner={currentUser?.id === post.author.id}
         />
       ))}
+      {feedLoading && (
+        <div className="flex justify-center py-6">
+          <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+      {!feedHasMore && feedPostsConverted.length > 0 && (
+        <p className="text-center text-zinc-600 text-xs py-6">No more posts</p>
+      )}
+      <div ref={feedSentinelRef} className="h-1" />
     </div>
   );
 
@@ -1402,11 +1446,12 @@ const App: React.FC = () => {
     ];
 
     return (
-      <div className="p-4 pb-28">
-        <div className="flex items-center gap-3 mb-6">
-          <button onClick={() => setCurrentView('MAIN')} className="text-zinc-500"><ArrowLeft size={20} /></button>
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-3">
+          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft size={20} /></button>
           <h2 className="text-lg font-black tracking-tight">Trust Score</h2>
         </div>
+        <div className="p-4 pb-28">
 
         {/* Big ring */}
         <div className="flex flex-col items-center mb-8">
@@ -1485,6 +1530,7 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
+        </div>
       </div>
     );
   };

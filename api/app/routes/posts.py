@@ -261,47 +261,74 @@ async def get_posts(
     return [build_post_response(p, is_liked=p.id in liked_ids) for p in posts]
 
 
-def _boost_score(post: Post) -> float:
-    """Calculate feed score with boost multiplier."""
-    base_score = post.created_at.timestamp()
+def _feed_score(post: Post, following_ids: set[int]) -> float:
+    """Composite feed score aligned with simulator exposure_weight.
+
+    score = time_decay * quality_signal * author_trust_mult * boost_mult * following_mult
+    """
+    import math, time
+
+    now = time.time()
+    age_days = max(0.01, (now - post.created_at.timestamp()) / 86400)
+
+    likes = post.likes_count or 0
+    comments = post.comments_count or 0
+
+    # 1. Time decay – exponential with dynamic half-life (base 3d, +engagement bonus)
+    half_life = 3.0 + min(4.0, math.log(likes + 1))
+    time_decay = math.exp(-age_days * math.log(2) / half_life)
+
+    # 2. Quality signal – engagement density + comment ratio
+    like_density = likes / max(1.0, age_days)
+    engagement = min(1.0, like_density / 5.0)
+    comment_ratio = min(1.0, comments / max(1, likes))
+    quality = engagement * 0.7 + comment_ratio * 0.3 if likes else 0.3
+
+    # 3. Author trust multiplier (0.8–1.5, maps trust 0-1000)
+    author_trust = getattr(post.author, 'trust_score', 135) if post.author else 135
+    trust_ratio = min(1.0, author_trust / 1000)
+    author_trust_mult = 0.8 + 0.7 * trust_ratio
+
+    # 4. Boost multiplier (paid promotion, capped at 5x)
     boost_mult = min(5.0, 1.0 + (post.boost_remaining or 0))
-    return base_score * boost_mult
+
+    # 5. Following multiplier (followed authors get priority)
+    following_mult = 2.5 if post.author_id in following_ids else 1.0
+
+    return time_decay * quality * author_trust_mult * boost_mult * following_mult
 
 
 @router.get('/feed', response_model=list[PostResponse])
 async def get_feed(
     user_id: int = Query(...),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get feed for a user (posts from followed users).
-    
-    Posts are sorted by recency × boost multiplier.
-    Boosted posts get up to 5x visibility boost.
-    """
+    """Mixed feed: following posts + global posts, ranked by composite score."""
     from app.models.user import Follow
 
-    # Get more posts than needed, then sort by boost score
+    following_result = await db.execute(
+        select(Follow.following_id).where(Follow.follower_id == user_id)
+    )
+    following_ids = set(row[0] for row in following_result.all())
+
+    pool_size = max(limit * 5, 150)
     query = (
         select(Post)
         .options(selectinload(Post.author))
-        .join(Follow, Follow.following_id == Post.author_id)
-        .where(Follow.follower_id == user_id)
         .where(Post.status == PostStatus.ACTIVE.value)
         .order_by(desc(Post.created_at))
-        .limit(limit * 3)  # Fetch extra for re-ranking
+        .limit(pool_size)
     )
-
     result = await db.execute(query)
     posts = list(result.scalars().all())
 
-    # Re-sort by boost score
-    posts.sort(key=_boost_score, reverse=True)
-    posts = posts[offset:offset + limit]
+    posts.sort(key=lambda p: _feed_score(p, following_ids), reverse=True)
+    page = posts[offset:offset + limit]
 
-    liked_ids = await _check_post_liked(db, [p.id for p in posts], user_id)
-    return [build_post_response(p, is_liked=p.id in liked_ids) for p in posts]
+    liked_ids = await _check_post_liked(db, [p.id for p in page], user_id)
+    return [build_post_response(p, is_liked=p.id in liked_ids) for p in page]
 
 
 @router.get('/{post_id}', response_model=PostResponse)

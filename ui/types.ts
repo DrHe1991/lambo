@@ -88,7 +88,7 @@ export function apiUserToUser(apiUser: {
     id: apiUser.id,
     name: apiUser.name,
     handle: apiUser.handle.startsWith('@') ? apiUser.handle : `@${apiUser.handle}`,
-    avatar: apiUser.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(apiUser.name)}&backgroundColor=f97316`,
+    avatar: apiUser.avatar || `https://i.pravatar.cc/150?u=${encodeURIComponent(apiUser.name)}`,
     trustScore: apiUser.trust_score,
     isFollowing: apiUser.is_following,
     bio: apiUser.bio,

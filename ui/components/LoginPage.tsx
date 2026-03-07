@@ -115,7 +115,7 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
                 </div>
               )}
               {availableUsers.map((user) => {
-                const avatarUrl = user.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.name)}&backgroundColor=f97316`;
+                const avatarUrl = user.avatar || `https://i.pravatar.cc/150?u=${encodeURIComponent(user.name)}`;
                 return (
                   <button
                     key={user.id}
@@ -129,7 +129,7 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
                         src={avatarUrl} 
                         className="w-full h-full rounded-full object-cover"
                         onError={(e) => {
-                          (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.name)}&backgroundColor=f97316`;
+                          (e.target as HTMLImageElement).src = `https://i.pravatar.cc/150?u=${encodeURIComponent(user.name)}`;
                         }}
                       />
                     </div>

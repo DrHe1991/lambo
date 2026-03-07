@@ -408,7 +408,7 @@ export const api = {
   getPosts: (filters?: { post_type?: string; author_id?: number; user_id?: number; limit?: number; offset?: number }) =>
     apiRequest<ApiPost[]>('/api/posts', { params: filters }),
 
-  getFeed: (userId: number, limit = 20, offset = 0) =>
+  getFeed: (userId: number, limit = 30, offset = 0) =>
     apiRequest<ApiPost[]>('/api/posts/feed', { params: { user_id: userId, limit, offset } }),
 
   getPost: (postId: number, userId?: number) =>

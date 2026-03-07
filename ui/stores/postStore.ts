@@ -1,9 +1,14 @@
 import { create } from 'zustand';
 import { api, ApiPost, ApiComment } from '../api/client';
 
+const FEED_PAGE_SIZE = 30;
+
 interface PostState {
   posts: ApiPost[];
   feedPosts: ApiPost[];
+  feedOffset: number;
+  feedHasMore: boolean;
+  feedLoading: boolean;
   currentPost: ApiPost | null;
   comments: ApiComment[];
   isLoading: boolean;
@@ -12,6 +17,7 @@ interface PostState {
   // Actions
   fetchPosts: (filters?: { post_type?: string; author_id?: number; user_id?: number }) => Promise<void>;
   fetchFeed: (userId: number) => Promise<void>;
+  loadMoreFeed: (userId: number) => Promise<void>;
   fetchPost: (postId: number, userId?: number) => Promise<void>;
   fetchComments: (postId: number, userId?: number) => Promise<void>;
   createPost: (authorId: number, content: string, postType: string, bounty?: number) => Promise<ApiPost>;
@@ -22,9 +28,12 @@ interface PostState {
   clearCurrentPost: () => void;
 }
 
-export const usePostStore = create<PostState>((set) => ({
+export const usePostStore = create<PostState>((set, get) => ({
   posts: [],
   feedPosts: [],
+  feedOffset: 0,
+  feedHasMore: true,
+  feedLoading: false,
   currentPost: null,
   comments: [],
   isLoading: false,
@@ -41,12 +50,34 @@ export const usePostStore = create<PostState>((set) => ({
   },
 
   fetchFeed: async (userId) => {
-    set({ isLoading: true, error: null });
+    set({ feedLoading: true, error: null });
     try {
-      const feedPosts = await api.getFeed(userId);
-      set({ feedPosts, isLoading: false });
+      const feedPosts = await api.getFeed(userId, FEED_PAGE_SIZE, 0);
+      set({
+        feedPosts,
+        feedOffset: FEED_PAGE_SIZE,
+        feedHasMore: feedPosts.length >= FEED_PAGE_SIZE,
+        feedLoading: false,
+      });
     } catch (error) {
-      set({ error: (error as Error).message, isLoading: false });
+      set({ error: (error as Error).message, feedLoading: false });
+    }
+  },
+
+  loadMoreFeed: async (userId) => {
+    const { feedLoading, feedHasMore, feedOffset } = get();
+    if (feedLoading || !feedHasMore) return;
+    set({ feedLoading: true });
+    try {
+      const more = await api.getFeed(userId, FEED_PAGE_SIZE, feedOffset);
+      set((state) => ({
+        feedPosts: [...state.feedPosts, ...more],
+        feedOffset: state.feedOffset + FEED_PAGE_SIZE,
+        feedHasMore: more.length >= FEED_PAGE_SIZE,
+        feedLoading: false,
+      }));
+    } catch (error) {
+      set({ feedLoading: false });
     }
   },
 

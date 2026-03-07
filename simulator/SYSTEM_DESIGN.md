@@ -1,6 +1,6 @@
 # BitLink 经济系统设计文档
 
-> 最后更新：2026-03-05
+> 最后更新：2026-03-07
 
 ---
 
@@ -359,25 +359,60 @@ inferred_quality =
     (1 - negative_signals) × 0.10 # 负面信号
 ```
 
-### 6.2 曝光权重 (Exposure Weight)
+### 6.2 Feed 排序公式
 
-决定内容被用户看到的概率：
+Feed 采用混合推荐（关注 + 全局），五因子综合排序，对齐 simulator 的 `exposure_weight`：
 
 ```
-exposure = inferred_quality × time_decay × engagement_boost
-
-其中：
-- time_decay: 时间衰减（半衰期 3-11 天，质量越高衰减越慢）
-- engagement_boost: 早期互动加成（前 24 小时有赞 = 更长曝光）
+feed_score = time_decay × quality_signal × author_trust_mult × boost_mult × following_mult
 ```
 
-### 6.3 热门内容递减
+各因子详解：
 
-防止单一爆款垄断曝光：
+| 因子 | 公式 | 范围 | 说明 |
+|------|------|------|------|
+| **time_decay** | `exp(-age_days × ln(2) / half_life)` | 0~1 | 指数衰减，半衰期 3~7 天 |
+| **quality_signal** | `engagement × 0.7 + comment_ratio × 0.3` | 0~1 | 互动密度 + 评论信号 |
+| **author_trust_mult** | `0.8 + 0.7 × (trust / 1000)` | 0.8~1.5 | 作者信任乘数 |
+| **boost_mult** | `min(5.0, 1.0 + boost_remaining)` | 1~5 | 付费曝光加成 |
+| **following_mult** | 关注: 2.5x, 未关注: 1.0x | 1~2.5 | 关注者优先 |
+
+**time_decay 动态半衰期**：
+
+```
+half_life = 3.0 + min(4.0, log(likes + 1))
+```
+
+高互动帖子衰减更慢（半衰期可达 7 天），无互动帖子 3 天半衰期。
+
+**quality_signal 质量信号**：
+
+```
+like_density = likes / max(1.0, age_days)
+engagement = min(1.0, like_density / 5.0)    # 每天 5 赞为满分
+comment_ratio = min(1.0, comments / max(1, likes))
+quality = engagement × 0.7 + comment_ratio × 0.3
+```
+
+无互动时 fallback 到 0.3（给新内容初始曝光）。
+
+### 6.3 混合 Feed 逻辑
+
+Feed 不再仅展示关注者内容，而是混合全局帖子：
+
+1. 从最近 150 条（或 limit×5）活跃帖子中取候选池
+2. 对每条帖子计算 `feed_score`
+3. 关注者帖子因 `following_mult = 2.5` 自然排在前面
+4. 全局热门帖子补充空位，确保 Feed 不为空
+5. 支持无限滚动分页（limit=30，offset 递增）
+
+### 6.4 热门内容递减
+
+防止单一爆款垄断曝光（用于 Discovery Score 结算，不影响 Feed 排序）：
 
 ```
 diminishing_factor = log(likes + 1) / (likes + 1)
-adjusted_exposure = exposure × diminishing_factor
+adjusted_score = discovery_score × diminishing_factor
 ```
 
 ---

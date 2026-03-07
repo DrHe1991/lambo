@@ -1,7 +1,7 @@
 ## Sprint Plan — Spend & Earn Implementation
 
 > Based on `simulator/SYSTEM_DESIGN.md` (模拟器验证版).
-> Sprint 1-13, 16 已完成. 举报仅用 L1 (LLM) 判决.
+> Sprint 1-13, 16-17 已完成. 举报仅用 L1 (LLM) 判决.
 
 ---
 
@@ -24,6 +24,7 @@
 | S13 前端集成 | ✅ 完成 | - | 成本/Trust/Boost UI |
 | **S15 AINFT** | 📋 计划中 | - | LLM 支付集成 |
 | **S16 24h Lock Settlement** | ✅ 完成 | - | 24小时锁定结算机制 |
+| **S17 Feed & Ranking** | ✅ 完成 | - | 无限滚动 + Discovery Score 排序 |
 
 **总测试**: 165/165 通过 ✅
 
@@ -412,6 +413,46 @@
 
 ---
 
+## Sprint 17 — Feed 无限滚动 + Discovery Score 排序 ✅
+
+> Goal: Feed 支持无限下拉加载，排序对齐 simulator 的 exposure_weight 公式
+
+### 完成内容
+
+**后端: 混合 Feed + 综合评分**:
+
+- [x] 重写 `get_feed` 端点为混合 Feed（关注 + 全局帖子）
+- [x] 默认 limit 从 20 改为 30
+- [x] 候选池 `max(limit*5, 150)` 条最新帖子
+- [x] 五因子排序公式:
+  ```
+  feed_score = time_decay × quality_signal × author_trust_mult × boost_mult × following_mult
+  ```
+- [x] time_decay: 指数衰减，动态半衰期 3~7 天
+- [x] quality_signal: 互动密度(0.7) + 评论比(0.3)
+- [x] author_trust_mult: 0.8~1.5（映射 trust 0-1000）
+- [x] boost_mult: 1~5x（付费曝光）
+- [x] following_mult: 关注者 2.5x 优先
+
+**前端: 无限滚动**:
+
+- [x] `postStore` 添加 `feedOffset`/`feedHasMore`/`feedLoading` 状态
+- [x] `loadMoreFeed` action: 递增 offset，追加数据
+- [x] `IntersectionObserver` 哨兵元素检测滚动到底部
+- [x] 加载中 spinner + "No more posts" 提示
+- [x] Feed 和 Following 两个 tab 共享无限滚动
+
+### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `api/app/routes/posts.py` | 重写 `_feed_score()` + `get_feed` 混合逻辑 |
+| `ui/stores/postStore.ts` | 添加分页状态和 `loadMoreFeed` |
+| `ui/App.tsx` | IntersectionObserver 无限滚动 |
+| `ui/api/client.ts` | `getFeed` 默认 limit 改为 30 |
+
+---
+
 ## Sprint 15 — AINFT LLM 支付集成 📋 计划中
 
 > Goal: 通过 AINFT 平台支付举报判决的 LLM token 费用
@@ -453,6 +494,7 @@ AINFT 是基于 TRON 区块链的 AI + 区块链生态系统：
 | **S14** | ⏸️ 暂缓 | 上诉机制 (依赖 L2 陪审) |
 | **S15** | 📋 计划中 | AINFT LLM 支付集成 |
 | **S16** | ✅ 完成 | 24小时锁定结算机制 |
+| **S17** | ✅ 完成 | Feed 无限滚动 + Discovery Score 排序 |
 
 ### 依赖关系
 
@@ -463,9 +505,13 @@ S1-S13 ✅ (后端 + 前端核心完成)
      │
      ├──→ S15 📋 (AINFT LLM 支付 - 计划中)
      │
-     └──→ S16 ✅ (24h 锁定结算 - 完成)
+     ├──→ S16 ✅ (24h 锁定结算 - 完成)
+     │         │
+     │         └── 修改 S6 分成逻辑: 即时 → 延迟结算
+     │
+     └──→ S17 ✅ (Feed + 排序 - 完成)
               │
-              └── 修改 S6 分成逻辑: 即时 → 延迟结算
+              └── 混合 Feed + 五因子排序 + 无限滚动
 ```
 
 ---
