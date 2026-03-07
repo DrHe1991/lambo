@@ -60,6 +60,8 @@ class CommentResponse(BaseModel):
     cost_paid: int = 0
     is_liked: bool = False
     created_at: datetime
+    interaction_status: str = 'settled'
+    locked_until: datetime | None = None
 
     class Config:
         from_attributes = True

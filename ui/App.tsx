@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
+import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession, getRemainingLockTime } from './types';
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
@@ -17,6 +17,15 @@ import { useChatWebSocket } from './hooks/useChatWebSocket';
 
 // Views
 type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'TRUST_DETAIL' | 'GROUP_INFO' | 'JOIN_GROUP';
+
+// Avatar fallback helper
+const getAvatarUrl = (avatar: string | null | undefined, name: string): string => {
+  return avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=f97316`;
+};
+
+const handleAvatarError = (e: React.SyntheticEvent<HTMLImageElement>, name: string) => {
+  (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=f97316`;
+};
 
 const App: React.FC = () => {
   // Stores
@@ -45,6 +54,7 @@ const App: React.FC = () => {
     createComment: createApiComment,
     toggleLikePost,
     toggleLikeComment,
+    deleteComment: deleteApiComment,
   } = usePostStore();
 
   const {
@@ -427,7 +437,7 @@ const App: React.FC = () => {
               id: u.id,
               name: u.name,
               handle: u.handle,
-              avatar: u.avatar || `https://picsum.photos/id/${u.id + 10}/200/200`,
+              avatar: getAvatarUrl(u.avatar, u.name),
               trustScore: u.trust_score,
             })) as User[]);
         })
@@ -514,33 +524,33 @@ const App: React.FC = () => {
     if (currentView !== 'MAIN' || isPublishing) return null;
     return (
       <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-zinc-800 safe-bottom-nav">
-        <div className="max-w-md mx-auto px-4 pt-3 pb-2 grid grid-cols-5 items-end">
-          <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
-            <Home size={24} />
-            <span className="text-[10px] font-bold">Feed</span>
+        <div className="max-w-md mx-auto px-4 py-2 grid grid-cols-5 items-center">
+          <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <Home size={22} />
+            <span className="text-[10px] font-medium">Feed</span>
           </button>
-          <button data-testid="nav-following" onClick={() => { setActiveTab('Following'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
-            <Users size={24} />
-            <span className="text-[10px] font-bold">Following</span>
+          <button data-testid="nav-following" onClick={() => { setActiveTab('Following'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <Users size={22} />
+            <span className="text-[10px] font-medium">Following</span>
           </button>
           
-          <div className="flex justify-center -mt-4">
+          <div className="flex justify-center relative">
             <button 
               data-testid="new-post-button"
               onClick={() => setIsPublishing(true)}
-              className="w-14 h-14 bg-orange-500 rounded-2xl flex items-center justify-center shadow-lg shadow-orange-500/30 active:scale-90 transition-transform duration-200"
+              className="w-12 h-12 bg-orange-500 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/30 active:scale-90 transition-transform duration-200 -mt-3"
             >
-              <Plus size={28} color="white" strokeWidth={3} />
+              <Plus size={26} color="white" strokeWidth={2.5} />
             </button>
           </div>
 
-          <button data-testid="nav-chat" onClick={() => { setActiveTab('Chat'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
-            <MessageCircle size={24} />
-            <span className="text-[10px] font-bold">Chat</span>
+          <button data-testid="nav-chat" onClick={() => { setActiveTab('Chat'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <MessageCircle size={22} />
+            <span className="text-[10px] font-medium">Chat</span>
           </button>
-          <button data-testid="nav-profile" onClick={() => { setActiveTab('Profile'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 py-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
-            <UserIcon size={24} />
-            <span className="text-[10px] font-bold">Me</span>
+          <button data-testid="nav-profile" onClick={() => { setActiveTab('Profile'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
+            <UserIcon size={22} />
+            <span className="text-[10px] font-medium">Me</span>
           </button>
         </div>
       </nav>
@@ -669,9 +679,9 @@ const App: React.FC = () => {
               }}
             >
               <div className="relative">
-                <img src={displayUser?.avatar || `https://picsum.photos/id/${Number(chat.id) + 10}/200/200`} className="w-14 h-14 rounded-full border border-zinc-800 object-cover" />
+                <img src={getAvatarUrl(displayUser?.avatar, displayUser?.name || 'User')} className="w-14 h-14 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, displayUser?.name || 'User')} />
                 {chat.isGroup && otherParticipants[1] && (
-                   <img src={otherParticipants[1].avatar || `https://picsum.photos/id/${Number(chat.id) + 11}/200/200`} className="w-8 h-8 rounded-full border-2 border-black absolute -bottom-1 -right-1 object-cover" />
+                   <img src={getAvatarUrl(otherParticipants[1].avatar, otherParticipants[1].name)} className="w-8 h-8 rounded-full border-2 border-black absolute -bottom-1 -right-1 object-cover" onError={(e) => handleAvatarError(e, otherParticipants[1].name)} />
                 )}
               </div>
               <div className="flex-1 min-w-0">
@@ -711,7 +721,7 @@ const App: React.FC = () => {
               }}
             >
               <div className="flex items-center gap-3">
-                <img src={user.avatar} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" />
+                <img src={getAvatarUrl(user.avatar, user.name)} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, user.name)} />
                 <div className="text-left">
                   <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
                   <span className="text-[11px] text-zinc-500">{user.handle}</span>
@@ -880,7 +890,7 @@ const App: React.FC = () => {
                     onClick={() => toggleMember(user.id)}
                   >
                     <div className="flex items-center gap-3">
-                      <img src={user.avatar} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" />
+                      <img src={getAvatarUrl(user.avatar, user.name)} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, user.name)} />
                       <div className="text-left">
                         <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
                         <span className="text-[11px] text-zinc-500">{user.handle}</span>
@@ -946,7 +956,7 @@ const App: React.FC = () => {
              <circle cx="56" cy="56" r="50" stroke="currentColor" strokeWidth="6" fill="transparent" className="text-zinc-800" />
              <circle cx="56" cy="56" r="50" stroke={getTrustStrokeColor(currentMe.trustScore)} strokeWidth="6" fill="transparent" strokeDasharray={314} strokeDashoffset={314 * (1 - currentMe.trustScore / 1000)} strokeLinecap="round" />
            </svg>
-           <img src={currentMe.avatar || `https://picsum.photos/id/64/200/200`} className="absolute inset-2 w-24 h-24 rounded-full border border-zinc-800 object-cover" />
+           <img src={getAvatarUrl(currentMe.avatar, currentMe.name)} className="absolute inset-2 w-24 h-24 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, currentMe.name)} />
            <div className={`absolute -bottom-1 left-1/2 -translate-x-1/2 ${getTrustBadgeBg(currentMe.trustScore)} text-white text-[10px] font-black px-2 py-0.5 rounded-full border-2 border-black`}>
              {currentMe.trustScore}
            </div>
@@ -1064,8 +1074,9 @@ const App: React.FC = () => {
                     onClick={() => handleViewProfile(user)}
                   >
                     <img 
-                      src={user.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${user.handle}`} 
-                      className="w-10 h-10 rounded-full border border-zinc-700 object-cover" 
+                      src={getAvatarUrl(user.avatar, user.name)} 
+                      className="w-10 h-10 rounded-full border border-zinc-700 object-cover"
+                      onError={(e) => handleAvatarError(e, user.name)}
                     />
                     <div className="flex-1">
                       <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
@@ -1105,7 +1116,7 @@ const App: React.FC = () => {
                 {posts.slice(0, 4).map((p, i) => (
                   <div key={i} className="bg-zinc-950 border border-zinc-900 rounded-xl p-3 h-40 overflow-hidden relative">
                     <div className="flex items-center gap-2 mb-2">
-                      <img src={p.author.avatar} className="w-5 h-5 rounded-full" />
+                      <img src={getAvatarUrl(p.author.avatar, p.author.name)} className="w-5 h-5 rounded-full" onError={(e) => handleAvatarError(e, p.author.name)} />
                       <span className="text-[10px] font-bold text-zinc-500">{p.author.handle}</span>
                     </div>
                     <p className="text-[11px] text-zinc-300 leading-tight">{p.content}</p>
@@ -1126,18 +1137,27 @@ const App: React.FC = () => {
   // Shared comment-list component used by Post Detail & QA Detail
   const renderCommentItem = (c: ApiComment) => {
     const isLiked = c.is_liked;
+    const canDelete = currentUser && c.author.id === currentUser.id && c.interaction_status === 'pending';
+    const lockTimeRemaining = getRemainingLockTime(c.locked_until);
+
     return (
       <div key={c.id} className={`flex gap-3 mb-5 ${c.parent_id ? 'ml-10' : ''}`}>
         <div className={`w-8 h-8 rounded-full p-[2px] ${getTrustRingClass(c.author.trust_score)} shrink-0`}>
           <img
-            src={c.author.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${c.author.handle}`}
+            src={getAvatarUrl(c.author.avatar, c.author.name)}
             className="w-full h-full rounded-full object-cover border border-zinc-900"
+            onError={(e) => handleAvatarError(e, c.author.name)}
           />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-bold truncate">{c.author.name}</span>
             <span className="text-[10px] text-zinc-500 font-medium">@{c.author.handle}</span>
+            {lockTimeRemaining && (
+              <span className="text-[9px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">
+                🔒 {lockTimeRemaining}
+              </span>
+            )}
           </div>
           <p className="text-sm text-zinc-400 break-words">{c.content}</p>
           <div className="flex items-center gap-4 mt-2">
@@ -1165,6 +1185,24 @@ const App: React.FC = () => {
             >
               Reply <span className="text-zinc-600">20</span>
             </button>
+            {canDelete && (
+              <button
+                className="text-[10px] font-bold text-red-400 hover:text-red-300 flex items-center gap-1"
+                onClick={async () => {
+                  if (!currentUser || !selectedPost) return;
+                  if (!confirm('Delete this comment? You will get 70% refund, 30% penalty.')) return;
+                  try {
+                    const result = await deleteApiComment(c.id, Number(selectedPost.id), currentUser.id);
+                    toast.success(`Deleted. Refunded ${result.refunded} sat`);
+                    fetchBalance(currentUser.id);
+                  } catch (err) {
+                    toast.warning((err as Error).message);
+                  }
+                }}
+              >
+                <Trash2 size={10} /> Delete
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1265,7 +1303,7 @@ const App: React.FC = () => {
            <h2 className="text-xl font-bold mb-4">{selectedPost.content}</h2>
            <div className="flex items-center justify-between">
              <div className="flex items-center gap-2">
-               <img src={selectedPost.author.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${selectedPost.author.handle}`} className="w-6 h-6 rounded-full" />
+               <img src={getAvatarUrl(selectedPost.author.avatar, selectedPost.author.name)} className="w-6 h-6 rounded-full" onError={(e) => handleAvatarError(e, selectedPost.author.name)} />
                <span className="text-xs font-bold">{selectedPost.author.handle}</span>
              </div>
              {selectedPost.bounty ? (
@@ -1281,8 +1319,9 @@ const App: React.FC = () => {
                <div className="flex items-center gap-2 mb-3">
                   <div className={`w-8 h-8 rounded-full p-[2px] ${getTrustRingClass(answer.author.trust_score)} shrink-0`}>
                     <img
-                      src={answer.author.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${answer.author.handle}`}
+                      src={getAvatarUrl(answer.author.avatar, answer.author.name)}
                       className="w-full h-full rounded-full object-cover border border-zinc-900"
+                      onError={(e) => handleAvatarError(e, answer.author.name)}
                     />
                   </div>
                   <div>
@@ -1678,8 +1717,9 @@ const App: React.FC = () => {
         <div className="flex-1 px-4 pt-4 overflow-auto">
           <div className="flex items-start gap-3 mb-4">
             <img
-              src={currentMe.avatar || 'https://picsum.photos/200'}
+              src={getAvatarUrl(currentMe.avatar, currentMe.name)}
               className={`w-10 h-10 rounded-full border-2 ${isNote ? 'border-orange-500/50' : 'border-blue-500/50'} object-cover flex-shrink-0`}
+              onError={(e) => handleAvatarError(e, currentMe.name)}
             />
             <div className="flex-1 min-w-0">
               <span className="text-sm font-bold text-zinc-300 block">{currentMe.name}</span>
@@ -1977,11 +2017,11 @@ const App: React.FC = () => {
           >
             {isGroup ? (
               <div className="relative w-10 h-10">
-                <img src={selectedChat.participants[0]?.avatar || `https://picsum.photos/id/10/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 absolute top-0 left-0" />
-                <img src={selectedChat.participants[1]?.avatar || `https://picsum.photos/id/11/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 absolute bottom-0 right-0" />
+                <img src={getAvatarUrl(selectedChat.participants[0]?.avatar, selectedChat.participants[0]?.name || 'User')} className="w-7 h-7 rounded-full border border-zinc-800 absolute top-0 left-0" onError={(e) => handleAvatarError(e, selectedChat.participants[0]?.name || 'User')} />
+                <img src={getAvatarUrl(selectedChat.participants[1]?.avatar, selectedChat.participants[1]?.name || 'User')} className="w-7 h-7 rounded-full border border-zinc-800 absolute bottom-0 right-0" onError={(e) => handleAvatarError(e, selectedChat.participants[1]?.name || 'User')} />
               </div>
             ) : (
-              <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-10 h-10 rounded-full border border-zinc-800 object-cover" />
+              <img src={getAvatarUrl(chatPartner?.avatar, chatPartner?.name || 'User')} className="w-10 h-10 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, chatPartner?.name || 'User')} />
             )}
             <div className="flex flex-col items-start">
               <span className="text-sm font-bold">{isGroup ? (selectedChat.name || 'Group Chat') : chatPartner?.name}</span>
@@ -2041,7 +2081,7 @@ const App: React.FC = () => {
               <div key={msg.id} ref={el => { messageRefs.current[String(msg.id)] = el; }} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'} relative transition-colors duration-500 ${highlightedMsgId === msg.id ? 'bg-orange-500/15 rounded-xl' : ''}`}>
                 {!isMe && (
                   <button onClick={handleOpenProfile} className="flex-shrink-0">
-                    <img src={chatPartner?.avatar || `https://picsum.photos/id/${Number(chatPartner?.id) + 10}/200/200`} className="w-7 h-7 rounded-full border border-zinc-800 object-cover" />
+                    <img src={getAvatarUrl(chatPartner?.avatar, chatPartner?.name || 'User')} className="w-7 h-7 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, chatPartner?.name || 'User')} />
                   </button>
                 )}
                 <div className={`flex flex-col gap-1 max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
@@ -2692,7 +2732,7 @@ const App: React.FC = () => {
                     >
                       <div className="relative mb-1">
                         <img
-                          src={member.user.avatar || `https://picsum.photos/id/${member.user.id + 10}/200/200`}
+                          src={getAvatarUrl(member.user.avatar, member.user.name)}
                           className="w-14 h-14 rounded-xl object-cover border-2 border-zinc-800 group-hover:border-orange-500/50 transition-colors"
                         />
                         {member.role === 'owner' && (
@@ -2988,7 +3028,7 @@ const App: React.FC = () => {
                     }}
                     className={`w-full p-3 rounded-xl flex items-center gap-3 ${selectedNewMembers.has(Number(user.id)) ? 'bg-orange-500/20 border border-orange-500' : 'bg-zinc-800'}`}
                   >
-                    <img src={user.avatar || `https://picsum.photos/id/${Number(user.id) + 10}/200/200`} className="w-10 h-10 rounded-full" />
+                    <img src={getAvatarUrl(user.avatar, user.name)} className="w-10 h-10 rounded-full" onError={(e) => handleAvatarError(e, user.name)} />
                     <div className="flex-1 text-left">
                       <p className="font-medium">{user.name}</p>
                       <p className="text-zinc-500 text-sm">@{user.handle}</p>
@@ -3031,7 +3071,7 @@ const App: React.FC = () => {
                       className="w-full p-4 flex items-center gap-3 hover:bg-zinc-800"
                     >
                       <img
-                        src={member.user.avatar || `https://picsum.photos/id/${member.user.id + 10}/200/200`}
+                        src={getAvatarUrl(member.user.avatar, member.user.name)}
                         className="w-10 h-10 rounded-full"
                       />
                       <div className="flex-1 text-left">
@@ -3067,7 +3107,7 @@ const App: React.FC = () => {
            <button><MoreHorizontal /></button>
         </div>
         <div className="flex flex-col items-center p-6 border-b border-zinc-900">
-          <img src={selectedUser.avatar} className="w-24 h-24 rounded-full border-2 border-orange-500 p-1 object-cover mb-4" />
+          <img src={getAvatarUrl(selectedUser.avatar, selectedUser.name)} className="w-24 h-24 rounded-full border-2 border-orange-500 p-1 object-cover mb-4" onError={(e) => handleAvatarError(e, selectedUser.name)} />
           <h2 className="text-2xl font-black italic tracking-tighter uppercase mb-1">{selectedUser.name}</h2>
           <span className="text-zinc-500 text-xs font-medium mb-4">{selectedUser.handle}</span>
           <TrustBadge score={selectedUser.trustScore} size="lg" />

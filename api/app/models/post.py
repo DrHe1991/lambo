@@ -19,6 +19,13 @@ class PostStatus(str, Enum):
     CHALLENGED = 'challenged'
 
 
+class InteractionStatus(str, Enum):
+    """Status of a like/comment interaction for 24h lock settlement."""
+    PENDING = 'pending'      # Locked, awaiting settlement
+    SETTLED = 'settled'      # Settled to author
+    CANCELLED = 'cancelled'  # User cancelled, 30% penalty applied
+
+
 class Post(Base):
     """Post model - supports both notes and questions."""
 
@@ -81,12 +88,22 @@ class Comment(Base):
     # How much the author paid (comment=50, reply=20, answer=200)
     cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
 
+    # 24h lock settlement fields
+    interaction_status: Mapped[str] = mapped_column(
+        String(20), default=InteractionStatus.SETTLED.value
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    recipient_id: Mapped[int | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), default=None
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationships
     post: Mapped['Post'] = relationship('Post', back_populates='comments')
-    author: Mapped['User'] = relationship('User', back_populates='comments')
+    author: Mapped['User'] = relationship('User', back_populates='comments', foreign_keys=[author_id])
+    recipient: Mapped['User | None'] = relationship('User', foreign_keys=[recipient_id])
     replies: Mapped[list['Comment']] = relationship(
         'Comment', back_populates='parent', cascade='all, delete-orphan'
     )
@@ -119,6 +136,16 @@ class PostLike(Base):
     # Is this a cross-circle like? (liker not following author)
     is_cross_circle: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # 24h lock settlement fields
+    status: Mapped[str] = mapped_column(
+        String(20), default=InteractionStatus.SETTLED.value
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
+    recipient_id: Mapped[int | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), default=None
+    )
+
     __table_args__ = (
         UniqueConstraint('post_id', 'user_id', name='uq_post_like'),
     )
@@ -133,6 +160,16 @@ class CommentLike(Base):
     comment_id: Mapped[int] = mapped_column(ForeignKey('comments.id', ondelete='CASCADE'))
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # 24h lock settlement fields
+    status: Mapped[str] = mapped_column(
+        String(20), default=InteractionStatus.SETTLED.value
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
+    recipient_id: Mapped[int | None] = mapped_column(
+        ForeignKey('users.id', ondelete='SET NULL'), default=None
+    )
 
     __table_args__ = (
         UniqueConstraint('comment_id', 'user_id', name='uq_comment_like'),

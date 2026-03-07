@@ -41,6 +41,14 @@ class ActionType(str, Enum):
     # Jury system
     JURY_REWARD = 'jury_reward'
 
+    # 24h lock settlement
+    LOCK_LIKE = 'lock_like'          # Lock funds when liking
+    LOCK_COMMENT = 'lock_comment'    # Lock funds when commenting
+    SETTLE_AUTHOR = 'settle_author'  # Settle 80% to author after 24h
+    SETTLE_PLATFORM = 'settle_platform'  # Settle 20% to platform after 24h
+    REFUND_CANCEL = 'refund_cancel'  # Refund 70% on cancel
+    PENALTY_CANCEL = 'penalty_cancel'  # 30% penalty on cancel
+
 
 class RefType(str, Enum):
     """What entity a ledger entry references."""
@@ -50,6 +58,8 @@ class RefType(str, Enum):
     CHALLENGE = 'challenge'
     BOOST = 'boost'
     USER = 'user'
+    POST_LIKE = 'post_like'
+    COMMENT_LIKE = 'comment_like'
 
 
 class Ledger(Base):

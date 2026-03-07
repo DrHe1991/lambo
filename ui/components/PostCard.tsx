@@ -38,9 +38,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           aria-label={`View ${post.author.name} profile`}
         >
           <img 
-            src={post.author.avatar} 
+            src={post.author.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(post.author.name)}&backgroundColor=f97316`} 
             className="w-full h-full rounded-full object-cover border border-zinc-900"
             alt={post.author.name}
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(post.author.name)}&backgroundColor=f97316`;
+            }}
           />
         </button>
         <div className="flex-1 overflow-hidden">
@@ -97,7 +100,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           >
             <Heart size={18} className={isLiked ? 'fill-current' : ''} />
             <span className="text-xs font-medium">{post.likes}</span>
-            {!isLiked && <span className="text-[10px] text-zinc-600 font-bold">20sat</span>}
           </button>
           <button className="flex items-center gap-1.5 text-zinc-400 hover:text-blue-400 transition-colors">
             <MessageSquare size={18} />

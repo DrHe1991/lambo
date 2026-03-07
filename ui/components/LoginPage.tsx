@@ -114,31 +114,36 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
                   <div className="w-8 h-8 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
                 </div>
               )}
-              {availableUsers.map((user) => (
-                <button
-                  key={user.id}
-                  data-testid={`login-user-${user.handle}`}
-                  onClick={() => handleSelectUser(user.id)}
-                  disabled={isLoading}
-                  className="w-full bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4 active:scale-[0.98] transition-all disabled:opacity-50 hover:border-orange-500/50"
-                >
-                  <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-amber-600 rounded-full flex items-center justify-center">
-                    {user.avatar ? (
-                      <img src={user.avatar} className="w-full h-full rounded-full object-cover" />
-                    ) : (
-                      <User className="w-6 h-6 text-white" />
-                    )}
-                  </div>
-                  <div className="flex-1 text-left">
-                    <span className="font-bold text-white block">{user.name}</span>
-                    <span className="text-zinc-500 text-sm">@{user.handle}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-orange-500 font-bold text-sm">{user.trust_score}</span>
-                    <span className="text-zinc-600 text-xs block">Trust</span>
-                  </div>
-                </button>
-              ))}
+              {availableUsers.map((user) => {
+                const avatarUrl = user.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.name)}&backgroundColor=f97316`;
+                return (
+                  <button
+                    key={user.id}
+                    data-testid={`login-user-${user.handle}`}
+                    onClick={() => handleSelectUser(user.id)}
+                    disabled={isLoading}
+                    className="w-full bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 flex items-center gap-4 active:scale-[0.98] transition-all disabled:opacity-50 hover:border-orange-500/50"
+                  >
+                    <div className="w-12 h-12 rounded-full overflow-hidden bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center">
+                      <img 
+                        src={avatarUrl} 
+                        className="w-full h-full rounded-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.name)}&backgroundColor=f97316`;
+                        }}
+                      />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <span className="font-bold text-white block">{user.name}</span>
+                      <span className="text-zinc-500 text-sm">@{user.handle}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-orange-500 font-bold text-sm">{user.trust_score}</span>
+                      <span className="text-zinc-600 text-xs block">Trust</span>
+                    </div>
+                  </button>
+                );
+              })}
         </div>
 
             {/* Create New User Button */}

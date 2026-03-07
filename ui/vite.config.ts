@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
     return {
       base: './',  // 使用相对路径，Capacitor 必需
       server: {
-        port: 3000,
+        port: 3003,
         host: '0.0.0.0',
       },
       plugins: [react(), tailwindcss()],

@@ -192,5 +192,107 @@ class LedgerService:
             revenue.post_revenue += amount
         elif source == 'boost':
             revenue.boost_revenue += amount
+        elif source == 'penalty':
+            revenue.post_revenue += amount
 
         revenue.total += amount
+
+    async def lock_funds(
+        self,
+        user_id: int,
+        amount: int,
+        action_type: ActionType,
+        ref_type: RefType = RefType.NONE,
+        ref_id: int | None = None,
+    ) -> Ledger:
+        """Lock funds from user for 24h settlement (deduct but don't distribute yet)."""
+        if amount <= 0:
+            raise ValueError('Lock amount must be positive')
+
+        user = await self.db.get(User, user_id)
+        if not user:
+            raise ValueError(f'User {user_id} not found')
+
+        if user.available_balance < amount:
+            raise InsufficientBalance(
+                f'Need {amount} sat but only have {user.available_balance}'
+            )
+
+        user.available_balance -= amount
+
+        entry = Ledger(
+            user_id=user_id,
+            amount=-amount,
+            balance_after=user.available_balance,
+            action_type=action_type.value,
+            ref_type=ref_type.value,
+            ref_id=ref_id,
+            note='locked for 24h settlement',
+        )
+        self.db.add(entry)
+        await self.db.flush()
+        await self.db.refresh(entry)
+        return entry
+
+    async def settle_locked(
+        self,
+        amount: int,
+        recipient_id: int,
+        ref_type: RefType = RefType.NONE,
+        ref_id: int | None = None,
+        revenue_source: str = 'like',
+    ) -> tuple[int, int]:
+        """Settle locked funds after 24h: 80% to author, 20% to platform.
+
+        Returns (author_share, platform_share).
+        """
+        if amount <= 0:
+            raise ValueError('Amount must be positive')
+
+        author_share = int(amount * CREATOR_SHARE)
+        platform_share = amount - author_share
+
+        # Pay author (80%)
+        if author_share > 0:
+            await self.earn(
+                recipient_id, author_share, ActionType.SETTLE_AUTHOR,
+                ref_type=ref_type, ref_id=ref_id,
+                note='settled after 24h lock',
+            )
+
+        # Add to platform revenue (20%)
+        if platform_share > 0:
+            await self._add_platform_revenue(platform_share, revenue_source)
+
+        return author_share, platform_share
+
+    async def cancel_locked(
+        self,
+        user_id: int,
+        amount: int,
+        ref_type: RefType = RefType.NONE,
+        ref_id: int | None = None,
+    ) -> tuple[int, int]:
+        """Cancel locked funds: 70% refund to user, 30% penalty to platform.
+
+        Returns (refund_amount, penalty_amount).
+        """
+        if amount <= 0:
+            raise ValueError('Amount must be positive')
+
+        refund_amount = int(amount * 0.70)
+        penalty_amount = amount - refund_amount
+
+        # Refund 70% to user
+        if refund_amount > 0:
+            await self.earn(
+                user_id, refund_amount, ActionType.REFUND_CANCEL,
+                ref_type=ref_type, ref_id=ref_id,
+                note='70% refund on cancel',
+            )
+
+        # 30% penalty to platform
+        if penalty_amount > 0:
+            await self._add_platform_revenue(penalty_amount, 'penalty')
+
+        return refund_amount, penalty_amount

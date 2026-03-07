@@ -18,6 +18,8 @@ from app.services.subsidy_service import run_weekly_subsidy
 from app.services.discovery_service import DiscoveryService
 from app.services.cabal_service import run_cabal_detection, CabalDetectionService
 from app.services.boost_service import decay_all_boosts
+from app.services.interaction_settlement_service import run_interaction_settlement
+from apscheduler.triggers.interval import IntervalTrigger
 
 # Configure logging
 logging.basicConfig(
@@ -81,6 +83,15 @@ class SettlementWorker:
             CronTrigger(hour=5, minute=0),
             id='boost_decay',
             name='Daily Boost Decay',
+            replace_existing=True,
+        )
+
+        # Schedule interaction settlement (every minute)
+        self.scheduler.add_job(
+            self._run_interaction_settlement,
+            IntervalTrigger(minutes=1),
+            id='interaction_settlement',
+            name='Settle Expired Locked Interactions',
             replace_existing=True,
         )
 
@@ -158,6 +169,21 @@ class SettlementWorker:
             logger.error(f'Boost decay failed: {e}', exc_info=True)
             raise
 
+    async def _run_interaction_settlement(self):
+        """Settle expired 24h locked interactions (likes, comments)."""
+        try:
+            async with self.async_session() as session:
+                async with session.begin():
+                    result = await run_interaction_settlement(session)
+                    await session.commit()
+
+                if result['total_settled'] > 0:
+                    logger.info(f'Interaction settlement: {result}')
+                return result
+        except Exception as e:
+            logger.error(f'Interaction settlement failed: {e}', exc_info=True)
+            raise
+
     async def run_once(self, job_type: str = 'subsidy'):
         """Run a single job immediately (for testing)."""
         if job_type == 'subsidy':
@@ -168,6 +194,8 @@ class SettlementWorker:
             return await self._run_cabal_detection()
         elif job_type == 'boost_decay':
             return await self._run_boost_decay()
+        elif job_type == 'interaction_settlement':
+            return await self._run_interaction_settlement()
         else:
             raise ValueError(f'Unknown job type: {job_type}')
 

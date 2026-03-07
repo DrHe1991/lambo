@@ -5,7 +5,12 @@ from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
 from app.models.user import User
-from app.models.post import Post, Comment, PostStatus, PostType, PostLike, CommentLike
+from app.models.post import (
+    Post, Comment, PostStatus, PostType, PostLike, CommentLike, InteractionStatus,
+)
+from datetime import timedelta
+
+LOCK_DURATION_HOURS = 24
 from app.models.ledger import ActionType, RefType, Ledger
 from app.schemas.post import (
     PostCreate, PostUpdate, PostResponse, CommentCreate, CommentResponse,
@@ -99,6 +104,8 @@ def _comment_response(c: Comment, author: User, is_liked: bool = False) -> Comme
         cost_paid=c.cost_paid,
         is_liked=is_liked,
         created_at=c.created_at,
+        interaction_status=c.interaction_status,
+        locked_until=c.locked_until,
     )
 
 
@@ -366,7 +373,9 @@ async def like_post(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a post. Costs 20 sat (80% to author, 20% to platform)."""
+    """Like a post. Costs 20 sat, locked for 24h then settled (80% author, 20% platform)."""
+    from datetime import datetime
+
     post = await db.get(Post, post_id)
     if not post or post.status != PostStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail='Post not found')
@@ -382,7 +391,6 @@ async def like_post(
     if existing.scalar_one_or_none():
         return {'likes_count': post.likes_count, 'is_liked': True}
 
-    # Get user for trust-based fee calculation
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
@@ -390,17 +398,14 @@ async def like_post(
     like_cost = _apply_k(BASE_LIKE_POST_COST, _get_fresh_trust(user))
     ledger = LedgerService(db)
 
-    # 80% to author, 20% to platform
+    # Lock funds for 24h (don't distribute yet)
     try:
-        author_share, platform_share = await ledger.spend_with_split(
+        await ledger.lock_funds(
             user_id=user_id,
             amount=like_cost,
-            author_id=post.author_id,
-            spend_action_type=ActionType.SPEND_LIKE,
-            earn_action_type=ActionType.EARN_LIKE,
+            action_type=ActionType.LOCK_LIKE,
             ref_type=RefType.POST,
             ref_id=post_id,
-            revenue_source='like',
         )
     except InsufficientBalance:
         raise HTTPException(
@@ -412,8 +417,9 @@ async def like_post(
     weight_service = LikeWeightService(db)
     weights = await weight_service.calculate_like_weight(user_id, post_id)
 
-    # Create like with weight components
-    db.add(PostLike(
+    # Create like with lock settlement fields
+    now = datetime.utcnow()
+    like = PostLike(
         post_id=post_id,
         user_id=user_id,
         w_trust=weights['w_trust'],
@@ -424,7 +430,12 @@ async def like_post(
         cabal_penalty=weights['cabal_penalty'],
         total_weight=weights['total_weight'],
         is_cross_circle=weights['is_cross_circle'],
-    ))
+        status=InteractionStatus.PENDING.value,
+        locked_until=now + timedelta(hours=LOCK_DURATION_HOURS),
+        cost_paid=like_cost,
+        recipient_id=post.author_id,
+    )
+    db.add(like)
     post.likes_count += 1
     await _log_interaction(db, user_id, post.author_id, InteractionType.LIKE, post_id)
     await db.flush()
@@ -432,7 +443,8 @@ async def like_post(
     return {
         'likes_count': post.likes_count,
         'is_liked': True,
-        'author_earned': author_share,
+        'cost_locked': like_cost,
+        'locked_until': like.locked_until.isoformat(),
         'like_weight': weights['total_weight'],
     }
 
@@ -443,7 +455,7 @@ async def unlike_post(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlike a post. No refund."""
+    """Unlike a post. Only allowed within 24h lock period, with 30% penalty."""
     post = await db.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail='Post not found')
@@ -457,11 +469,35 @@ async def unlike_post(
     if not like:
         return {'likes_count': post.likes_count, 'is_liked': False}
 
+    # Check if can cancel (only PENDING status)
+    if like.status == InteractionStatus.SETTLED.value:
+        raise HTTPException(
+            status_code=403,
+            detail='Cannot unlike: already settled after 24h lock period',
+        )
+
+    if like.status == InteractionStatus.CANCELLED.value:
+        return {'likes_count': post.likes_count, 'is_liked': False}
+
+    # Cancel and refund 70%
+    ledger = LedgerService(db)
+    refund_amount, penalty_amount = await ledger.cancel_locked(
+        user_id=user_id,
+        amount=like.cost_paid,
+        ref_type=RefType.POST_LIKE,
+        ref_id=like.id,
+    )
+
     await db.delete(like)
     post.likes_count = max(0, post.likes_count - 1)
     await db.flush()
 
-    return {'likes_count': post.likes_count, 'is_liked': False}
+    return {
+        'likes_count': post.likes_count,
+        'is_liked': False,
+        'refunded': refund_amount,
+        'penalty': penalty_amount,
+    }
 
 
 # ── Comments ─────────────────────────────────────────────────────────────────
@@ -476,7 +512,9 @@ async def create_comment(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a comment / reply / answer. 80% to post author, 20% to platform."""
+    """Create a comment / reply / answer. Locked for 24h, then 80% to recipient."""
+    from datetime import datetime
+
     post = await db.get(Post, post_id)
     if not post or post.status != PostStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail='Post not found')
@@ -499,13 +537,10 @@ async def create_comment(
     author_trust = _get_fresh_trust(author)
     if is_answer:
         cost = _apply_k(BASE_ANSWER_COST, author_trust)
-        action_type = ActionType.SPEND_ANSWER
     elif is_reply:
         cost = _apply_k(BASE_REPLY_COST, author_trust)
-        action_type = ActionType.SPEND_REPLY
     else:
         cost = _apply_k(BASE_COMMENT_COST, author_trust)
-        action_type = ActionType.SPEND_COMMENT
 
     # Validate parent comment and determine recipient
     recipient_id = post.author_id
@@ -516,31 +551,35 @@ async def create_comment(
         # Reply goes to parent comment author
         recipient_id = parent.author_id
 
-    # Check if commenting on own content (no split needed)
+    # Check if commenting on own content
     is_self = author_id == recipient_id
 
     ledger = LedgerService(db)
+    now = datetime.utcnow()
+
     try:
         if is_self:
-            # Self-comment: just spend, no split
+            # Self-comment: just spend, all goes to platform (no lock needed)
             await ledger.spend(
-                author_id, cost, action_type,
+                author_id, cost, ActionType.LOCK_COMMENT,
                 ref_type=RefType.COMMENT, ref_id=None,
             )
-            # Post cost goes to platform
             await ledger._add_platform_revenue(cost, 'comment')
+            interaction_status = InteractionStatus.SETTLED.value
+            locked_until = None
+            final_recipient_id = None
         else:
-            # 80% to recipient, 20% to platform
-            await ledger.spend_with_split(
+            # Lock funds for 24h
+            await ledger.lock_funds(
                 user_id=author_id,
                 amount=cost,
-                author_id=recipient_id,
-                spend_action_type=action_type,
-                earn_action_type=ActionType.EARN_COMMENT,
+                action_type=ActionType.LOCK_COMMENT,
                 ref_type=RefType.COMMENT,
                 ref_id=None,
-                revenue_source='comment',
             )
+            interaction_status = InteractionStatus.PENDING.value
+            locked_until = now + timedelta(hours=LOCK_DURATION_HOURS)
+            final_recipient_id = recipient_id
     except InsufficientBalance:
         raise HTTPException(
             status_code=402,
@@ -553,6 +592,9 @@ async def create_comment(
         content=comment_data.content,
         parent_id=comment_data.parent_id,
         cost_paid=cost,
+        interaction_status=interaction_status,
+        locked_until=locked_until,
+        recipient_id=final_recipient_id,
     )
     db.add(comment)
     post.comments_count += 1
@@ -570,7 +612,7 @@ async def create_comment(
         sql_update(Ledger)
         .where(Ledger.user_id == author_id)
         .where(Ledger.ref_id.is_(None))
-        .where(Ledger.action_type == action_type.value)
+        .where(Ledger.action_type == ActionType.LOCK_COMMENT.value)
         .values(ref_id=comment.id)
     )
 
@@ -606,6 +648,59 @@ async def get_comments(
     ]
 
 
+@router.delete('/comments/{comment_id}', status_code=status.HTTP_200_OK)
+async def delete_comment(
+    comment_id: int,
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a comment. Only allowed within 24h lock period, with 30% penalty."""
+    comment = await db.get(Comment, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail='Comment not found')
+
+    if comment.author_id != user_id:
+        raise HTTPException(status_code=403, detail='Not authorized to delete this comment')
+
+    # Check if can delete (only PENDING status)
+    if comment.interaction_status == InteractionStatus.SETTLED.value:
+        raise HTTPException(
+            status_code=403,
+            detail='Cannot delete: already settled after 24h lock period',
+        )
+
+    if comment.interaction_status == InteractionStatus.CANCELLED.value:
+        raise HTTPException(status_code=400, detail='Comment already deleted')
+
+    # Cancel and refund 70% (if not self-comment)
+    refund_amount = 0
+    penalty_amount = 0
+    if comment.cost_paid > 0 and comment.recipient_id:
+        ledger = LedgerService(db)
+        refund_amount, penalty_amount = await ledger.cancel_locked(
+            user_id=user_id,
+            amount=comment.cost_paid,
+            ref_type=RefType.COMMENT,
+            ref_id=comment.id,
+        )
+
+    # Update post comment count
+    post = await db.get(Post, comment.post_id)
+    if post:
+        post.comments_count = max(0, post.comments_count - 1)
+
+    # Mark as cancelled (soft delete)
+    comment.interaction_status = InteractionStatus.CANCELLED.value
+    comment.content = '[deleted]'
+    await db.flush()
+
+    return {
+        'status': 'deleted',
+        'refunded': refund_amount,
+        'penalty': penalty_amount,
+    }
+
+
 # ── Comment Likes ────────────────────────────────────────────────────────────
 
 @router.post(
@@ -618,7 +713,9 @@ async def like_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a comment. Costs 10 sat (80% to author, 20% to platform)."""
+    """Like a comment. Costs 10 sat, locked for 24h then settled."""
+    from datetime import datetime
+
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
@@ -641,17 +738,14 @@ async def like_comment(
     cl_cost = _apply_k(BASE_LIKE_COMMENT_COST, _get_fresh_trust(user))
     ledger = LedgerService(db)
 
-    # 80% to comment author, 20% to platform
+    # Lock funds for 24h
     try:
-        author_share, _ = await ledger.spend_with_split(
+        await ledger.lock_funds(
             user_id=user_id,
             amount=cl_cost,
-            author_id=comment.author_id,
-            spend_action_type=ActionType.SPEND_COMMENT_LIKE,
-            earn_action_type=ActionType.EARN_LIKE,
+            action_type=ActionType.LOCK_LIKE,
             ref_type=RefType.COMMENT,
             ref_id=comment_id,
-            revenue_source='like',
         )
     except InsufficientBalance:
         raise HTTPException(
@@ -659,7 +753,16 @@ async def like_comment(
             detail=f'Insufficient balance. Need {cl_cost} sat.',
         )
 
-    db.add(CommentLike(comment_id=comment_id, user_id=user_id))
+    now = datetime.utcnow()
+    like = CommentLike(
+        comment_id=comment_id,
+        user_id=user_id,
+        status=InteractionStatus.PENDING.value,
+        locked_until=now + timedelta(hours=LOCK_DURATION_HOURS),
+        cost_paid=cl_cost,
+        recipient_id=comment.author_id,
+    )
+    db.add(like)
     comment.likes_count += 1
     await _log_interaction(
         db, user_id, comment.author_id, InteractionType.COMMENT_LIKE, comment_id,
@@ -669,7 +772,8 @@ async def like_comment(
     return {
         'likes_count': comment.likes_count,
         'is_liked': True,
-        'author_earned': author_share,
+        'cost_locked': cl_cost,
+        'locked_until': like.locked_until.isoformat(),
     }
 
 
@@ -683,7 +787,7 @@ async def unlike_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlike a comment. No refund."""
+    """Unlike a comment. Only allowed within 24h lock period, with 30% penalty."""
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
@@ -697,11 +801,35 @@ async def unlike_comment(
     if not like:
         return {'likes_count': comment.likes_count, 'is_liked': False}
 
+    # Check if can cancel (only PENDING status)
+    if like.status == InteractionStatus.SETTLED.value:
+        raise HTTPException(
+            status_code=403,
+            detail='Cannot unlike: already settled after 24h lock period',
+        )
+
+    if like.status == InteractionStatus.CANCELLED.value:
+        return {'likes_count': comment.likes_count, 'is_liked': False}
+
+    # Cancel and refund 70%
+    ledger = LedgerService(db)
+    refund_amount, penalty_amount = await ledger.cancel_locked(
+        user_id=user_id,
+        amount=like.cost_paid,
+        ref_type=RefType.COMMENT_LIKE,
+        ref_id=like.id,
+    )
+
     await db.delete(like)
     comment.likes_count = max(0, comment.likes_count - 1)
     await db.flush()
 
-    return {'likes_count': comment.likes_count, 'is_liked': False}
+    return {
+        'likes_count': comment.likes_count,
+        'is_liked': False,
+        'refunded': refund_amount,
+        'penalty': penalty_amount,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════

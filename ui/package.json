@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "screenshot": "playwright test screenshot-capture",
+    "screenshot:headed": "playwright test screenshot-capture --headed"
   },
   "dependencies": {
     "@capacitor/android": "^8.0.2",

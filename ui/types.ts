@@ -31,6 +31,20 @@ export interface Post {
   isLiked?: boolean;
 }
 
+export interface Comment {
+  id: string | number;
+  postId: string | number;
+  author: User;
+  content: string;
+  parentId?: string | number | null;
+  likesCount: number;
+  costPaid: number;
+  isLiked?: boolean;
+  timestamp: string;
+  interactionStatus?: 'pending' | 'settled' | 'cancelled';
+  lockedUntil?: string | null;
+}
+
 export interface ChatMessage {
   id: string | number;
   senderId: string | number;
@@ -74,8 +88,8 @@ export function apiUserToUser(apiUser: {
     id: apiUser.id,
     name: apiUser.name,
     handle: apiUser.handle.startsWith('@') ? apiUser.handle : `@${apiUser.handle}`,
-    avatar: apiUser.avatar || `https://picsum.photos/id/${apiUser.id + 10}/200/200`,
-    trustScore: apiUser.trust_score, // Keep raw score (can exceed 1000 for elite creators)
+    avatar: apiUser.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(apiUser.name)}&backgroundColor=f97316`,
+    trustScore: apiUser.trust_score,
     isFollowing: apiUser.is_following,
     bio: apiUser.bio,
     followers_count: apiUser.followers_count,
@@ -171,4 +185,52 @@ function formatTimestamp(isoString: string): string {
   if (diffDays === 1) return 'Yesterday';
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString();
+}
+
+export function apiCommentToComment(apiComment: {
+  id: number;
+  post_id: number;
+  author: {
+    id: number;
+    name: string;
+    handle: string;
+    avatar: string | null;
+    trust_score: number;
+  };
+  content: string;
+  parent_id: number | null;
+  likes_count: number;
+  cost_paid: number;
+  is_liked: boolean;
+  created_at: string;
+  interaction_status?: string;
+  locked_until?: string | null;
+}): Comment {
+  return {
+    id: apiComment.id,
+    postId: apiComment.post_id,
+    author: apiUserToUser(apiComment.author),
+    content: apiComment.content,
+    parentId: apiComment.parent_id,
+    likesCount: apiComment.likes_count,
+    costPaid: apiComment.cost_paid,
+    isLiked: apiComment.is_liked,
+    timestamp: formatTimestamp(apiComment.created_at),
+    interactionStatus: (apiComment.interaction_status as 'pending' | 'settled' | 'cancelled') || 'settled',
+    lockedUntil: apiComment.locked_until,
+  };
+}
+
+export function getRemainingLockTime(lockedUntil: string | null | undefined): string | null {
+  if (!lockedUntil) return null;
+  const lockTime = new Date(lockedUntil);
+  const now = new Date();
+  const diffMs = lockTime.getTime() - now.getTime();
+  if (diffMs <= 0) return null;
+
+  const hours = Math.floor(diffMs / 3600000);
+  const mins = Math.floor((diffMs % 3600000) / 60000);
+
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
 }

@@ -1,34 +1,44 @@
 import { defineConfig, devices } from '@playwright/test';
+import path from 'path';
+import os from 'os';
+
+const SCREENSHOT_DIR = path.join(os.homedir(), 'Desktop', 'bitlink-screenshots');
 
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  retries: 0,
   workers: 1,
   reporter: 'html',
+  timeout: 60000,
   
   use: {
-    baseURL: 'http://localhost:3000',
-    trace: 'on-first-retry',
-    screenshot: 'only-on-failure',
+    baseURL: 'http://localhost:3003',
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
+    actionTimeout: 5000,
   },
 
   projects: [
     {
-      name: 'Pixel 5',
-      use: { ...devices['Pixel 5'] },
-    },
-    {
-      name: 'Pixel 7',
-      use: { ...devices['Pixel 7'] },
+      name: 'Mobile',
+      use: { 
+        viewport: { width: 393, height: 852 },
+        deviceScaleFactor: 2.75,
+        isMobile: true,
+        hasTouch: true,
+      },
     },
   ],
 
+  outputDir: path.join(SCREENSHOT_DIR, 'test-results'),
+
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    url: 'http://localhost:3003',
+    reuseExistingServer: true,
     timeout: 120000,
   },
 });

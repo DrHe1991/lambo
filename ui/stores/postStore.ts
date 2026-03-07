@@ -18,6 +18,7 @@ interface PostState {
   toggleLikePost: (postId: number, userId: number, isLiked: boolean) => Promise<void>;
   createComment: (postId: number, authorId: number, content: string, parentId?: number) => Promise<ApiComment>;
   toggleLikeComment: (postId: number, commentId: number, userId: number, isLiked: boolean) => Promise<void>;
+  deleteComment: (commentId: number, postId: number, userId: number) => Promise<{ refunded: number; penalty: number }>;
   clearCurrentPost: () => void;
 }
 
@@ -133,6 +134,20 @@ export const usePostStore = create<PostState>((set) => ({
     } catch (error) {
       throw error;
     }
+  },
+
+  deleteComment: async (commentId, postId, userId) => {
+    const result = await api.deleteComment(commentId, userId);
+    set((state) => ({
+      comments: state.comments.filter((c) => c.id !== commentId),
+      posts: state.posts.map((p) =>
+        p.id === postId ? { ...p, comments_count: Math.max(0, p.comments_count - 1) } : p,
+      ),
+      currentPost: state.currentPost?.id === postId
+        ? { ...state.currentPost, comments_count: Math.max(0, state.currentPost.comments_count - 1) }
+        : state.currentPost,
+    }));
+    return { refunded: result.refunded, penalty: result.penalty };
   },
 
   clearCurrentPost: () => set({ currentPost: null, comments: [] }),

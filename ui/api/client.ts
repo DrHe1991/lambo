@@ -132,6 +132,8 @@ export interface ApiComment {
   cost_paid: number;
   is_liked: boolean;
   created_at: string;
+  interaction_status?: 'pending' | 'settled' | 'cancelled';
+  locked_until?: string | null;
 }
 
 export interface ApiChatSession {
@@ -445,6 +447,12 @@ export const api = {
   unlikeComment: (postId: number, commentId: number, userId: number) =>
     apiRequest<{ likes_count: number; is_liked: boolean }>(
       `/api/posts/${postId}/comments/${commentId}/like`,
+      { method: 'DELETE', params: { user_id: userId } },
+    ),
+
+  deleteComment: (commentId: number, userId: number) =>
+    apiRequest<{ status: string; refunded: number; penalty: number }>(
+      `/api/posts/comments/${commentId}`,
       { method: 'DELETE', params: { user_id: userId } },
     ),
 
