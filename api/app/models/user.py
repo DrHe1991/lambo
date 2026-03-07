@@ -40,7 +40,9 @@ class User(Base):
 
     # Relationships
     posts: Mapped[list['Post']] = relationship('Post', back_populates='author')
-    comments: Mapped[list['Comment']] = relationship('Comment', back_populates='author')
+    comments: Mapped[list['Comment']] = relationship(
+        'Comment', back_populates='author', foreign_keys='Comment.author_id'
+    )
 
     # Follow relationships
     followers: Mapped[list['Follow']] = relationship(

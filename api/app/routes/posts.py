@@ -627,11 +627,16 @@ async def get_comments(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get comments for a post."""
+    """Get comments for a post. Excludes cancelled/deleted comments."""
     result = await db.execute(
         select(Comment)
         .options(selectinload(Comment.author))
-        .where(Comment.post_id == post_id)
+        .where(
+            and_(
+                Comment.post_id == post_id,
+                Comment.interaction_status != InteractionStatus.CANCELLED.value,
+            )
+        )
         .order_by(Comment.created_at)
         .limit(limit)
         .offset(offset)

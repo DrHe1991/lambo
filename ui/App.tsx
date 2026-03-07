@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession, getRemainingLockTime } from './types';
+import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
@@ -1138,7 +1138,6 @@ const App: React.FC = () => {
   const renderCommentItem = (c: ApiComment) => {
     const isLiked = c.is_liked;
     const canDelete = currentUser && c.author.id === currentUser.id && c.interaction_status === 'pending';
-    const lockTimeRemaining = getRemainingLockTime(c.locked_until);
 
     return (
       <div key={c.id} className={`flex gap-3 mb-5 ${c.parent_id ? 'ml-10' : ''}`}>
@@ -1153,11 +1152,6 @@ const App: React.FC = () => {
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-bold truncate">{c.author.name}</span>
             <span className="text-[10px] text-zinc-500 font-medium">@{c.author.handle}</span>
-            {lockTimeRemaining && (
-              <span className="text-[9px] text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">
-                🔒 {lockTimeRemaining}
-              </span>
-            )}
           </div>
           <p className="text-sm text-zinc-400 break-words">{c.content}</p>
           <div className="flex items-center gap-4 mt-2">
@@ -1187,20 +1181,20 @@ const App: React.FC = () => {
             </button>
             {canDelete && (
               <button
-                className="text-[10px] font-bold text-red-400 hover:text-red-300 flex items-center gap-1"
+                className="text-[10px] font-bold text-zinc-500 hover:text-zinc-400 flex items-center gap-1"
                 onClick={async () => {
                   if (!currentUser || !selectedPost) return;
                   if (!confirm('Delete this comment? You will get 70% refund, 30% penalty.')) return;
                   try {
                     const result = await deleteApiComment(c.id, Number(selectedPost.id), currentUser.id);
-                    toast.success(`Deleted. Refunded ${result.refunded} sat`);
+                    toast.success(`Refunded ${result.refunded} sat`);
                     fetchBalance(currentUser.id);
                   } catch (err) {
                     toast.warning((err as Error).message);
                   }
                 }}
               >
-                <Trash2 size={10} /> Delete
+                <Trash2 size={10} />
               </button>
             )}
           </div>
@@ -1240,7 +1234,7 @@ const App: React.FC = () => {
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center justify-between">
           <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
-          <span className="font-black italic tracking-tighter uppercase">Thread</span>
+          <div className="w-6" />
           <button><MoreHorizontal /></button>
         </div>
         <div className="p-4 pb-28">
@@ -1294,9 +1288,10 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center justify-between">
           <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
-          <span className="font-black italic tracking-tighter uppercase">Inquiry</span>
+          <div className="w-6" />
+          <button><MoreHorizontal /></button>
         </div>
         <div className="p-4 bg-orange-500/5 border-b border-orange-500/10 mb-4">
            <div className="bg-orange-500 text-white text-[10px] font-black px-2 py-1 rounded inline-block mb-3 uppercase tracking-widest">Question</div>

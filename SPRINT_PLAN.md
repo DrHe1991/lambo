@@ -1,7 +1,7 @@
 ## Sprint Plan — Spend & Earn Implementation
 
 > Based on `simulator/SYSTEM_DESIGN.md` (模拟器验证版).
-> Sprint 1-13 已完成. 举报仅用 L1 (LLM) 判决.
+> Sprint 1-13, 16 已完成. 举报仅用 L1 (LLM) 判决.
 
 ---
 
@@ -23,6 +23,7 @@
 | S12 Boost | ✅ 完成 | 16/16 | 付费曝光 |
 | S13 前端集成 | ✅ 完成 | - | 成本/Trust/Boost UI |
 | **S15 AINFT** | 📋 计划中 | - | LLM 支付集成 |
+| **S16 24h Lock Settlement** | ✅ 完成 | - | 24小时锁定结算机制 |
 
 **总测试**: 165/165 通过 ✅
 
@@ -49,6 +50,8 @@
 ## Sprint 2 — Paid Actions ✅
 
 > Goal: every public action costs sat.
+> 
+> **⚠️ 已被 S16 修改**: Unlike 行为改为 24h 内可撤销 (70% 退还, 30% 罚没)
 
 ### 完成内容
 
@@ -58,7 +61,7 @@
 - [x] 点赞: 20 sat (原 10)
 - [x] 评论点赞: 5 sat
 - [x] 不能给自己点赞
-- [x] Unlike 不退款
+- [x] ~~Unlike 不退款~~ → 24h 内可撤销 (70% 退还)，24h 后不可撤销
 
 **测试**: `bash api/tests/test_s2_paid_actions.sh` — 31/31 ✅
 
@@ -121,12 +124,14 @@
 ## Sprint 6 — Revenue Split ✅
 
 > Goal: 80% 直接分成 + 20% 平台收入池，取消增发
+> 
+> **⚠️ 已被 S16 修改**: 即时分成改为 24h 锁定结算，详见 Sprint 16
 
 ### 完成内容
 
 - [x] `PlatformRevenue` 模型 (按日记录收入)
-- [x] `spend_with_split()` 实时分成
-- [x] 点赞/评论 80% 给作者，20% 进平台池
+- [x] ~~`spend_with_split()` 实时分成~~ → 改为 `lock_funds()` + 定时 `settle_locked()`
+- [x] 点赞/评论 80% 给作者，20% 进平台池 (24h 后结算)
 - [x] 移除 `EMISSION_PER_DAU = 300`
 - [x] 新成本参数:
   - 发帖 50 sat
@@ -328,6 +333,85 @@
 
 ---
 
+## Sprint 16 — 24小时锁定结算机制 ✅
+
+> Goal: 点赞/评论费用先锁定24小时，再结算给作者，支持撤销
+
+### 完成内容
+
+**数据模型扩展**:
+
+- [x] `InteractionStatus` 枚举 (pending, settled, cancelled)
+- [x] `PostLike` 添加字段:
+  - `status VARCHAR(20)` 状态
+  - `locked_until TIMESTAMP` 锁定到期时间
+  - `cost_paid BIGINT` 支付金额
+  - `recipient_id INTEGER` 收益接收者
+- [x] `CommentLike` 添加相同字段
+- [x] `Comment` 添加字段:
+  - `interaction_status VARCHAR(20)`
+  - `locked_until TIMESTAMP`
+  - `recipient_id INTEGER`
+- [x] 数据库迁移 `n4o5p6q7r8s9_add_lock_settlement_fields.py`
+
+**Ledger 服务扩展**:
+
+- [x] 新 ActionType: `LOCK_LIKE`, `LOCK_COMMENT`, `SETTLE_AUTHOR`, `SETTLE_PLATFORM`, `REFUND_CANCEL`, `PENALTY_CANCEL`
+- [x] 新 RefType: `POST_LIKE`, `COMMENT_LIKE`
+- [x] `lock_funds()` — 锁定用户资金
+- [x] `settle_locked()` — 结算给作者 (80%) + 平台 (20%)
+- [x] `cancel_locked()` — 退还用户 (70%) + 罚没平台 (30%)
+
+**API 路由更新**:
+
+- [x] `POST /posts/{id}/like` — 使用锁定机制
+- [x] `DELETE /posts/{id}/unlike` — 检查状态，PENDING 可撤销
+- [x] `POST /posts/{id}/comments` — 使用锁定机制
+- [x] `DELETE /posts/comments/{id}` — **新增** 删除评论端点
+- [x] `POST /posts/comments/{id}/like` — 使用锁定机制
+- [x] `DELETE /posts/comments/{id}/unlike` — 检查状态
+
+**结算 Worker**:
+
+- [x] `InteractionSettlementService` — 封装结算逻辑
+- [x] `settle_expired_post_likes()` — 结算到期的帖子点赞
+- [x] `settle_expired_comment_likes()` — 结算到期的评论点赞
+- [x] `settle_expired_comments()` — 结算到期的评论
+- [x] 定时任务: **每分钟** 执行结算检查
+
+**前端集成**:
+
+- [x] `Comment` 类型添加 `interactionStatus`, `lockedUntil` 字段
+- [x] `getRemainingLockTime()` 计算剩余锁定时间
+- [x] `deleteComment()` API 和 Store action
+- [x] 评论显示锁定倒计时 (🔒 23h 59m)
+- [x] 作者可删除 PENDING 状态的评论 (带确认弹窗)
+
+### 核心流程
+
+```
+用户点赞/评论
+      │
+      ▼
+   PENDING (锁定 24h)
+      │
+      ├── 24h 后 ──→ SETTLED (80% 作者 + 20% 平台)
+      │
+      └── 用户撤销 ──→ CANCELLED (70% 退还 + 30% 罚没)
+```
+
+### 参数
+
+| 参数 | 值 |
+|------|-----|
+| LOCK_DURATION_HOURS | 24 |
+| AUTHOR_SHARE | 80% |
+| PLATFORM_SHARE | 20% |
+| REFUND_RATE | 70% |
+| PENALTY_RATE | 30% |
+
+---
+
 ## Sprint 15 — AINFT LLM 支付集成 📋 计划中
 
 > Goal: 通过 AINFT 平台支付举报判决的 LLM token 费用
@@ -368,6 +452,7 @@ AINFT 是基于 TRON 区块链的 AI + 区块链生态系统：
 | **S13** | ✅ 完成 | 前端集成 |
 | **S14** | ⏸️ 暂缓 | 上诉机制 (依赖 L2 陪审) |
 | **S15** | 📋 计划中 | AINFT LLM 支付集成 |
+| **S16** | ✅ 完成 | 24小时锁定结算机制 |
 
 ### 依赖关系
 
@@ -376,7 +461,11 @@ S1-S13 ✅ (后端 + 前端核心完成)
      │
      ├──→ S14 ⏸️ (上诉机制 - 暂缓，依赖 L2 陪审)
      │
-     └──→ S15 📋 (AINFT LLM 支付 - 计划中)
+     ├──→ S15 📋 (AINFT LLM 支付 - 计划中)
+     │
+     └──→ S16 ✅ (24h 锁定结算 - 完成)
+              │
+              └── 修改 S6 分成逻辑: 即时 → 延迟结算
 ```
 
 ---
@@ -408,5 +497,7 @@ done
 | `api/app/services/like_weight_service.py` | 点赞权重 |
 | `api/app/services/subsidy_service.py` | 质量补贴 |
 | `api/app/services/boost_service.py` | Boost 付费曝光 |
+| `api/app/services/ledger_service.py` | 余额/锁定/结算 |
+| `api/app/services/interaction_settlement_service.py` | 24h 锁定结算逻辑 |
 | `api/app/worker/settlement_worker.py` | 定时任务调度 |
 | `simulator/SYSTEM_DESIGN.md` | 经济模型设计文档 |
