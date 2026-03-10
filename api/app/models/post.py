@@ -9,7 +9,14 @@ from app.db.database import Base
 class PostType(str, Enum):
     """Type of post content."""
     NOTE = 'note'
+    ARTICLE = 'article'
     QUESTION = 'question'
+
+
+class ContentFormat(str, Enum):
+    """Content format for posts."""
+    PLAIN = 'plain'
+    MARKDOWN = 'markdown'
 
 
 class PostStatus(str, Enum):
@@ -33,7 +40,9 @@ class Post(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     author_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    title: Mapped[str | None] = mapped_column(String(200), default=None)
     content: Mapped[str] = mapped_column(Text)
+    content_format: Mapped[str] = mapped_column(String(20), default=ContentFormat.PLAIN.value)
     post_type: Mapped[str] = mapped_column(String(20), default=PostType.NOTE.value)
     status: Mapped[str] = mapped_column(String(20), default=PostStatus.ACTIVE.value)
 

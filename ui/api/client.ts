@@ -108,8 +108,10 @@ export interface ApiBalanceResponse {
 export interface ApiPost {
   id: number;
   author: ApiUser;
+  title?: string | null;
   content: string;
-  post_type: 'note' | 'question';
+  content_format?: 'plain' | 'markdown';
+  post_type: 'note' | 'article' | 'question';
   status: string;
   likes_count: number;
   comments_count: number;
@@ -120,6 +122,14 @@ export interface ApiPost {
   is_liked: boolean;
   boost_amount?: number;
   boost_remaining?: number;
+}
+
+export interface ApiCostEstimate {
+  base_cost: number;
+  length_cost: number;
+  fee_paid: number;
+  total: number;
+  content_limits: { min: number; max: number };
 }
 
 export interface ApiComment {
@@ -402,8 +412,21 @@ export const api = {
     apiRequest<ApiUserCosts>(`/api/users/${userId}/costs`),
 
   // Posts
-  createPost: (authorId: number, data: { content: string; post_type: string; bounty?: number }) =>
+  createPost: (authorId: number, data: {
+    content: string;
+    post_type: string;
+    title?: string;
+    content_format?: string;
+    bounty?: number;
+  }) =>
     apiRequest<ApiPost>('/api/posts', { method: 'POST', body: data, params: { author_id: authorId } }),
+
+  estimatePostCost: (authorId: number, contentLength: number, postType = 'article') =>
+    apiRequest<ApiCostEstimate>('/api/posts/estimate-cost', {
+      method: 'POST',
+      body: { content_length: contentLength, post_type: postType },
+      params: { author_id: authorId },
+    }),
 
   getPosts: (filters?: { post_type?: string; author_id?: number; user_id?: number; limit?: number; offset?: number }) =>
     apiRequest<ApiPost[]>('/api/posts', { params: filters }),

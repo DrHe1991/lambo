@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.db.database import get_db
 from app.models.user import User
 from app.models.post import (
-    Post, Comment, PostStatus, PostType, PostLike, CommentLike, InteractionStatus,
+    Post, Comment, PostStatus, PostType, ContentFormat, PostLike, CommentLike, InteractionStatus,
 )
 from datetime import timedelta
 
@@ -20,6 +20,10 @@ from app.services.ledger_service import LedgerService, InsufficientBalance
 from app.services.trust_service import dynamic_fee_multiplier, compute_trust_score
 from app.services.like_weight_service import LikeWeightService
 from app.services.boost_service import BoostService
+from app.services.pricing_service import (
+    calculate_total_post_cost, validate_content_length, estimate_article_cost,
+    get_content_limits, CONTENT_LIMITS,
+)
 from app.models.reward import InteractionLog, InteractionType
 
 # Base costs (before K(trust) multiplier) - aligned with simulator
@@ -80,7 +84,9 @@ def build_post_response(post: Post, is_liked: bool = False) -> PostResponse:
     return PostResponse(
         id=post.id,
         author=_user_brief(post.author),
+        title=post.title,
         content=post.content,
+        content_format=post.content_format or 'plain',
         post_type=post.post_type,
         status=post.status,
         likes_count=post.likes_count,
@@ -146,17 +152,40 @@ async def create_post(
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
 
+    # Validate content length for post type
+    is_valid, error_msg = validate_content_length(post_data.content, post_data.post_type)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error_msg)
+
+    # Articles require a title
+    is_article = post_data.post_type == PostType.ARTICLE.value
+    if is_article and not post_data.title:
+        raise HTTPException(status_code=400, detail='Articles require a title')
+
     is_question = post_data.post_type == PostType.QUESTION.value
-    raw_cost = BASE_QUESTION_COST if is_question else BASE_POST_COST
-    base_cost = _apply_k(raw_cost, _get_fresh_trust(author))
-    action_type = ActionType.SPEND_QUESTION if is_question else ActionType.SPEND_POST
     bounty = post_data.bounty or 0
     ledger = LedgerService(db)
 
-    # Free post only waives the base fee, not the bounty
+    # Calculate costs using pricing service
+    trust_score = _get_fresh_trust(author)
     is_free = author.free_posts_remaining > 0
-    fee_paid = 0 if is_free else base_cost
-    total_cost = fee_paid + bounty
+    cost_breakdown = calculate_total_post_cost(
+        content=post_data.content,
+        post_type=post_data.post_type,
+        trust_score=trust_score,
+        bounty=bounty,
+        is_free_post=is_free,
+    )
+    fee_paid = cost_breakdown['fee_paid']
+    total_cost = cost_breakdown['total']
+
+    # Select action type
+    if is_article:
+        action_type = ActionType.SPEND_POST
+    elif is_question:
+        action_type = ActionType.SPEND_QUESTION
+    else:
+        action_type = ActionType.SPEND_POST
 
     # Check total balance upfront
     if total_cost > author.available_balance:
@@ -168,7 +197,7 @@ async def create_post(
     if is_free:
         author.free_posts_remaining -= 1
 
-    # Deduct base fee
+    # Deduct base + length fee
     if fee_paid > 0:
         await ledger.spend(
             author_id, fee_paid, action_type,
@@ -184,9 +213,14 @@ async def create_post(
             note=f'Question bounty ({bounty} sat)',
         )
 
+    # Determine content format
+    content_format = post_data.content_format if is_article else ContentFormat.PLAIN.value
+
     post = Post(
         author_id=author_id,
+        title=post_data.title if is_article else None,
         content=post_data.content,
+        content_format=content_format,
         post_type=post_data.post_type,
         bounty=post_data.bounty,
         cost_paid=fee_paid + bounty,
@@ -231,9 +265,55 @@ async def create_post(
     return build_post_response(post)
 
 
+from pydantic import BaseModel
+
+
+class CostEstimateRequest(BaseModel):
+    """Request body for cost estimation."""
+    content_length: int
+    post_type: str = 'article'
+
+
+class CostEstimateResponse(BaseModel):
+    """Response with cost breakdown."""
+    base_cost: int
+    length_cost: int
+    fee_paid: int
+    total: int
+    content_limits: dict
+
+
+@router.post('/estimate-cost', response_model=CostEstimateResponse)
+async def estimate_post_cost(
+    request: CostEstimateRequest,
+    author_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Estimate cost for a post before publishing."""
+    author = await db.get(User, author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail='Author not found')
+
+    trust_score = _get_fresh_trust(author)
+    is_free = author.free_posts_remaining > 0
+
+    cost = estimate_article_cost(request.content_length, trust_score)
+    if is_free:
+        cost['fee_paid'] = 0
+        cost['total'] = cost['bounty']
+
+    return CostEstimateResponse(
+        base_cost=cost['base_cost'],
+        length_cost=cost['length_cost'],
+        fee_paid=cost['fee_paid'],
+        total=cost['total'],
+        content_limits=get_content_limits(request.post_type),
+    )
+
+
 @router.get('', response_model=list[PostResponse])
 async def get_posts(
-    post_type: str | None = Query(None, pattern=r'^(note|question)$'),
+    post_type: str | None = Query(None, pattern=r'^(note|article|question)$'),
     author_id: int | None = Query(None),
     user_id: int | None = Query(None, description='Current user for is_liked'),
     limit: int = Query(20, ge=1, le=100),

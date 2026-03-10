@@ -6,12 +6,14 @@ from app.schemas.user import UserBrief
 
 class PostBase(BaseModel):
     """Base post fields."""
-    content: str = Field(..., min_length=1, max_length=5000)
-    post_type: str = Field(default='note', pattern=r'^(note|question)$')
+    content: str = Field(..., min_length=1, max_length=50000)
+    post_type: str = Field(default='note', pattern=r'^(note|article|question)$')
 
 
 class PostCreate(PostBase):
     """Schema for creating a post."""
+    title: str | None = Field(None, max_length=200)
+    content_format: str = Field(default='plain', pattern=r'^(plain|markdown)$')
     bounty: int | None = Field(None, ge=0)
 
 
@@ -24,7 +26,9 @@ class PostResponse(BaseModel):
     """Post response with author info."""
     id: int
     author: UserBrief
+    title: str | None = None
     content: str
+    content_format: str = 'plain'
     post_type: str
     status: str
     likes_count: int

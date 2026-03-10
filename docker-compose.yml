@@ -9,7 +9,7 @@ services:
       POSTGRES_PASSWORD: bitlink_dev_password
       POSTGRES_DB: bitlink
     ports:
-      - '5433:5432'
+      - '5435:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,7 +24,7 @@ services:
     container_name: bitlink-redis
     restart: unless-stopped
     ports:
-      - '6379:6379'
+      - '6380:6379'
     volumes:
       - redis_data:/data
     healthcheck:
@@ -41,7 +41,7 @@ services:
     container_name: bitlink-api
     restart: unless-stopped
     ports:
-      - '8001:8000'
+      - '8003:8000'
     environment:
       DATABASE_URL: postgresql+asyncpg://bitlink:bitlink_dev_password@postgres:5432/bitlink
       REDIS_URL: redis://redis:6379/0
@@ -64,9 +64,9 @@ services:
     container_name: ui
     restart: unless-stopped
     ports:
-      - '3001:3000'
+      - '3003:3003'
     environment:
-      VITE_API_URL: http://localhost:8001
+      VITE_API_URL: http://localhost:8003
     volumes:
       - ./ui:/app
       - /app/node_modules

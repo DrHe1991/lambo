@@ -15,7 +15,9 @@ export interface User {
 export interface Post {
   id: string | number;
   author: User;
+  title?: string | null;
   content: string;
+  contentFormat?: 'plain' | 'markdown';
   stakedSats?: number;
   likes: number;
   comments: number;
@@ -25,7 +27,7 @@ export interface Post {
   isBoosted?: boolean;
   boostMultiplier?: number;
   boostRemaining?: number;
-  type: 'Note' | 'Question';
+  type: 'Note' | 'Article' | 'Question';
   bounty?: number;
   status?: string;
   isLiked?: boolean;
@@ -107,8 +109,10 @@ export function apiPostToPost(apiPost: {
     avatar: string | null;
     trust_score: number;
   };
+  title?: string | null;
   content: string;
-  post_type: 'note' | 'question';
+  content_format?: 'plain' | 'markdown';
+  post_type: 'note' | 'article' | 'question';
   status: string;
   likes_count: number;
   comments_count: number;
@@ -123,11 +127,19 @@ export function apiPostToPost(apiPost: {
   const isBoosted = boostRemaining > 0.01;
   const boostMultiplier = Math.min(5.0, 1.0 + boostRemaining);
 
+  const typeMap: Record<string, 'Note' | 'Article' | 'Question'> = {
+    note: 'Note',
+    article: 'Article',
+    question: 'Question',
+  };
+
   return {
     id: apiPost.id,
     author: apiUserToUser(apiPost.author),
+    title: apiPost.title,
     content: apiPost.content,
-    type: apiPost.post_type === 'question' ? 'Question' : 'Note',
+    contentFormat: apiPost.content_format || 'plain',
+    type: typeMap[apiPost.post_type] || 'Note',
     likes: apiPost.likes_count,
     comments: apiPost.comments_count,
     timestamp: formatTimestamp(apiPost.created_at),

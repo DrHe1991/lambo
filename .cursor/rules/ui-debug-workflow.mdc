@@ -1,0 +1,85 @@
+---
+description: UI debug workflow - use Playwright screenshots to verify and fix frontend issues
+alwaysApply: true
+---
+
+# UI Debug Workflow
+
+When the user reports a UI issue or requests a frontend change:
+
+## Step 1: Check existing screenshots
+
+Look for cached Playwright screenshots at `~/Desktop/bitlink-screenshots/`.
+Read the relevant screenshot to understand the current state before making changes.
+
+## Step 2: If screenshot is missing or stale, capture fresh ones
+
+Run a Playwright script against `http://localhost:3003` to capture the target view:
+
+```typescript
+// Use: viewport 393x852, deviceScaleFactor 2.75, isMobile: true
+// Save to: ~/Desktop/bitlink-screenshots/<view-name>.png
+```
+
+Key views and how to reach them:
+
+- `01-login-page.png` — initial page
+- `02-feed.png` — after login, Feed tab
+- `03-following.png` — Following tab
+- `04-chat-list.png` — Chat tab
+- `05-profile.png` — Me tab
+- `07-post-detail.png` — click a post
+- `10-trust-detail.png` — Profile > Trust Score
+
+## Step 3: Read the screenshot, identify the issue
+
+Use the Read tool on the PNG file to visually inspect and confirm the problem.
+
+## Step 4: Fix the code
+
+Make the necessary changes in source files.
+
+## Step 5: Re-screenshot to verify
+
+Capture a fresh screenshot of the same view, **save it to `~/Desktop/bitlink-screenshots/`**, and read it to confirm the fix works.
+Repeat steps 4-5 until the UI matches expectations.
+
+## Screenshot Persistence Rules
+
+- **Every** screenshot (initial check or verification) MUST be saved to `~/Desktop/bitlink-screenshots/`.
+- Use descriptive filenames: `feed.png`, `post-detail.png`, `header-v2.png`, `inline-comment.png`, etc.
+- Verification screenshots should overwrite or update the relevant view file so the latest state is always cached.
+- At the start of any new UI task, **always read the most recent saved screenshot first** to understand the current state before making changes. This avoids unnecessary re-captures.
+
+## Screenshot Naming Convention
+
+Core views use numbered prefixes so they sort naturally:
+
+| View | Filename |
+|------|----------|
+| Login page | `01-login-page.png` |
+| Feed (main home) | `02-feed.png` |
+| Following tab | `03-following.png` |
+| Chat list | `04-chat-list.png` |
+| Profile (Me tab) | `05-profile.png` |
+| Trust score page | `06-trust-score.png` |
+| Transactions | `07-transactions.png` |
+| Settings | `08-settings.png` |
+| New post editor | `09-new-post-editor.png` |
+| Post detail | `10-post-detail.png` |
+| Followers list | `11-followers-list.png` |
+
+Feature-specific screenshots use plain descriptive names:
+- `inline-comment.png` — comment input popup on feed
+- `search-results.png` — search view with results
+- Name must be **immediately understandable** — anyone reading the filename should know exactly what view/feature it shows.
+
+**Cleanup rule**: After iterating on a design (e.g. `header-v1.png`, `header-v2.png`), delete intermediate files and only keep the final result saved under the canonical name (e.g. update `02-feed.png`). Never leave stale iteration files behind.
+
+## Important
+
+- Screenshots dir: `/Users/the053/Desktop/bitlink-screenshots/`
+- Dev server: `http://localhost:3003`
+- Playwright config: `ui/playwright.config.ts`
+- Test file: `ui/tests/screenshot-capture.spec.ts`
+- Always verify fixes visually — never assume a code change looks correct without a screenshot.

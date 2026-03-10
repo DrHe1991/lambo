@@ -11,6 +11,8 @@ import { ChallengeModal } from './components/ChallengeModal';
 import { LikeStakeModal } from './components/LikeStakeModal';
 import { BoostModal } from './components/BoostModal';
 import { ToastContainer, toast } from './components/Toast';
+import { ArticleEditor } from './components/ArticleEditor';
+import { ArticleRenderer } from './components/ArticleRenderer';
 import { getTrustRingClass, getTrustStrokeColor, getTrustBadgeBg, getTrustTier } from './trustTheme';
 import { ApiTrustBreakdown, ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest } from './api/client';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
@@ -89,9 +91,12 @@ const App: React.FC = () => {
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedChat, setSelectedChat] = useState<ChatSession | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
-  const [publishType, setPublishType] = useState<'Note' | 'Question'>('Note');
+  const [publishType, setPublishType] = useState<'Note' | 'Article' | 'Question'>('Note');
   const [publishContent, setPublishContent] = useState('');
+  const [publishTitle, setPublishTitle] = useState('');
   const [publishBounty, setPublishBounty] = useState('');
+  const [publishPreview, setPublishPreview] = useState(false);
+  const [publishCostEstimate, setPublishCostEstimate] = useState<{ base_cost: number; length_cost: number; total: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [challengePost, setChallengePost] = useState<Post | null>(null);
   const [showChallengeModal, setShowChallengeModal] = useState(false);
@@ -110,6 +115,8 @@ const App: React.FC = () => {
   const [groupMemberIds, setGroupMemberIds] = useState<Set<string>>(new Set());
   const [commentDraft, setCommentDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState<{ id: string; handle: string } | null>(null);
+  const [inlineCommentPost, setInlineCommentPost] = useState<Post | null>(null);
+  const [inlineCommentDraft, setInlineCommentDraft] = useState('');
 
 
   // Chat detail state
@@ -450,6 +457,27 @@ const App: React.FC = () => {
     return () => observer.disconnect();
   }, [currentUser, feedHasMore, feedLoading, loadMoreFeed]);
 
+  // Article cost estimation
+  useEffect(() => {
+    if (publishType === 'Article' && publishContent.length > 0 && currentUser) {
+      const timer = setTimeout(async () => {
+        try {
+          const estimate = await api.estimatePostCost(currentUser.id, publishContent.length, 'article');
+          setPublishCostEstimate({
+            base_cost: estimate.base_cost,
+            length_cost: estimate.length_cost,
+            total: estimate.total,
+          });
+        } catch {
+          // Ignore estimation errors
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    } else {
+      setPublishCostEstimate(null);
+    }
+  }, [publishType, publishContent.length, currentUser]);
+
   // Load available users when entering group chat creation
   useEffect(() => {
     if (currentView === 'GROUP_CHAT' && currentUser) {
@@ -531,15 +559,20 @@ const App: React.FC = () => {
   const renderHeader = () => {
     if (currentView !== 'MAIN') return null;
     return (
-      <header className="sticky top-0 z-40 bg-black/80 backdrop-blur-md border-b border-zinc-800 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-xl font-black italic tracking-tighter text-orange-500">BITLINK</h1>
-        <div className="flex items-center gap-4">
-          <Search 
-            className="text-zinc-400" 
-            size={22} 
-            onClick={() => setCurrentView('SEARCH')} 
-          />
-          <Bell className="text-zinc-400" size={22} />
+      <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between">
+        <span className="text-[19px] text-white select-none" style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, letterSpacing: '-0.03em' }}>
+          <span className="text-orange-500">Bit</span>Link
+        </span>
+        <div className="flex items-center gap-1">
+          <button
+            className="p-2.5 rounded-full hover:bg-zinc-800/60 transition-colors"
+            onClick={() => setCurrentView('SEARCH')}
+          >
+            <Search className="text-zinc-300" size={20} />
+          </button>
+          <button className="p-2.5 rounded-full hover:bg-zinc-800/60 transition-colors relative">
+            <Bell className="text-zinc-300" size={20} />
+          </button>
         </div>
       </header>
     );
@@ -585,15 +618,7 @@ const App: React.FC = () => {
   // Sub-Views
   const renderFeed = () => (
     <div className="">
-      <div className="p-4">
-        <div className="bg-gradient-to-r from-orange-600 to-amber-600 rounded-2xl p-4 mb-6 flex items-center justify-between shadow-lg shadow-orange-500/10">
-          <div>
-            <h3 className="text-white font-black text-lg italic leading-tight uppercase tracking-tighter">Daily Highlights</h3>
-            <p className="text-orange-100 text-[10px] font-medium opacity-80">Top 10 consensus discussions today</p>
-          </div>
-          <Zap className="text-white fill-white" size={24} />
-        </div>
-
+      <div className="px-4 pb-4">
         {feedPostsConverted.map(post => (
           <PostCard 
             key={post.id} 
@@ -611,6 +636,7 @@ const App: React.FC = () => {
             onChallenge={handleChallenge}
             onLike={handleLikeRequest}
             onBoost={handleBoost}
+            onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
             isLiked={likedPosts.has(String(post.id)) || post.isLiked}
             isOwner={currentUser?.id === post.author.id}
           />
@@ -649,6 +675,7 @@ const App: React.FC = () => {
           onChallenge={handleChallenge}
           onLike={handleLikeRequest}
           onBoost={handleBoost}
+          onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
           isLiked={likedPosts.has(String(post.id)) || post.isLiked}
           isOwner={currentUser?.id === post.author.id}
         />
@@ -1261,6 +1288,51 @@ const App: React.FC = () => {
     }
   };
 
+  // Submit inline comment from feed
+  const handleInlineComment = async () => {
+    if (!inlineCommentDraft.trim() || !inlineCommentPost || !currentUser) return;
+    try {
+      const cost = inlineCommentPost.type === 'Question' ? 50 : 20;
+      await createApiComment(Number(inlineCommentPost.id), currentUser.id, inlineCommentDraft.trim());
+      setInlineCommentDraft('');
+      setInlineCommentPost(null);
+      fetchBalance(currentUser.id);
+      toast.success('Comment posted');
+    } catch (err) {
+      toast.warning((err as Error).message);
+    }
+  };
+
+  const renderInlineCommentSheet = () => {
+    if (!inlineCommentPost) return null;
+    const cost = inlineCommentPost.type === 'Question' ? '50 sat' : '20 sat';
+    return (
+      <div className="fixed inset-0 z-[70] flex flex-col justify-end" onClick={() => setInlineCommentPost(null)}>
+        <div className="absolute inset-0 bg-black/60" />
+        <div
+          className="relative bg-zinc-950 border-t border-zinc-800 rounded-t-2xl p-4 pb-8"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs text-zinc-500">Replying to</span>
+            <span className="text-xs font-bold text-zinc-300">{inlineCommentPost.author.name}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <input
+              autoFocus
+              value={inlineCommentDraft}
+              onChange={(e) => setInlineCommentDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleInlineComment()}
+              placeholder="Add your insight..."
+              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
+            />
+            <button className="bg-orange-500 p-3 rounded-xl shrink-0" onClick={handleInlineComment}><Send size={18} /></button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Determine comment input cost label (S6: updated costs)
   const commentCostLabel = () => {
     if (!selectedPost) return '';
@@ -1273,6 +1345,7 @@ const App: React.FC = () => {
     if (!selectedPost) return null;
     const topLevel = apiComments.filter(c => !c.parent_id);
     const replies = apiComments.filter(c => c.parent_id);
+    const isArticle = selectedPost.type === 'Article';
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
@@ -1282,7 +1355,61 @@ const App: React.FC = () => {
           <button><MoreHorizontal /></button>
         </div>
         <div className="p-4 pb-28">
-          <PostCard post={selectedPost} />
+          {isArticle ? (
+            <div className="mb-8">
+              {/* Article header */}
+              <div className="flex items-center gap-1 mb-4">
+                <span className="inline-flex items-center gap-1 bg-orange-500/20 text-orange-400 text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-tight">
+                  <FileText size={10} /> Article
+                </span>
+              </div>
+              
+              {/* Title */}
+              {selectedPost.title && (
+                <h1 className="text-2xl font-black text-white mb-4 leading-tight">
+                  {selectedPost.title}
+                </h1>
+              )}
+              
+              {/* Author info */}
+              <div className="flex items-center gap-3 mb-6 pb-6 border-b border-zinc-800">
+                <div className={`w-12 h-12 rounded-full p-[2px] ${getTrustRingClass(selectedPost.author.trustScore)} shrink-0`}>
+                  <img
+                    src={getAvatarUrl(selectedPost.author.avatar, selectedPost.author.name)}
+                    className="w-full h-full rounded-full object-cover border border-zinc-900"
+                    onError={(e) => handleAvatarError(e, selectedPost.author.name)}
+                  />
+                </div>
+                <div>
+                  <span className="font-bold text-white block">{selectedPost.author.name}</span>
+                  <span className="text-zinc-500 text-sm">{selectedPost.author.handle} · {selectedPost.timestamp}</span>
+                </div>
+              </div>
+              
+              {/* Article content */}
+              {selectedPost.contentFormat === 'markdown' ? (
+                <ArticleRenderer content={selectedPost.content} />
+              ) : (
+                <p className="text-zinc-200 text-base leading-relaxed whitespace-pre-wrap">
+                  {selectedPost.content}
+                </p>
+              )}
+              
+              {/* Engagement stats */}
+              <div className="flex items-center gap-6 mt-8 pt-6 border-t border-zinc-800">
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <Heart size={20} />
+                  <span className="font-medium">{selectedPost.likes}</span>
+                </div>
+                <div className="flex items-center gap-2 text-zinc-400">
+                  <MessageCircle size={20} />
+                  <span className="font-medium">{selectedPost.comments}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <PostCard post={selectedPost} />
+          )}
 
 
 
@@ -1313,13 +1440,10 @@ const App: React.FC = () => {
               onChange={(e) => setCommentDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
               placeholder={replyTarget ? `Reply to ${replyTarget.handle}...` : 'Add your insight...'}
-              className="w-full bg-zinc-900 rounded-xl px-4 py-3 text-sm"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
             />
           </div>
-          <div className="flex flex-col items-center gap-1">
-            <button className="bg-orange-500 p-3 rounded-xl" onClick={handleSubmitComment}><Send size={18} /></button>
-            <span className="text-[9px] text-zinc-500 font-medium">{commentCostLabel()}</span>
-          </div>
+          <button className="bg-orange-500 p-3 rounded-xl shrink-0" onClick={handleSubmitComment}><Send size={18} /></button>
         </div>
       </div>
     );
@@ -1418,13 +1542,10 @@ const App: React.FC = () => {
               onChange={(e) => setCommentDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
               placeholder={replyTarget ? `Reply to ${replyTarget.handle}...` : 'Submit your answer...'}
-              className="w-full bg-zinc-900 rounded-xl px-4 py-3 text-sm"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
             />
           </div>
-          <div className="flex flex-col items-center gap-1">
-            <button className="bg-orange-500 p-3 rounded-xl" onClick={handleSubmitComment}><Send size={18} /></button>
-            <span className="text-[9px] text-zinc-500 font-medium">{commentCostLabel()}</span>
-          </div>
+          <button className="bg-orange-500 p-3 rounded-xl shrink-0" onClick={handleSubmitComment}><Send size={18} /></button>
         </div>
       </div>
     );
@@ -1671,24 +1792,52 @@ const App: React.FC = () => {
     if (!isPublishing) return null;
 
     const isNote = publishType === 'Note';
-    const accentBg = isNote ? 'bg-orange-500' : 'bg-blue-500';
-    const accentText = isNote ? 'text-orange-500' : 'text-blue-400';
-    const accentBorder = isNote ? 'border-orange-500/30' : 'border-blue-500/30';
-    const accentGlow = isNote ? 'shadow-orange-500/30' : 'shadow-blue-500/30';
+    const isArticle = publishType === 'Article';
+    const isQuestion = publishType === 'Question';
+    
+    const accentBg = isNote ? 'bg-orange-500' : isArticle ? 'bg-purple-500' : 'bg-blue-500';
+    const accentText = isNote ? 'text-orange-500' : isArticle ? 'text-purple-400' : 'text-blue-400';
+    const accentBorder = isNote ? 'border-orange-500/30' : isArticle ? 'border-purple-500/30' : 'border-blue-500/30';
+    const accentGlow = isNote ? 'shadow-orange-500/30' : isArticle ? 'shadow-purple-500/30' : 'shadow-blue-500/30';
     const freePost = currentUser?.free_posts_remaining && currentUser.free_posts_remaining > 0;
+
+    const resetPublishState = () => {
+      setIsPublishing(false);
+      setPublishContent('');
+      setPublishTitle('');
+      setPublishBounty('');
+      setPublishType('Note');
+      setPublishPreview(false);
+      setPublishCostEstimate(null);
+    };
 
     const handlePublish = async () => {
       if (!publishContent.trim() || !currentUser) return;
+      
+      if (isArticle && !publishTitle.trim()) {
+        toast.warning('Articles require a title');
+        return;
+      }
+      if (isArticle && publishContent.length < 100) {
+        toast.warning('Articles must be at least 100 characters');
+        return;
+      }
+      
       setIsSubmitting(true);
       try {
-        const bounty = publishType === 'Question' && publishBounty ? parseInt(publishBounty) : undefined;
-        await createApiPost(currentUser.id, publishContent, publishType === 'Note' ? 'note' : 'question', bounty);
-        setPublishContent('');
-        setPublishBounty('');
-        setIsPublishing(false);
-        setPublishType('Note');
-        toast.success('Posted');
-        // Refresh feed and balance
+        const bounty = isQuestion && publishBounty ? parseInt(publishBounty) : undefined;
+        const postType = isNote ? 'note' : isArticle ? 'article' : 'question';
+        
+        await api.createPost(currentUser.id, {
+          content: publishContent,
+          post_type: postType,
+          title: isArticle ? publishTitle : undefined,
+          content_format: isArticle ? 'markdown' : 'plain',
+          bounty,
+        });
+        
+        resetPublishState();
+        toast.success(isArticle ? 'Article published' : 'Posted');
         fetchPosts({ user_id: currentUser.id });
         if (currentUser) {
           fetchBalance(currentUser.id);
@@ -1706,43 +1855,71 @@ const App: React.FC = () => {
       }
     };
 
+    const getCostDisplay = () => {
+      if (freePost) return 'free · 1 remaining';
+      if (isArticle && publishCostEstimate) {
+        return `~${publishCostEstimate.total} sat · ${availableBalance.toLocaleString()} available`;
+      }
+      const baseCost = isNote 
+        ? (userCosts?.costs.post ?? 50) 
+        : isQuestion 
+          ? (userCosts?.costs.question ?? 100) 
+          : 80;
+      return `${baseCost}+ sat · ${availableBalance.toLocaleString()} available`;
+    };
+
+    const canPublish = () => {
+      if (!publishContent.trim()) return false;
+      if (isArticle && !publishTitle.trim()) return false;
+      if (isArticle && publishContent.length < 100) return false;
+      return true;
+    };
+
     return (
       <div className={`fixed inset-0 z-[100] bg-black flex flex-col`}>
         {/* Header */}
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <button
-            onClick={() => { setIsPublishing(false); setPublishContent(''); setPublishBounty(''); setPublishType('Note'); }}
+            onClick={resetPublishState}
             className="p-2 text-zinc-400"
           >
             <X size={24} />
           </button>
 
           {/* Type toggle */}
-          <div className="flex bg-zinc-900 rounded-xl p-1 gap-1">
+          <div className="flex bg-zinc-900 rounded-xl p-1 gap-0.5">
             <button
               onClick={() => setPublishType('Note')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight transition-all duration-200 ${
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all duration-200 ${
                 isNote ? 'bg-orange-500 text-white' : 'text-zinc-500'
               }`}
             >
               Note
             </button>
             <button
-              onClick={() => setPublishType('Question')}
-              className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight transition-all duration-200 ${
-                !isNote ? 'bg-blue-500 text-white' : 'text-zinc-500'
+              onClick={() => setPublishType('Article')}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all duration-200 ${
+                isArticle ? 'bg-purple-500 text-white' : 'text-zinc-500'
               }`}
             >
-              Inquiry
+              Article
+            </button>
+            <button
+              onClick={() => setPublishType('Question')}
+              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all duration-200 ${
+                isQuestion ? 'bg-blue-500 text-white' : 'text-zinc-500'
+              }`}
+            >
+              Q&A
             </button>
           </div>
 
           <button
             data-testid="publish-button"
             onClick={handlePublish}
-            disabled={!publishContent.trim() || isSubmitting}
+            disabled={!canPublish() || isSubmitting}
             className={`px-5 py-2 rounded-xl text-sm font-black uppercase tracking-tight transition-all duration-200 ${
-              publishContent.trim()
+              canPublish()
                 ? `${accentBg} text-white shadow-lg ${accentGlow} active:scale-95`
                 : 'bg-zinc-800 text-zinc-600'
             }`}
@@ -1752,39 +1929,64 @@ const App: React.FC = () => {
         </div>
 
         {/* Accent line */}
-        <div className={`h-0.5 ${isNote ? 'bg-gradient-to-r from-orange-500/50 via-orange-500 to-orange-500/50' : 'bg-gradient-to-r from-blue-500/50 via-blue-500 to-blue-500/50'}`} />
+        <div className={`h-0.5 ${
+          isNote 
+            ? 'bg-gradient-to-r from-orange-500/50 via-orange-500 to-orange-500/50' 
+            : isArticle 
+              ? 'bg-gradient-to-r from-purple-500/50 via-purple-500 to-purple-500/50'
+              : 'bg-gradient-to-r from-blue-500/50 via-blue-500 to-blue-500/50'
+        }`} />
 
         {/* Editor */}
         <div className="flex-1 px-4 pt-4 overflow-auto">
           <div className="flex items-start gap-3 mb-4">
             <img
               src={getAvatarUrl(currentMe.avatar, currentMe.name)}
-              className={`w-10 h-10 rounded-full border-2 ${isNote ? 'border-orange-500/50' : 'border-blue-500/50'} object-cover flex-shrink-0`}
+              className={`w-10 h-10 rounded-full border-2 ${
+                isNote ? 'border-orange-500/50' : isArticle ? 'border-purple-500/50' : 'border-blue-500/50'
+              } object-cover flex-shrink-0`}
               onError={(e) => handleAvatarError(e, currentMe.name)}
             />
             <div className="flex-1 min-w-0">
               <span className="text-sm font-bold text-zinc-300 block">{currentMe.name}</span>
-              <span className="text-[11px] text-zinc-500 font-medium">
-                {freePost
-                  ? 'free · 1 remaining'
-                  : `${isNote ? (userCosts?.costs.post ?? 50) : (userCosts?.costs.question ?? 100)} sat · ${availableBalance.toLocaleString()} available`
-                }
-              </span>
+              <span className="text-[11px] text-zinc-500 font-medium">{getCostDisplay()}</span>
             </div>
           </div>
 
-          <textarea
-            data-testid="post-content"
-            autoFocus
-            value={publishContent}
-            onChange={(e) => setPublishContent(e.target.value)}
-            className={`w-full bg-transparent border-none outline-none text-lg leading-relaxed resize-none min-h-[200px] ${
-              isNote ? 'placeholder:text-orange-500/30' : 'placeholder:text-blue-400/30'
-            }`}
-            placeholder={isNote ? "What's the signal?" : 'What do you need to know?'}
-          />
+          {isArticle ? (
+            <ArticleEditor
+              title={publishTitle}
+              content={publishContent}
+              onTitleChange={setPublishTitle}
+              onContentChange={setPublishContent}
+              showPreview={publishPreview}
+              onTogglePreview={() => setPublishPreview(!publishPreview)}
+              placeholder="Write your article in markdown..."
+              accentColor="purple"
+            />
+          ) : (
+            <>
+              <textarea
+                data-testid="post-content"
+                autoFocus
+                value={publishContent}
+                onChange={(e) => setPublishContent(e.target.value)}
+                maxLength={isNote ? 500 : 2000}
+                className={`w-full bg-transparent border-none outline-none text-lg leading-relaxed resize-none min-h-[200px] ${
+                  isNote ? 'placeholder:text-orange-500/30' : 'placeholder:text-blue-400/30'
+                }`}
+                placeholder={isNote ? "What's the signal?" : 'What do you need to know?'}
+              />
+              
+              {isNote && (
+                <div className="text-right text-xs text-zinc-600">
+                  {publishContent.length}/500
+                </div>
+              )}
+            </>
+          )}
 
-          {publishType === 'Question' && (
+          {isQuestion && (
             <div className={`mt-4 flex items-center justify-between p-4 bg-blue-500/10 border ${accentBorder} rounded-2xl`}>
               <span className="text-sm font-bold text-blue-400">Bounty (optional)</span>
               <div className="flex items-center gap-2">
@@ -1797,6 +1999,32 @@ const App: React.FC = () => {
                 />
                 <span className="text-[10px] font-black uppercase text-blue-400">sat</span>
               </div>
+            </div>
+          )}
+
+          {isArticle && publishCostEstimate && (
+            <div className="mt-4 p-4 bg-orange-500/10 border border-orange-500/30 rounded-2xl">
+              {freePost ? (
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-400">This post is</span>
+                  <span className="text-green-400 font-black text-lg">FREE</span>
+                </div>
+              ) : (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-zinc-400">Base fee</span>
+                    <span className="text-orange-400 font-bold">{publishCostEstimate.base_cost} sat</span>
+                  </div>
+                  <div className="flex justify-between text-sm mt-1">
+                    <span className="text-zinc-400">Length fee ({publishContent.length.toLocaleString()} chars)</span>
+                    <span className="text-orange-400 font-bold">{publishCostEstimate.length_cost} sat</span>
+                  </div>
+                  <div className="flex justify-between text-sm mt-2 pt-2 border-t border-orange-500/20">
+                    <span className="text-white font-bold">Total</span>
+                    <span className="text-orange-300 font-black">{publishCostEstimate.total} sat</span>
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -3270,6 +3498,9 @@ const App: React.FC = () => {
       {currentView === 'SCAN' && renderScan()}
       {currentView === 'SETTINGS' && renderSettings()}
       
+      {/* Inline Comment Sheet */}
+      {renderInlineCommentSheet()}
+
       {/* Challenge Modal */}
       <ChallengeModal
         isOpen={showChallengeModal}

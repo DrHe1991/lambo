@@ -1,6 +1,6 @@
 import React from 'react';
 import { Post } from '../types';
-import { Heart, MessageSquare, ShieldAlert, Cpu, Rocket, Zap } from 'lucide-react';
+import { Heart, MessageSquare, ShieldAlert, Cpu, Rocket, Zap, FileText } from 'lucide-react';
 import { getTrustRingClass, getTrustTier } from '../trustTheme';
 
 interface PostCardProps {
@@ -10,11 +10,12 @@ interface PostCardProps {
   onChallenge?: (post: Post) => void;
   onLike?: (post: Post) => void;
   onBoost?: (post: Post) => void;
+  onComment?: (post: Post) => void;
   isLiked?: boolean;
   isOwner?: boolean;
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onBoost, isLiked, isOwner }) => {
+export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onBoost, onComment, isLiked, isOwner }) => {
   const trustTier = getTrustTier(post.author.trustScore);
   const isOrangeTier = trustTier === 'orange';
   const isBoosted = Boolean(post.isPromoted || post.isBoosted);
@@ -74,6 +75,14 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
         </div>
       </div>
 
+      {post.type === 'Article' && (
+        <div className="mb-2">
+          <span className="inline-flex items-center gap-1 bg-purple-500/20 text-purple-400 text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-tight">
+            <FileText size={10} /> Article
+          </span>
+        </div>
+      )}
+
       {post.type === 'Question' && (
         <div className="mb-2">
           <span className="bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded mr-2 uppercase tracking-tight">
@@ -87,9 +96,25 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
         </div>
       )}
 
+      {post.type === 'Article' && post.title && (
+        <h3 className="text-lg font-bold text-white mb-2">{post.title}</h3>
+      )}
+
       <p className="text-zinc-200 text-sm leading-relaxed mb-4 whitespace-pre-wrap">
-        {post.content}
+        {post.type === 'Article' && post.content.length > 200 
+          ? `${post.content.slice(0, 200).trim()}...`
+          : post.content
+        }
       </p>
+
+      {post.type === 'Article' && post.content.length > 200 && (
+        <button 
+          className="text-purple-400 text-sm font-medium hover:text-purple-300 mb-3"
+          onClick={(e) => { e.stopPropagation(); onClick?.(post); }}
+        >
+          Read more →
+        </button>
+      )}
 
       <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">
         <div className="flex items-center gap-4">
@@ -101,7 +126,10 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
             <Heart size={18} className={isLiked ? 'fill-current' : ''} />
             <span className="text-xs font-medium">{post.likes}</span>
           </button>
-          <button className="flex items-center gap-1.5 text-zinc-400 hover:text-blue-400 transition-colors">
+          <button
+            className="flex items-center gap-1.5 text-zinc-400 hover:text-blue-400 transition-colors"
+            onClick={(e) => { e.stopPropagation(); onComment ? onComment(post) : onClick?.(post); }}
+          >
             <MessageSquare size={18} />
             <span className="text-xs font-medium">{post.comments}</span>
           </button>
