@@ -1,6 +1,6 @@
 import React from 'react';
 import { Post } from '../types';
-import { Heart, MessageSquare, ShieldAlert, Cpu, Rocket, Zap, FileText } from 'lucide-react';
+import { Heart, MessageSquare, ShieldAlert, Cpu, FileText, TrendingUp } from 'lucide-react';
 import { getTrustRingClass, getTrustTier } from '../trustTheme';
 
 interface PostCardProps {
@@ -9,25 +9,19 @@ interface PostCardProps {
   onUserClick?: (userId: string) => void;
   onChallenge?: (post: Post) => void;
   onLike?: (post: Post) => void;
-  onBoost?: (post: Post) => void;
   onComment?: (post: Post) => void;
   isLiked?: boolean;
-  isOwner?: boolean;
+  likeCost?: number;  // Dynamic like cost from API
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onBoost, onComment, isLiked, isOwner }) => {
+export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, isLiked, likeCost }) => {
   const trustTier = getTrustTier(post.author.trustScore);
   const isOrangeTier = trustTier === 'orange';
-  const isBoosted = Boolean(post.isPromoted || post.isBoosted);
 
   return (
     <div 
       data-testid={`post-card-${post.id}`}
-      className={`border rounded-2xl p-4 mb-3 active:scale-[0.98] transition-transform duration-100 ${
-        isBoosted
-          ? 'bg-gradient-to-br from-orange-500/12 via-zinc-900 to-zinc-900 border-orange-400/70 shadow-[0_0_0_1px_rgba(251,146,60,0.32),0_0_20px_rgba(249,115,22,0.16)]'
-          : 'bg-zinc-900 border-zinc-800'
-      }`}
+      className="border rounded-2xl p-4 mb-3 active:scale-[0.98] transition-transform duration-100 bg-zinc-900 border-zinc-800"
       onClick={() => onClick?.(post)}
     >
       <div className="flex items-start gap-3 mb-3">
@@ -60,14 +54,9 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
                 <Cpu size={10} /> AI
               </div>
             )}
-            {post.isPromoted && (
-              <div className="flex items-center gap-1 bg-orange-500/15 border border-orange-400/60 text-orange-300 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide">
-                <Rocket size={10} /> Sponsored
-              </div>
-            )}
-            {post.isBoosted && !post.isPromoted && (
-              <div className="flex items-center gap-1 bg-yellow-500/15 border border-yellow-400/50 text-yellow-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
-                <Zap size={10} /> {post.boostMultiplier?.toFixed(1)}x
+            {post.likes > 10 && (
+              <div className="flex items-center gap-1 bg-green-500/15 border border-green-400/50 text-green-300 px-1.5 py-0.5 rounded text-[10px] font-bold">
+                <TrendingUp size={10} /> Hot
               </div>
             )}
           </div>
@@ -125,6 +114,9 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           >
             <Heart size={18} className={isLiked ? 'fill-current' : ''} />
             <span className="text-xs font-medium">{post.likes}</span>
+            {!isLiked && likeCost && (
+              <span className="text-[10px] text-zinc-500 ml-1">({likeCost} sat)</span>
+            )}
           </button>
           <button
             className="flex items-center gap-1.5 text-zinc-400 hover:text-blue-400 transition-colors"
@@ -135,16 +127,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           </button>
         </div>
         <div className="flex items-center gap-2">
-          {isOwner && (
-            <button 
-              data-testid={`boost-button-${post.id}`}
-              className="flex items-center gap-1 text-zinc-500 hover:text-orange-400 transition-colors"
-              onClick={(e) => { e.stopPropagation(); onBoost?.(post); }}
-            >
-              <Zap size={16} />
-              <span className="text-[10px] font-bold uppercase tracking-wider">Boost</span>
-            </button>
-          )}
           <button 
             data-testid={`report-button-${post.id}`}
             className="flex items-center gap-1 text-zinc-600 hover:text-red-500 transition-colors"

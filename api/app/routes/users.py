@@ -9,7 +9,6 @@ from app.models.ledger import Ledger
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, UserBrief
 from app.schemas.ledger import LedgerEntry, BalanceResponse
 from app.services.ledger_service import LedgerService
-from app.services.trust_service import TrustScoreService, dynamic_fee_multiplier, trust_tier
 
 router = APIRouter()
 
@@ -269,51 +268,39 @@ async def get_ledger(
     return entries
 
 
-# --- Trust Score ---
+# --- Trust Score (Simplified in minimal system) ---
 
 @router.get('/{user_id}/trust')
 async def get_trust_breakdown(user_id: int, db: AsyncSession = Depends(get_db)):
-    """Get user's TrustScore breakdown (4 dimensions + composite)."""
-    svc = TrustScoreService(db)
-    try:
-        return await svc.get_breakdown(user_id)
-    except ValueError:
+    """Get user's simple trust score. Complex breakdown removed in minimal system."""
+    user = await db.get(User, user_id)
+    if not user:
         raise HTTPException(status_code=404, detail='User not found')
+    
+    return {
+        'user_id': user.id,
+        'trust_score': user.trust_score,
+        'note': 'Trust breakdown removed in minimal system',
+    }
 
 
 @router.get('/{user_id}/costs')
 async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
-    """Get dynamic action costs for this user (adjusted by K(trust))."""
-    from app.services.trust_service import compute_trust_score
+    """Get action costs. Simplified fixed costs in minimal system."""
+    from app.services.dynamic_like_service import like_cost
     
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
 
-    # Compute fresh trust score from sub-dimensions (S8)
-    fresh_trust = compute_trust_score(
-        user.creator_score, user.curator_score,
-        user.juror_score, user.risk_score,
-    )
-    k = dynamic_fee_multiplier(fresh_trust)
-
-    def apply(base: int) -> int:
-        return max(1, int(round(base * k)))
-
-    # Base costs aligned with simulator (S6)
     return {
         'user_id': user.id,
-        'trust_score': fresh_trust,
-        'tier': trust_tier(fresh_trust),
-        'fee_multiplier': k,
         'costs': {
-            'post': apply(50),
-            'question': apply(100),
-            'answer': apply(50),
-            'comment': apply(20),
-            'reply': apply(10),
-            'like_post': apply(20),
-            'like_comment': apply(10),
+            'post': 0,  # Free posting
+            'comment': 20,
+            'reply': 10,
+            'like_post': 'dynamic (5-100 sat)',  # Depends on post like count
+            'like_comment': 10,
         },
+        'note': 'Posting is free. Like costs are dynamic based on post popularity.',
     }
-

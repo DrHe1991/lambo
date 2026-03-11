@@ -17,37 +17,18 @@ from app.schemas.post import (
 )
 from app.schemas.user import UserBrief
 from app.services.ledger_service import LedgerService, InsufficientBalance
-from app.services.trust_service import dynamic_fee_multiplier, compute_trust_score
-from app.services.like_weight_service import LikeWeightService
-from app.services.boost_service import BoostService
-from app.services.pricing_service import (
-    calculate_total_post_cost, validate_content_length, estimate_article_cost,
-    get_content_limits, CONTENT_LIMITS,
+from app.services.dynamic_like_service import (
+    DynamicLikeService, like_cost as calc_like_cost,
+    AlreadyLiked, CannotLikeOwnPost,
+    InsufficientBalance as DynamicInsufficientBalance,
 )
 from app.models.reward import InteractionLog, InteractionType
 
-# Base costs (before K(trust) multiplier) - aligned with simulator
-BASE_POST_COST = 50
-BASE_QUESTION_COST = 100
-BASE_ANSWER_COST = 50
+# Simplified costs - no more dynamic K(trust) multiplier
+BASE_POST_COST = 0  # Free posting in minimal system
 BASE_COMMENT_COST = 20
 BASE_REPLY_COST = 10
-BASE_LIKE_POST_COST = 20
 BASE_LIKE_COMMENT_COST = 10
-
-
-def _get_fresh_trust(user: User) -> int:
-    """Compute fresh trust score from sub-dimensions."""
-    return compute_trust_score(
-        user.creator_score, user.curator_score,
-        user.juror_score, user.risk_score,
-    )
-
-
-def _apply_k(base_cost: int, trust_score: int) -> int:
-    """Apply K(trust) dynamic fee multiplier to a base cost."""
-    k = dynamic_fee_multiplier(trust_score)
-    return max(1, int(round(base_cost * k)))
 
 router = APIRouter()
 
@@ -147,75 +128,20 @@ async def create_post(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new post. First post base-fee is free; bounty always costs."""
+    """Create a new post. Free in minimal system."""
     author = await db.get(User, author_id)
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
-
-    # Validate content length for post type
-    is_valid, error_msg = validate_content_length(post_data.content, post_data.post_type)
-    if not is_valid:
-        raise HTTPException(status_code=400, detail=error_msg)
 
     # Articles require a title
     is_article = post_data.post_type == PostType.ARTICLE.value
     if is_article and not post_data.title:
         raise HTTPException(status_code=400, detail='Articles require a title')
 
-    is_question = post_data.post_type == PostType.QUESTION.value
-    bounty = post_data.bounty or 0
-    ledger = LedgerService(db)
-
-    # Calculate costs using pricing service
-    trust_score = _get_fresh_trust(author)
-    is_free = author.free_posts_remaining > 0
-    cost_breakdown = calculate_total_post_cost(
-        content=post_data.content,
-        post_type=post_data.post_type,
-        trust_score=trust_score,
-        bounty=bounty,
-        is_free_post=is_free,
-    )
-    fee_paid = cost_breakdown['fee_paid']
-    total_cost = cost_breakdown['total']
-
-    # Select action type
-    if is_article:
-        action_type = ActionType.SPEND_POST
-    elif is_question:
-        action_type = ActionType.SPEND_QUESTION
-    else:
-        action_type = ActionType.SPEND_POST
-
-    # Check total balance upfront
-    if total_cost > author.available_balance:
-        raise HTTPException(
-            status_code=402,
-            detail=f'Insufficient balance. Need {total_cost} sat.',
-        )
-
-    if is_free:
-        author.free_posts_remaining -= 1
-
-    # Deduct base + length fee
-    if fee_paid > 0:
-        await ledger.spend(
-            author_id, fee_paid, action_type,
-            ref_type=RefType.POST, ref_id=None,
-            note=f'Post ({post_data.post_type})',
-        )
-
-    # Deduct bounty
-    if bounty > 0:
-        await ledger.spend(
-            author_id, bounty, ActionType.SPEND_BOOST,
-            ref_type=RefType.POST, ref_id=None,
-            note=f'Question bounty ({bounty} sat)',
-        )
-
     # Determine content format
     content_format = post_data.content_format if is_article else ContentFormat.PLAIN.value
 
+    # In minimal system, posting is free
     post = Post(
         author_id=author_id,
         title=post_data.title if is_article else None,
@@ -223,44 +149,10 @@ async def create_post(
         content_format=content_format,
         post_type=post_data.post_type,
         bounty=post_data.bounty,
-        cost_paid=fee_paid + bounty,
+        cost_paid=0,  # Free in minimal system
     )
     db.add(post)
     await db.flush()
-
-    # Fix up ledger ref_ids now that we have the post ID
-    from sqlalchemy import update as sql_update
-
-    if is_free:
-        free_entry = Ledger(
-            user_id=author_id,
-            amount=0,
-            balance_after=author.available_balance,
-            action_type=ActionType.FREE_POST.value,
-            ref_type=RefType.POST.value,
-            ref_id=post.id,
-            note='Free post (1st post bonus)',
-        )
-        db.add(free_entry)
-        await db.flush()
-    else:
-        await db.execute(
-            sql_update(Ledger)
-            .where(Ledger.user_id == author_id)
-            .where(Ledger.ref_id.is_(None))
-            .where(Ledger.action_type == action_type.value)
-            .values(ref_id=post.id)
-        )
-
-    if bounty > 0:
-        await db.execute(
-            sql_update(Ledger)
-            .where(Ledger.user_id == author_id)
-            .where(Ledger.ref_id.is_(None))
-            .where(Ledger.action_type == ActionType.SPEND_BOOST.value)
-            .values(ref_id=post.id)
-        )
-
     await db.refresh(post, ['author'])
     return build_post_response(post)
 
@@ -268,47 +160,19 @@ async def create_post(
 from pydantic import BaseModel
 
 
-class CostEstimateRequest(BaseModel):
-    """Request body for cost estimation."""
-    content_length: int
-    post_type: str = 'article'
-
-
 class CostEstimateResponse(BaseModel):
-    """Response with cost breakdown."""
-    base_cost: int
-    length_cost: int
-    fee_paid: int
-    total: int
-    content_limits: dict
+    """Response with cost breakdown - simplified for minimal system."""
+    post_cost: int = 0
+    message: str = 'Posting is free in minimal system'
 
 
 @router.post('/estimate-cost', response_model=CostEstimateResponse)
 async def estimate_post_cost(
-    request: CostEstimateRequest,
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Estimate cost for a post before publishing."""
-    author = await db.get(User, author_id)
-    if not author:
-        raise HTTPException(status_code=404, detail='Author not found')
-
-    trust_score = _get_fresh_trust(author)
-    is_free = author.free_posts_remaining > 0
-
-    cost = estimate_article_cost(request.content_length, trust_score)
-    if is_free:
-        cost['fee_paid'] = 0
-        cost['total'] = cost['bounty']
-
-    return CostEstimateResponse(
-        base_cost=cost['base_cost'],
-        length_cost=cost['length_cost'],
-        fee_paid=cost['fee_paid'],
-        total=cost['total'],
-        content_limits=get_content_limits(request.post_type),
-    )
+    """Estimate cost for a post - always free in minimal system."""
+    return CostEstimateResponse()
 
 
 @router.get('', response_model=list[PostResponse])
@@ -364,18 +228,11 @@ def _feed_score(post: Post, following_ids: set[int]) -> float:
     comment_ratio = min(1.0, comments / max(1, likes))
     quality = engagement * 0.7 + comment_ratio * 0.3 if likes else 0.3
 
-    # 3. Author trust multiplier (0.8–1.5, maps trust 0-1000)
-    author_trust = getattr(post.author, 'trust_score', 135) if post.author else 135
-    trust_ratio = min(1.0, author_trust / 1000)
-    author_trust_mult = 0.8 + 0.7 * trust_ratio
-
-    # 4. Boost multiplier (paid promotion, capped at 5x)
-    boost_mult = min(5.0, 1.0 + (post.boost_remaining or 0))
-
-    # 5. Following multiplier (followed authors get priority)
+    # 3. Following multiplier (followed authors get priority)
     following_mult = 2.5 if post.author_id in following_ids else 1.0
 
-    return time_decay * quality * author_trust_mult * boost_mult * following_mult
+    # Simplified: no boost, no trust multiplier
+    return time_decay * quality * following_mult
 
 
 @router.get('/feed', response_model=list[PostResponse])
@@ -472,7 +329,26 @@ async def delete_post(
     return {'status': 'deleted'}
 
 
-# ── Post Likes ───────────────────────────────────────────────────────────────
+# ── Post Likes (Dynamic Pricing + Early Supporter Revenue Sharing) ────────────
+
+@router.get('/{post_id}/like-cost')
+async def get_like_cost(
+    post_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current like cost for a post (dynamic pricing)."""
+    service = DynamicLikeService(db)
+    try:
+        cost = await service.get_like_cost(post_id)
+        post = await db.get(Post, post_id)
+        return {
+            'post_id': post_id,
+            'cost': cost,
+            'likes_count': post.likes_count if post else 0,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
 
 @router.post('/{post_id}/like', status_code=status.HTTP_200_OK)
 async def like_post(
@@ -480,80 +356,37 @@ async def like_post(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a post. Costs 20 sat, locked for 24h then settled (80% author, 20% platform)."""
-    from datetime import datetime
-
-    post = await db.get(Post, post_id)
-    if not post or post.status != PostStatus.ACTIVE.value:
-        raise HTTPException(status_code=404, detail='Post not found')
-    if post.author_id == user_id:
-        raise HTTPException(status_code=400, detail='Cannot like your own post')
-
-    # Check if already liked
-    existing = await db.execute(
-        select(PostLike).where(
-            and_(PostLike.post_id == post_id, PostLike.user_id == user_id)
-        )
-    )
-    if existing.scalar_one_or_none():
-        return {'likes_count': post.likes_count, 'is_liked': True}
-
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail='User not found')
-
-    like_cost = _apply_k(BASE_LIKE_POST_COST, _get_fresh_trust(user))
-    ledger = LedgerService(db)
-
-    # Lock funds for 24h (don't distribute yet)
+    """Like a post with dynamic pricing and early supporter revenue sharing.
+    
+    - Cost decreases as more people like: cost = max(5, 100 / sqrt(1 + likes))
+    - Revenue split: 50% author, 40% early likers, 10% platform
+    """
+    service = DynamicLikeService(db)
+    
     try:
-        await ledger.lock_funds(
-            user_id=user_id,
-            amount=like_cost,
-            action_type=ActionType.LOCK_LIKE,
-            ref_type=RefType.POST,
-            ref_id=post_id,
-        )
-    except InsufficientBalance:
-        raise HTTPException(
-            status_code=402,
-            detail=f'Insufficient balance. Need {like_cost} sat.',
-        )
-
-    # Calculate like weight (S9)
-    weight_service = LikeWeightService(db)
-    weights = await weight_service.calculate_like_weight(user_id, post_id)
-
-    # Create like with lock settlement fields
-    now = datetime.utcnow()
-    like = PostLike(
-        post_id=post_id,
-        user_id=user_id,
-        w_trust=weights['w_trust'],
-        n_novelty=weights['n_novelty'],
-        s_source=weights['s_source'],
-        ce_entropy=weights['ce_entropy'],
-        cross_circle=weights['cross_circle'],
-        cabal_penalty=weights['cabal_penalty'],
-        total_weight=weights['total_weight'],
-        is_cross_circle=weights['is_cross_circle'],
-        status=InteractionStatus.PENDING.value,
-        locked_until=now + timedelta(hours=LOCK_DURATION_HOURS),
-        cost_paid=like_cost,
-        recipient_id=post.author_id,
-    )
-    db.add(like)
-    post.likes_count += 1
-    await _log_interaction(db, user_id, post.author_id, InteractionType.LIKE, post_id)
-    await db.flush()
-
-    return {
-        'likes_count': post.likes_count,
-        'is_liked': True,
-        'cost_locked': like_cost,
-        'locked_until': like.locked_until.isoformat(),
-        'like_weight': weights['total_weight'],
-    }
+        result = await service.like_post(user_id, post_id)
+        await db.commit()
+        
+        post = await db.get(Post, post_id)
+        return {
+            'likes_count': post.likes_count if post else 0,
+            'is_liked': True,
+            'cost': result['cost'],
+            'author_share': result['author_share'],
+            'early_liker_share': result['early_liker_share'],
+            'platform_share': result['platform_share'],
+            'your_weight': result['weight'],
+            'like_rank': result['like_rank'],
+        }
+    except CannotLikeOwnPost:
+        raise HTTPException(status_code=400, detail='Cannot like your own post')
+    except AlreadyLiked:
+        post = await db.get(Post, post_id)
+        return {'likes_count': post.likes_count if post else 0, 'is_liked': True}
+    except DynamicInsufficientBalance as e:
+        raise HTTPException(status_code=402, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.delete('/{post_id}/like', status_code=status.HTTP_200_OK)
@@ -562,49 +395,32 @@ async def unlike_post(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlike a post. Only allowed within 24h lock period, with 30% penalty."""
+    """Unlike a post. No refund in the minimal system."""
+    service = DynamicLikeService(db)
+    
+    result = await service.unlike_post(user_id, post_id)
+    await db.commit()
+    
     post = await db.get(Post, post_id)
-    if not post:
-        raise HTTPException(status_code=404, detail='Post not found')
-
-    result = await db.execute(
-        select(PostLike).where(
-            and_(PostLike.post_id == post_id, PostLike.user_id == user_id)
-        )
-    )
-    like = result.scalar_one_or_none()
-    if not like:
-        return {'likes_count': post.likes_count, 'is_liked': False}
-
-    # Check if can cancel (only PENDING status)
-    if like.status == InteractionStatus.SETTLED.value:
-        raise HTTPException(
-            status_code=403,
-            detail='Cannot unlike: already settled after 24h lock period',
-        )
-
-    if like.status == InteractionStatus.CANCELLED.value:
-        return {'likes_count': post.likes_count, 'is_liked': False}
-
-    # Cancel and refund 70%
-    ledger = LedgerService(db)
-    refund_amount, penalty_amount = await ledger.cancel_locked(
-        user_id=user_id,
-        amount=like.cost_paid,
-        ref_type=RefType.POST_LIKE,
-        ref_id=like.id,
-    )
-
-    await db.delete(like)
-    post.likes_count = max(0, post.likes_count - 1)
-    await db.flush()
-
     return {
-        'likes_count': post.likes_count,
+        'likes_count': post.likes_count if post else 0,
         'is_liked': False,
-        'refunded': refund_amount,
-        'penalty': penalty_amount,
+        'note': 'No refund in minimal system',
     }
+
+
+@router.get('/{post_id}/likers')
+async def get_post_likers(
+    post_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get list of early supporters for a post."""
+    service = DynamicLikeService(db)
+    try:
+        likers = await service.get_post_likers(post_id)
+        return {'likers': likers}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 # ── Comments ─────────────────────────────────────────────────────────────────
@@ -630,24 +446,13 @@ async def create_comment(
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
 
-    # Determine cost and action type
+    # Determine cost - simplified fixed costs
     is_reply = comment_data.parent_id is not None
-    is_answer = (
-        post.post_type == PostType.QUESTION.value
-        and not is_reply
-    )
-
-    # Cannot answer your own question
-    if is_answer and post.author_id == author_id:
-        raise HTTPException(status_code=400, detail='Cannot answer your own question')
-
-    author_trust = _get_fresh_trust(author)
-    if is_answer:
-        cost = _apply_k(BASE_ANSWER_COST, author_trust)
-    elif is_reply:
-        cost = _apply_k(BASE_REPLY_COST, author_trust)
+    
+    if is_reply:
+        cost = BASE_REPLY_COST  # 10 sat
     else:
-        cost = _apply_k(BASE_COMMENT_COST, author_trust)
+        cost = BASE_COMMENT_COST  # 20 sat
 
     # Validate parent comment and determine recipient
     recipient_id = post.author_id
@@ -847,7 +652,7 @@ async def like_comment(
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
 
-    cl_cost = _apply_k(BASE_LIKE_COMMENT_COST, _get_fresh_trust(user))
+    cl_cost = BASE_LIKE_COMMENT_COST  # Fixed 10 sat
     ledger = LedgerService(db)
 
     # Lock funds for 24h
@@ -944,45 +749,4 @@ async def unlike_comment(
     }
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-#  BOOST ENDPOINTS
-# ═══════════════════════════════════════════════════════════════════════════
-
-@router.post('/{post_id}/boost')
-async def boost_post(
-    post_id: int,
-    amount: int = Query(..., ge=1000, description='Amount in sat (min 1000)'),
-    user_id: int = Query(..., description='User paying for boost'),
-    db: AsyncSession = Depends(get_db),
-):
-    """Boost a post for increased visibility.
-    
-    - Minimum boost: 1000 sat (~$0.68)
-    - 100 sat = 1 boost point
-    - Max 5x visibility multiplier
-    - Decays 30% daily
-    - Only author can boost their own posts
-    """
-    service = BoostService(db)
-    result = await service.boost_post(post_id, user_id, amount)
-    await db.commit()
-
-    if 'error' in result:
-        raise HTTPException(status_code=400, detail=result['error'])
-
-    return result
-
-
-@router.get('/{post_id}/boost')
-async def get_boost_info(
-    post_id: int,
-    db: AsyncSession = Depends(get_db),
-):
-    """Get boost info for a post."""
-    service = BoostService(db)
-    result = await service.get_post_boost_info(post_id)
-
-    if not result:
-        raise HTTPException(status_code=404, detail='Post not found')
-
-    return result
+# Boost endpoints removed in minimal system

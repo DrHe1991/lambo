@@ -241,122 +241,7 @@ export interface ApiMessage {
   created_at: string;
 }
 
-// Reward types
-export interface ApiDiscoveryLike {
-  user_id: number;
-  handle: string;
-  trust_score: number;
-  w_trust: number;
-  n_novelty: number;
-  s_source: number;
-  weight: number;
-}
-
-export interface ApiDiscoveryBreakdown {
-  post_id: number;
-  discovery_score: number;
-  likes: ApiDiscoveryLike[];
-  settlement: {
-    status: string;
-    author_reward: number;
-    comment_pool: number;
-    settled_at: string | null;
-  } | null;
-}
-
-export interface ApiPendingItem {
-  post_id: number;
-  content_preview: string;
-  discovery_score: number;
-  days_left: number;
-  created_at: string;
-}
-
-export interface ApiPendingRewards {
-  user_id: number;
-  pending: ApiPendingItem[];
-}
-
-export interface ApiRewardItem {
-  post_id: number;
-  content_preview: string;
-  discovery_score: number;
-  author_reward: number;
-  comment_pool: number;
-  settled_at: string | null;
-}
-
-export interface ApiUserRewards {
-  user_id: number;
-  total_earned: number;
-  rewards: ApiRewardItem[];
-}
-
-// Challenge types
-export interface ApiChallenge {
-  id: number;
-  content_type: 'post' | 'comment';
-  content_id: number;
-  challenger_id: number;
-  author_id: number;
-  reason: string;
-  layer: number;
-  status: 'pending' | 'guilty' | 'not_guilty' | 'escalated' | 'voting';
-  fee_paid: number;
-  fine_amount: number;
-  ai_verdict: string | null;
-  ai_reason: string | null;
-  ai_confidence: number | null;
-  created_at: string;
-  resolved_at: string | null;
-}
-
-// Boost types (Sprint 12)
-export interface ApiBoostResult {
-  post_id: number;
-  amount_paid: number;
-  boost_points_added: number;
-  total_boost_remaining: number;
-  current_multiplier: number;
-  estimated_duration_days: number;
-}
-
-export interface ApiBoostInfo {
-  post_id: number;
-  boost_amount: number;
-  boost_remaining: number;
-  current_multiplier: number;
-  is_boosted: boolean;
-}
-
-// Challenge L2 types (Sprint 11)
-export interface ApiChallengeFees {
-  layers: { '1': number; '2': number; '3': number };
-  violation_types: Record<string, { multiplier: number; description: string }>;
-  distribution: { reporter: string; jury: string; platform: string };
-}
-
-export interface ApiJuryChallenge {
-  id: number;
-  content_type: string;
-  content_id: number;
-  reason: string;
-  violation_type: string;
-  challenger_id: number;
-  author_id: number;
-  votes_guilty: number;
-  votes_not_guilty: number;
-  jury_size: number;
-  voting_deadline: string;
-  created_at: string;
-}
-
-export interface ApiJuryVoteResult {
-  vote_recorded: boolean;
-  current_votes: number;
-  required_votes: number;
-  status: string;
-}
+// Reward, Challenge, and Boost types removed in minimal system
 
 // API methods
 export const api = {
@@ -437,17 +322,32 @@ export const api = {
   getPost: (postId: number, userId?: number) =>
     apiRequest<ApiPost>(`/api/posts/${postId}`, { params: { user_id: userId } }),
 
+  getLikeCost: (postId: number) =>
+    apiRequest<{ post_id: number; cost: number; likes_count: number }>(`/api/posts/${postId}/like-cost`),
+
   likePost: (postId: number, userId: number) =>
-    apiRequest<{ likes_count: number; is_liked: boolean }>(`/api/posts/${postId}/like`, {
+    apiRequest<{
+      likes_count: number;
+      is_liked: boolean;
+      cost: number;
+      author_share: number;
+      early_liker_share: number;
+      platform_share: number;
+      your_weight: number;
+      like_rank: number;
+    }>(`/api/posts/${postId}/like`, {
       method: 'POST',
       params: { user_id: userId },
     }),
 
   unlikePost: (postId: number, userId: number) =>
-    apiRequest<{ likes_count: number; is_liked: boolean }>(`/api/posts/${postId}/like`, {
+    apiRequest<{ likes_count: number; is_liked: boolean; note: string }>(`/api/posts/${postId}/like`, {
       method: 'DELETE',
       params: { user_id: userId },
     }),
+
+  getPostLikers: (postId: number) =>
+    apiRequest<{ likers: { user_id: number; username: string; cost_paid: number; weight: number; created_at: string }[] }>(`/api/posts/${postId}/likers`),
 
   getComments: (postId: number, userId?: number) =>
     apiRequest<ApiComment[]>(`/api/posts/${postId}/comments`, {
@@ -624,51 +524,5 @@ export const api = {
       params: { user_id: userId },
     }),
 
-  // Rewards
-  getPostDiscovery: (postId: number) =>
-    apiRequest<ApiDiscoveryBreakdown>(`/api/rewards/posts/${postId}/discovery`),
-
-  getPendingRewards: (userId: number) =>
-    apiRequest<ApiPendingRewards>(`/api/rewards/users/${userId}/pending-rewards`),
-
-  getUserRewards: (userId: number, limit = 20) =>
-    apiRequest<ApiUserRewards>(`/api/rewards/users/${userId}/rewards`, { params: { limit } }),
-
-  // Challenges
-  createChallenge: (challengerId: number, data: { content_type: string; content_id: number; reason: string }) =>
-    apiRequest<ApiChallenge>('/api/challenges', {
-      method: 'POST',
-      body: data,
-      params: { challenger_id: challengerId },
-    }),
-
-  getChallenge: (challengeId: number) =>
-    apiRequest<ApiChallenge>(`/api/challenges/${challengeId}`),
-
-  listChallenges: (filters?: { content_type?: string; content_id?: number; user_id?: number; author_id?: number }) =>
-    apiRequest<ApiChallenge[]>('/api/challenges', { params: filters }),
-
-  // Boost (Sprint 12)
-  boostPost: (postId: number, userId: number, amount: number) =>
-    apiRequest<ApiBoostResult>(`/api/posts/${postId}/boost`, {
-      method: 'POST',
-      params: { user_id: userId, amount },
-    }),
-
-  getBoostInfo: (postId: number) =>
-    apiRequest<ApiBoostInfo>(`/api/posts/${postId}/boost`),
-
-  // Challenge L2 Jury (Sprint 11)
-  getChallengeFees: (userId: number) =>
-    apiRequest<ApiChallengeFees>(`/api/challenges/fees`, { params: { user_id: userId } }),
-
-  getPendingJuryChallenges: (userId: number) =>
-    apiRequest<ApiJuryChallenge[]>(`/api/challenges/jury/${userId}/pending`),
-
-  castJuryVote: (challengeId: number, userId: number, voteGuilty: boolean, reasoning?: string) =>
-    apiRequest<ApiJuryVoteResult>(`/api/challenges/${challengeId}/vote`, {
-      method: 'POST',
-      body: { vote_guilty: voteGuilty, reasoning },
-      params: { user_id: userId },
-    }),
+  // Rewards, Challenges, and Boost removed in minimal system
 };

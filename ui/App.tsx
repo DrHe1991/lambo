@@ -9,7 +9,7 @@ import { TrustBadge } from './components/TrustBadge';
 import { LoginPage } from './components/LoginPage';
 import { ChallengeModal } from './components/ChallengeModal';
 import { LikeStakeModal } from './components/LikeStakeModal';
-import { BoostModal } from './components/BoostModal';
+// BoostModal removed in minimal system
 import { ToastContainer, toast } from './components/Toast';
 import { ArticleEditor } from './components/ArticleEditor';
 import { ArticleRenderer } from './components/ArticleRenderer';
@@ -103,8 +103,7 @@ const App: React.FC = () => {
   const [showLikeModal, setShowLikeModal] = useState(false);
   const [likeTargetPost, setLikeTargetPost] = useState<Post | null>(null);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
-  const [showBoostModal, setShowBoostModal] = useState(false);
-  const [boostTargetPost, setBoostTargetPost] = useState<Post | null>(null);
+  // Boost modal removed in minimal system
   const [showChatActions, setShowChatActions] = useState(false);
   const [friendSearch, setFriendSearch] = useState('');
   const [friendSearchResults, setFriendSearchResults] = useState<User[]>([]);
@@ -385,20 +384,7 @@ const App: React.FC = () => {
     if (likeTargetPost) handleLikeToggle(likeTargetPost);
   };
 
-  // Handle boost button click
-  const handleBoost = (post: Post) => {
-    setBoostTargetPost(post);
-    setShowBoostModal(true);
-  };
-
-  // Handle boost success - refresh balance
-  const handleBoostSuccess = (newBalance: number) => {
-    if (currentUser) {
-      fetchBalance(currentUser.id);
-      fetchPosts({ user_id: currentUser.id });
-    }
-    toast.success('Post boosted!');
-  };
+  // Boost handlers removed in minimal system
 
   // Handle Google Sign-In (placeholder for Phase 2)
   const handleLogin = async () => {
@@ -635,10 +621,8 @@ const App: React.FC = () => {
             }}
             onChallenge={handleChallenge}
             onLike={handleLikeRequest}
-            onBoost={handleBoost}
             onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
             isLiked={likedPosts.has(String(post.id)) || post.isLiked}
-            isOwner={currentUser?.id === post.author.id}
           />
         ))}
 
@@ -674,10 +658,8 @@ const App: React.FC = () => {
           }}
           onChallenge={handleChallenge}
           onLike={handleLikeRequest}
-          onBoost={handleBoost}
           onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
           isLiked={likedPosts.has(String(post.id)) || post.isLiked}
-          isOwner={currentUser?.id === post.author.id}
         />
       ))}
       {feedLoading && (
@@ -3521,16 +3503,7 @@ const App: React.FC = () => {
         userBalance={availableBalance}
       />
 
-      {/* Boost Modal */}
-      {showBoostModal && boostTargetPost && currentUser && (
-        <BoostModal
-          post={boostTargetPost}
-          userId={currentUser.id}
-          userBalance={availableBalance}
-          onClose={() => setShowBoostModal(false)}
-          onSuccess={handleBoostSuccess}
-        />
-      )}
+      {/* Boost Modal removed in minimal system */}
       
       {/* Modals */}
       {renderPublishOverlay()}

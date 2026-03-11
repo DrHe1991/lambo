@@ -145,6 +145,9 @@ class PostLike(Base):
     # Is this a cross-circle like? (liker not following author)
     is_cross_circle: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # Total earnings from early supporter revenue sharing (minimal system)
+    earnings: Mapped[int] = mapped_column(BigInteger, default=0)
+
     # 24h lock settlement fields
     status: Mapped[str] = mapped_column(
         String(20), default=InteractionStatus.SETTLED.value

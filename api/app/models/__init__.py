@@ -2,12 +2,8 @@ from app.models.user import User, Follow
 from app.models.post import Post, Comment, PostLike, CommentLike
 from app.models.chat import ChatSession, ChatMember, Message
 from app.models.ledger import Ledger
-from app.models.reward import (
-    InteractionLog, RewardPool, PostReward, CommentReward,
-)
-from app.models.challenge import Challenge, JuryVote
+from app.models.reward import InteractionLog
 from app.models.revenue import PlatformRevenue
-from app.models.cabal import CabalGroup, CabalMember
 
 __all__ = [
     'User',
@@ -21,12 +17,5 @@ __all__ = [
     'Message',
     'Ledger',
     'InteractionLog',
-    'RewardPool',
-    'PostReward',
-    'CommentReward',
-    'Challenge',
-    'JuryVote',
     'PlatformRevenue',
-    'CabalGroup',
-    'CabalMember',
 ]
