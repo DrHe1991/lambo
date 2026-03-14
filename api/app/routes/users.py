@@ -97,10 +97,8 @@ async def get_user(
         handle=user.handle,
         avatar=user.avatar,
         bio=user.bio,
-        trust_score=user.trust_score,
         created_at=user.created_at,
         available_balance=user.available_balance,
-        free_posts_remaining=user.free_posts_remaining,
         followers_count=followers_count or 0,
         following_count=following_count or 0,
         is_following=is_following,
@@ -268,27 +266,11 @@ async def get_ledger(
     return entries
 
 
-# --- Trust Score (Simplified in minimal system) ---
-
-@router.get('/{user_id}/trust')
-async def get_trust_breakdown(user_id: int, db: AsyncSession = Depends(get_db)):
-    """Get user's simple trust score. Complex breakdown removed in minimal system."""
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail='User not found')
-    
-    return {
-        'user_id': user.id,
-        'trust_score': user.trust_score,
-        'note': 'Trust breakdown removed in minimal system',
-    }
-
+# --- Action Costs ---
 
 @router.get('/{user_id}/costs')
 async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
-    """Get action costs. Simplified fixed costs in minimal system."""
-    from app.services.dynamic_like_service import like_cost
-    
+    """Get action costs. Post is free, like costs are dynamic."""
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
@@ -296,11 +278,10 @@ async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
     return {
         'user_id': user.id,
         'costs': {
-            'post': 0,  # Free posting
+            'post': 0,
             'comment': 20,
             'reply': 10,
-            'like_post': 'dynamic (5-100 sat)',  # Depends on post like count
+            'like_post': 50,  # Average dynamic cost (actual varies 5-100)
             'like_comment': 10,
         },
-        'note': 'Posting is free. Like costs are dynamic based on post popularity.',
     }

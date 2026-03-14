@@ -2,15 +2,17 @@
 Dynamic Like Service - Core mechanism for the minimal system.
 
 Two core rules:
-1. Dynamic pricing: cost = max(5, 100 / sqrt(1 + likes))
+1. Dynamic pricing: cost = max(min, base / sqrt(1 + likes))
 2. Revenue split: 50% author, 40% early likers, 10% platform
+
+Applies to both post likes and comment likes.
 """
 from datetime import date
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.models.post import Post, PostLike
+from app.models.post import Post, PostLike, Comment, CommentLike
 from app.models.ledger import Ledger, ActionType, RefType
 from app.models.revenue import PlatformRevenue
 
@@ -19,8 +21,13 @@ AUTHOR_SHARE = 0.50
 EARLY_LIKER_SHARE = 0.40
 PLATFORM_SHARE = 0.10
 
-LIKE_COST_BASE = 100
-LIKE_COST_MIN = 5
+# Post like pricing
+POST_LIKE_COST_BASE = 100
+POST_LIKE_COST_MIN = 5
+
+# Comment like pricing (cheaper than posts)
+COMMENT_LIKE_COST_BASE = 20
+COMMENT_LIKE_COST_MIN = 2
 
 
 class InsufficientBalance(Exception):
@@ -39,7 +46,7 @@ class CannotLikeOwnPost(Exception):
 
 
 def like_cost(current_likes: int) -> int:
-    """Calculate dynamic like cost based on current like count.
+    """Calculate dynamic post like cost.
     
     Formula: cost = max(5, 100 / sqrt(1 + likes))
     
@@ -51,7 +58,22 @@ def like_cost(current_likes: int) -> int:
     | 100   |  10  |
     | 500+  |   5  |
     """
-    return max(LIKE_COST_MIN, int(LIKE_COST_BASE / (1 + current_likes) ** 0.5))
+    return max(POST_LIKE_COST_MIN, int(POST_LIKE_COST_BASE / (1 + current_likes) ** 0.5))
+
+
+def comment_like_cost(current_likes: int) -> int:
+    """Calculate dynamic comment like cost (cheaper than posts).
+    
+    Formula: cost = max(2, 20 / sqrt(1 + likes))
+    
+    | likes | cost |
+    |-------|------|
+    |   0   |  20  |
+    |   5   |   8  |
+    |  20   |   4  |
+    |  50+  |   2  |
+    """
+    return max(COMMENT_LIKE_COST_MIN, int(COMMENT_LIKE_COST_BASE / (1 + current_likes) ** 0.5))
 
 
 def liker_weight(cost_paid: int, like_rank: int) -> float:
@@ -113,7 +135,7 @@ class DynamicLikeService:
         # Deduct from user
         user.available_balance -= cost
         await self._create_ledger(
-            user_id, -cost, ActionType.LIKE_POST,
+            user_id, -cost, ActionType.SPEND_LIKE,
             RefType.POST, post_id, f'liked post {post_id}'
         )
 
@@ -302,10 +324,176 @@ class DynamicLikeService:
             user = await self.db.get(User, like.user_id)
             likers.append({
                 'user_id': like.user_id,
-                'username': user.username if user else 'unknown',
+                'username': user.name if user else 'unknown',
                 'cost_paid': like.cost_paid,
                 'weight': like.total_weight,
                 'created_at': like.created_at.isoformat(),
             })
 
         return likers
+
+    # ========== Comment Like Methods ==========
+
+    async def get_comment_like_cost(self, comment_id: int) -> int:
+        """Get current like cost for a comment."""
+        comment = await self.db.get(Comment, comment_id)
+        if not comment:
+            raise ValueError(f'Comment {comment_id} not found')
+        return comment_like_cost(comment.likes_count)
+
+    async def like_comment(self, user_id: int, comment_id: int) -> dict:
+        """Like a comment with dynamic pricing and early supporter revenue sharing."""
+        comment = await self.db.get(Comment, comment_id)
+        if not comment:
+            raise ValueError(f'Comment {comment_id} not found')
+
+        if comment.author_id == user_id:
+            raise CannotLikeOwnPost('Cannot like your own comment')
+
+        # Check if already liked
+        existing = await self.db.execute(
+            select(CommentLike).where(
+                CommentLike.comment_id == comment_id,
+                CommentLike.user_id == user_id
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise AlreadyLiked('Already liked this comment')
+
+        user = await self.db.get(User, user_id)
+        if not user:
+            raise ValueError(f'User {user_id} not found')
+
+        # Calculate cost
+        cost = comment_like_cost(comment.likes_count)
+
+        if user.available_balance < cost:
+            raise InsufficientBalance(
+                f'Need {cost} sat but only have {user.available_balance}'
+            )
+
+        # Deduct from user
+        user.available_balance -= cost
+        await self._create_ledger(
+            user_id, -cost, ActionType.SPEND_COMMENT_LIKE,
+            RefType.COMMENT, comment_id, f'liked comment {comment_id}'
+        )
+
+        # Calculate shares
+        author_share = int(cost * AUTHOR_SHARE)
+        early_liker_share = int(cost * EARLY_LIKER_SHARE)
+        platform_share = cost - author_share - early_liker_share
+
+        # Pay comment author (50%)
+        author = await self.db.get(User, comment.author_id)
+        if author and author_share > 0:
+            author.available_balance += author_share
+            await self._create_ledger(
+                comment.author_id, author_share, ActionType.EARN_COMMENT,
+                RefType.COMMENT, comment_id, f'comment like from user {user_id}'
+            )
+
+        # Distribute to early comment likers (40%)
+        early_liker_earnings = await self._distribute_to_early_comment_likers(
+            comment_id, early_liker_share
+        )
+
+        # Platform revenue (10%)
+        await self._add_platform_revenue(platform_share)
+
+        # Calculate weight for this like
+        weight = liker_weight(cost, comment.likes_count + 1)
+
+        # Create like record
+        new_like = CommentLike(
+            comment_id=comment_id,
+            user_id=user_id,
+            cost_paid=cost,
+        )
+        self.db.add(new_like)
+
+        # Update comment like count
+        comment.likes_count += 1
+
+        await self.db.flush()
+
+        return {
+            'cost': cost,
+            'author_share': author_share,
+            'early_liker_share': early_liker_share,
+            'platform_share': platform_share,
+            'weight': weight,
+            'like_rank': comment.likes_count,
+            'early_liker_earnings': early_liker_earnings,
+        }
+
+    async def _distribute_to_early_comment_likers(
+        self,
+        comment_id: int,
+        total_amount: int
+    ) -> list[dict]:
+        """Distribute revenue to previous comment likers based on cost paid."""
+        if total_amount <= 0:
+            return []
+
+        # Get all existing likes
+        result = await self.db.execute(
+            select(CommentLike).where(CommentLike.comment_id == comment_id)
+        )
+        likes = list(result.scalars().all())
+
+        if not likes:
+            await self._add_platform_revenue(total_amount)
+            return []
+
+        # Use cost_paid as weight
+        total_weight = sum(like.cost_paid for like in likes)
+        if total_weight <= 0:
+            await self._add_platform_revenue(total_amount)
+            return []
+
+        earnings = []
+        distributed = 0
+
+        for like in likes:
+            share = int(total_amount * (like.cost_paid / total_weight))
+            if share > 0:
+                liker = await self.db.get(User, like.user_id)
+                if liker:
+                    liker.available_balance += share
+                    await self._create_ledger(
+                        like.user_id, share, ActionType.EARN_COMMENT,
+                        RefType.COMMENT, comment_id, f'early comment supporter dividend'
+                    )
+                    distributed += share
+                    earnings.append({
+                        'user_id': like.user_id,
+                        'share': share,
+                    })
+
+        remainder = total_amount - distributed
+        if remainder > 0:
+            await self._add_platform_revenue(remainder)
+
+        return earnings
+
+    async def unlike_comment(self, user_id: int, comment_id: int) -> bool:
+        """Unlike a comment. No refund."""
+        result = await self.db.execute(
+            select(CommentLike).where(
+                CommentLike.comment_id == comment_id,
+                CommentLike.user_id == user_id
+            )
+        )
+        like = result.scalar_one_or_none()
+
+        if not like:
+            return False
+
+        await self.db.delete(like)
+
+        comment = await self.db.get(Comment, comment_id)
+        if comment and comment.likes_count > 0:
+            comment.likes_count -= 1
+
+        return True

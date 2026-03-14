@@ -8,27 +8,18 @@ from app.models.user import User
 from app.models.post import (
     Post, Comment, PostStatus, PostType, ContentFormat, PostLike, CommentLike, InteractionStatus,
 )
-from datetime import timedelta
-
-LOCK_DURATION_HOURS = 24
 from app.models.ledger import ActionType, RefType, Ledger
 from app.schemas.post import (
     PostCreate, PostUpdate, PostResponse, CommentCreate, CommentResponse,
 )
 from app.schemas.user import UserBrief
-from app.services.ledger_service import LedgerService, InsufficientBalance
+from app.services.ledger_service import LedgerService
 from app.services.dynamic_like_service import (
     DynamicLikeService, like_cost as calc_like_cost,
     AlreadyLiked, CannotLikeOwnPost,
     InsufficientBalance as DynamicInsufficientBalance,
 )
 from app.models.reward import InteractionLog, InteractionType
-
-# Simplified costs - no more dynamic K(trust) multiplier
-BASE_POST_COST = 0  # Free posting in minimal system
-BASE_COMMENT_COST = 20
-BASE_REPLY_COST = 10
-BASE_LIKE_COMMENT_COST = 10
 
 router = APIRouter()
 
@@ -435,9 +426,7 @@ async def create_comment(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a comment / reply / answer. Locked for 24h, then 80% to recipient."""
-    from datetime import datetime
-
+    """Create a comment or reply. FREE in minimal system - earn via likes."""
     post = await db.get(Post, post_id)
     if not post or post.status != PostStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail='Post not found')
@@ -446,87 +435,33 @@ async def create_comment(
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
 
-    # Determine cost - simplified fixed costs
-    is_reply = comment_data.parent_id is not None
-    
-    if is_reply:
-        cost = BASE_REPLY_COST  # 10 sat
-    else:
-        cost = BASE_COMMENT_COST  # 20 sat
-
-    # Validate parent comment and determine recipient
-    recipient_id = post.author_id
+    # Validate parent comment
     if comment_data.parent_id:
         parent = await db.get(Comment, comment_data.parent_id)
         if not parent or parent.post_id != post_id:
             raise HTTPException(status_code=400, detail='Invalid parent comment')
-        # Reply goes to parent comment author
-        recipient_id = parent.author_id
 
-    # Check if commenting on own content
-    is_self = author_id == recipient_id
-
-    ledger = LedgerService(db)
-    now = datetime.utcnow()
-
-    try:
-        if is_self:
-            # Self-comment: just spend, all goes to platform (no lock needed)
-            await ledger.spend(
-                author_id, cost, ActionType.LOCK_COMMENT,
-                ref_type=RefType.COMMENT, ref_id=None,
-            )
-            await ledger._add_platform_revenue(cost, 'comment')
-            interaction_status = InteractionStatus.SETTLED.value
-            locked_until = None
-            final_recipient_id = None
-        else:
-            # Lock funds for 24h
-            await ledger.lock_funds(
-                user_id=author_id,
-                amount=cost,
-                action_type=ActionType.LOCK_COMMENT,
-                ref_type=RefType.COMMENT,
-                ref_id=None,
-            )
-            interaction_status = InteractionStatus.PENDING.value
-            locked_until = now + timedelta(hours=LOCK_DURATION_HOURS)
-            final_recipient_id = recipient_id
-    except InsufficientBalance:
-        raise HTTPException(
-            status_code=402,
-            detail=f'Insufficient balance. Need {cost} sat.',
-        )
-
+    # Comments are FREE - no cost, no lock
     comment = Comment(
         post_id=post_id,
         author_id=author_id,
         content=comment_data.content,
         parent_id=comment_data.parent_id,
-        cost_paid=cost,
-        interaction_status=interaction_status,
-        locked_until=locked_until,
-        recipient_id=final_recipient_id,
+        cost_paid=0,
+        interaction_status=InteractionStatus.SETTLED.value,
+        locked_until=None,
+        recipient_id=None,
     )
     db.add(comment)
     post.comments_count += 1
 
-    # Log interaction with post author
+    # Log interaction
+    is_reply = comment_data.parent_id is not None
     itype = InteractionType.REPLY if is_reply else InteractionType.COMMENT
     await _log_interaction(db, author_id, post.author_id, itype, post_id)
 
     await db.flush()
     await db.refresh(comment)
-
-    # Update ledger ref_id
-    from sqlalchemy import update as sql_update
-    await db.execute(
-        sql_update(Ledger)
-        .where(Ledger.user_id == author_id)
-        .where(Ledger.ref_id.is_(None))
-        .where(Ledger.action_type == ActionType.LOCK_COMMENT.value)
-        .values(ref_id=comment.id)
-    )
 
     return _comment_response(comment, author)
 
@@ -571,7 +506,7 @@ async def delete_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a comment. Only allowed within 24h lock period, with 30% penalty."""
+    """Delete a comment. Comments are free so no refund needed."""
     comment = await db.get(Comment, comment_id)
     if not comment:
         raise HTTPException(status_code=404, detail='Comment not found')
@@ -579,46 +514,43 @@ async def delete_comment(
     if comment.author_id != user_id:
         raise HTTPException(status_code=403, detail='Not authorized to delete this comment')
 
-    # Check if can delete (only PENDING status)
-    if comment.interaction_status == InteractionStatus.SETTLED.value:
-        raise HTTPException(
-            status_code=403,
-            detail='Cannot delete: already settled after 24h lock period',
-        )
-
     if comment.interaction_status == InteractionStatus.CANCELLED.value:
         raise HTTPException(status_code=400, detail='Comment already deleted')
-
-    # Cancel and refund 70% (if not self-comment)
-    refund_amount = 0
-    penalty_amount = 0
-    if comment.cost_paid > 0 and comment.recipient_id:
-        ledger = LedgerService(db)
-        refund_amount, penalty_amount = await ledger.cancel_locked(
-            user_id=user_id,
-            amount=comment.cost_paid,
-            ref_type=RefType.COMMENT,
-            ref_id=comment.id,
-        )
 
     # Update post comment count
     post = await db.get(Post, comment.post_id)
     if post:
         post.comments_count = max(0, post.comments_count - 1)
 
-    # Mark as cancelled (soft delete)
+    # Soft delete
     comment.interaction_status = InteractionStatus.CANCELLED.value
     comment.content = '[deleted]'
-    await db.flush()
+    await db.commit()
 
-    return {
-        'status': 'deleted',
-        'refunded': refund_amount,
-        'penalty': penalty_amount,
-    }
+    return {'status': 'deleted'}
 
 
 # ── Comment Likes ────────────────────────────────────────────────────────────
+
+@router.get('/{post_id}/comments/{comment_id}/like-cost')
+async def get_comment_like_cost(
+    post_id: int,
+    comment_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Get current dynamic like cost for a comment."""
+    from app.services.dynamic_like_service import comment_like_cost
+    
+    comment = await db.get(Comment, comment_id)
+    if not comment or comment.post_id != post_id:
+        raise HTTPException(status_code=404, detail='Comment not found')
+    
+    return {
+        'comment_id': comment_id,
+        'likes_count': comment.likes_count,
+        'like_cost': comment_like_cost(comment.likes_count),
+    }
+
 
 @router.post(
     '/{post_id}/comments/{comment_id}/like',
@@ -630,68 +562,34 @@ async def like_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a comment. Costs 10 sat, locked for 24h then settled."""
-    from datetime import datetime
-
+    """Like a comment with dynamic pricing. 50% author, 40% early likers, 10% platform."""
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
-    if comment.author_id == user_id:
-        raise HTTPException(status_code=400, detail='Cannot like your own comment')
 
-    # Check if already liked
-    existing = await db.execute(
-        select(CommentLike).where(
-            and_(CommentLike.comment_id == comment_id, CommentLike.user_id == user_id)
-        )
-    )
-    if existing.scalar_one_or_none():
-        return {'likes_count': comment.likes_count, 'is_liked': True}
-
-    user = await db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail='User not found')
-
-    cl_cost = BASE_LIKE_COMMENT_COST  # Fixed 10 sat
-    ledger = LedgerService(db)
-
-    # Lock funds for 24h
+    service = DynamicLikeService(db)
     try:
-        await ledger.lock_funds(
-            user_id=user_id,
-            amount=cl_cost,
-            action_type=ActionType.LOCK_LIKE,
-            ref_type=RefType.COMMENT,
-            ref_id=comment_id,
+        result = await service.like_comment(user_id, comment_id)
+        await db.commit()
+        
+        # Log interaction
+        await _log_interaction(
+            db, user_id, comment.author_id, InteractionType.COMMENT_LIKE, comment_id,
         )
-    except InsufficientBalance:
-        raise HTTPException(
-            status_code=402,
-            detail=f'Insufficient balance. Need {cl_cost} sat.',
-        )
-
-    now = datetime.utcnow()
-    like = CommentLike(
-        comment_id=comment_id,
-        user_id=user_id,
-        status=InteractionStatus.PENDING.value,
-        locked_until=now + timedelta(hours=LOCK_DURATION_HOURS),
-        cost_paid=cl_cost,
-        recipient_id=comment.author_id,
-    )
-    db.add(like)
-    comment.likes_count += 1
-    await _log_interaction(
-        db, user_id, comment.author_id, InteractionType.COMMENT_LIKE, comment_id,
-    )
-    await db.flush()
-
-    return {
-        'likes_count': comment.likes_count,
-        'is_liked': True,
-        'cost_locked': cl_cost,
-        'locked_until': like.locked_until.isoformat(),
-    }
+        
+        return {
+            'likes_count': comment.likes_count,
+            'is_liked': True,
+            'cost': result['cost'],
+            'author_share': result['author_share'],
+            'early_liker_share': result['early_liker_share'],
+        }
+    except CannotLikeOwnPost:
+        raise HTTPException(status_code=400, detail='Cannot like your own comment')
+    except AlreadyLiked:
+        return {'likes_count': comment.likes_count, 'is_liked': True}
+    except DynamicInsufficientBalance as e:
+        raise HTTPException(status_code=402, detail=str(e))
 
 
 @router.delete(
@@ -704,48 +602,18 @@ async def unlike_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlike a comment. Only allowed within 24h lock period, with 30% penalty."""
+    """Unlike a comment. No refund in minimal system."""
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
 
-    result = await db.execute(
-        select(CommentLike).where(
-            and_(CommentLike.comment_id == comment_id, CommentLike.user_id == user_id)
-        )
-    )
-    like = result.scalar_one_or_none()
-    if not like:
-        return {'likes_count': comment.likes_count, 'is_liked': False}
-
-    # Check if can cancel (only PENDING status)
-    if like.status == InteractionStatus.SETTLED.value:
-        raise HTTPException(
-            status_code=403,
-            detail='Cannot unlike: already settled after 24h lock period',
-        )
-
-    if like.status == InteractionStatus.CANCELLED.value:
-        return {'likes_count': comment.likes_count, 'is_liked': False}
-
-    # Cancel and refund 70%
-    ledger = LedgerService(db)
-    refund_amount, penalty_amount = await ledger.cancel_locked(
-        user_id=user_id,
-        amount=like.cost_paid,
-        ref_type=RefType.COMMENT_LIKE,
-        ref_id=like.id,
-    )
-
-    await db.delete(like)
-    comment.likes_count = max(0, comment.likes_count - 1)
-    await db.flush()
+    service = DynamicLikeService(db)
+    removed = await service.unlike_comment(user_id, comment_id)
+    await db.commit()
 
     return {
         'likes_count': comment.likes_count,
-        'is_liked': False,
-        'refunded': refund_amount,
-        'penalty': penalty_amount,
+        'is_liked': not removed,
     }
 
 

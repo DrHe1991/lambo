@@ -43,11 +43,8 @@ TEST_USERS = [
 async def wipe_all(db: AsyncSession):
     """Truncate all tables in dependency-safe order."""
     tables = [
-        'challenges',
-        'comment_rewards',
-        'post_rewards',
-        'reward_pools',
         'interaction_logs',
+        'platform_revenue',
         'ledger',
         'comment_likes',
         'post_likes',
@@ -60,7 +57,10 @@ async def wipe_all(db: AsyncSession):
         'users',
     ]
     for table in tables:
-        await db.execute(text(f'TRUNCATE TABLE {table} RESTART IDENTITY CASCADE'))
+        try:
+            await db.execute(text(f'TRUNCATE TABLE {table} RESTART IDENTITY CASCADE'))
+        except Exception:
+            pass  # Table may not exist
     await db.commit()
     print('✓ All tables wiped')
 

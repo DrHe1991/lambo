@@ -1,7 +1,6 @@
 import React from 'react';
 import { Post } from '../types';
-import { Heart, MessageSquare, ShieldAlert, Cpu, FileText, TrendingUp } from 'lucide-react';
-import { getTrustRingClass, getTrustTier } from '../trustTheme';
+import { Heart, MessageSquare, ShieldAlert, Cpu, TrendingUp } from 'lucide-react';
 
 interface PostCardProps {
   post: Post;
@@ -11,13 +10,10 @@ interface PostCardProps {
   onLike?: (post: Post) => void;
   onComment?: (post: Post) => void;
   isLiked?: boolean;
-  likeCost?: number;  // Dynamic like cost from API
+  likeCost?: number;
 }
 
 export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, isLiked, likeCost }) => {
-  const trustTier = getTrustTier(post.author.trustScore);
-  const isOrangeTier = trustTier === 'orange';
-
   return (
     <div 
       data-testid={`post-card-${post.id}`}
@@ -26,15 +22,13 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
     >
       <div className="flex items-start gap-3 mb-3">
         <button
-          className={`w-10 h-10 rounded-full p-[2px] ${getTrustRingClass(post.author.trustScore)} shrink-0 ${
-            isOrangeTier ? 'shadow-[0_0_14px_rgba(249,115,22,0.45)]' : ''
-          }`}
-          onClick={(e) => { e.stopPropagation(); onUserClick?.(post.author.id); }}
+          className="w-10 h-10 rounded-full shrink-0"
+          onClick={(e) => { e.stopPropagation(); onUserClick?.(String(post.author.id)); }}
           aria-label={`View ${post.author.name} profile`}
         >
           <img 
             src={post.author.avatar || `https://i.pravatar.cc/150?u=${encodeURIComponent(post.author.name)}`} 
-            className="w-full h-full rounded-full object-cover border border-zinc-900"
+            className="w-full h-full rounded-full object-cover border-2 border-zinc-700"
             alt={post.author.name}
             onError={(e) => {
               (e.target as HTMLImageElement).src = `https://i.pravatar.cc/150?u=${encodeURIComponent(post.author.name)}`;
@@ -45,7 +39,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           <div className="flex items-center gap-2">
             <span 
               className="font-bold text-sm truncate max-w-[120px]"
-              onClick={(e) => { e.stopPropagation(); onUserClick?.(post.author.id); }}
+              onClick={(e) => { e.stopPropagation(); onUserClick?.(String(post.author.id)); }}
             >
               {post.author.name}
             </span>
@@ -64,14 +58,6 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
         </div>
       </div>
 
-      {post.type === 'Article' && (
-        <div className="mb-2">
-          <span className="inline-flex items-center gap-1 bg-purple-500/20 text-purple-400 text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-tight">
-            <FileText size={10} /> Article
-          </span>
-        </div>
-      )}
-
       {post.type === 'Question' && (
         <div className="mb-2">
           <span className="bg-orange-500 text-white text-[10px] font-black px-2 py-0.5 rounded mr-2 uppercase tracking-tight">
@@ -89,20 +75,26 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
         <h3 className="text-lg font-bold text-white mb-2">{post.title}</h3>
       )}
 
-      <p className="text-zinc-200 text-sm leading-relaxed mb-4 whitespace-pre-wrap">
-        {post.type === 'Article' && post.content.length > 200 
-          ? `${post.content.slice(0, 200).trim()}...`
-          : post.content
-        }
-      </p>
-
-      {post.type === 'Article' && post.content.length > 200 && (
-        <button 
-          className="text-purple-400 text-sm font-medium hover:text-purple-300 mb-3"
-          onClick={(e) => { e.stopPropagation(); onClick?.(post); }}
-        >
-          Read more →
-        </button>
+      {post.type === 'Article' ? (
+        <>
+          <p className="text-zinc-200 text-sm leading-relaxed mb-4">
+            {(() => {
+              // Strip HTML tags for preview
+              const text = post.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+              return text.length > 150 ? `${text.slice(0, 150).trim()}...` : text;
+            })()}
+          </p>
+          <button 
+            className="text-orange-400 text-sm font-medium hover:text-orange-300 mb-3"
+            onClick={(e) => { e.stopPropagation(); onClick?.(post); }}
+          >
+            Read full article →
+          </button>
+        </>
+      ) : (
+        <p className="text-zinc-200 text-sm leading-relaxed mb-4 whitespace-pre-wrap">
+          {post.content}
+        </p>
       )}
 
       <div className="flex items-center justify-between pt-2 border-t border-zinc-800/50">

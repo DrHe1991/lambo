@@ -4,6 +4,7 @@ from app.models.chat import ChatSession, ChatMember, Message
 from app.models.ledger import Ledger
 from app.models.reward import InteractionLog
 from app.models.revenue import PlatformRevenue
+from app.models.draft import Draft
 
 __all__ = [
     'User',
@@ -18,4 +19,5 @@ __all__ = [
     'Ledger',
     'InteractionLog',
     'PlatformRevenue',
+    'Draft',
 ]

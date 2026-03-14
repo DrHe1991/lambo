@@ -56,6 +56,11 @@ class User(Base):
         back_populates='follower',
     )
 
+    # Drafts
+    drafts: Mapped[list['Draft']] = relationship(
+        'Draft', back_populates='author', cascade='all, delete-orphan'
+    )
+
 
 class Follow(Base):
     """Follow relationship between users."""

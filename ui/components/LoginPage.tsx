@@ -137,10 +137,6 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
                       <span className="font-bold text-white block">{user.name}</span>
                       <span className="text-zinc-500 text-sm">@{user.handle}</span>
                     </div>
-                    <div className="text-right">
-                      <span className="text-orange-500 font-bold text-sm">{user.trust_score}</span>
-                      <span className="text-zinc-600 text-xs block">Trust</span>
-                    </div>
                   </button>
                 );
               })}

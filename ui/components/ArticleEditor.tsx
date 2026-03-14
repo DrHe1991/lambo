@@ -1,20 +1,20 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
-import { Bold, Italic, Underline as UnderlineIcon, Link as LinkIcon, Heading1, Heading2, List, ListOrdered, Quote, Undo, Redo } from 'lucide-react';
+import CharacterCount from '@tiptap/extension-character-count';
+import { Bold, Italic, Underline as UnderlineIcon, Link as LinkIcon, Heading1, Heading2, List, ListOrdered, Quote, Undo, Redo, X } from 'lucide-react';
 
 interface ArticleEditorProps {
   title: string;
   content: string;
   onTitleChange: (title: string) => void;
   onContentChange: (content: string) => void;
-  showPreview?: boolean;
-  onTogglePreview?: () => void;
   placeholder?: string;
-  accentColor?: string;
+  editorKey?: number;
+  onRemoveTitle?: () => void;
 }
 
 export const ArticleEditor: React.FC<ArticleEditorProps> = ({
@@ -23,15 +23,19 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
   onTitleChange,
   onContentChange,
   placeholder = 'Write your article...',
-  accentColor = 'orange',
+  editorKey = 0,
+  onRemoveTitle,
 }) => {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3] },
+        bulletList: { keepMarks: true, keepAttributes: false },
+        orderedList: { keepMarks: true, keepAttributes: false },
       }),
       Link.configure({
         openOnClick: false,
+        autolink: true,
         HTMLAttributes: { class: 'text-orange-400 underline cursor-pointer' },
       }),
       Underline,
@@ -39,6 +43,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
       }),
+      CharacterCount,
     ],
     content: content || '',
     onUpdate: ({ editor }) => {
@@ -49,12 +54,32 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
         class: 'outline-none min-h-[250px] px-1',
       },
     },
-  });
+  }, [editorKey]);
+
+  useEffect(() => {
+    if (editor && content === '' && editor.getHTML() !== '<p></p>') {
+      editor.commands.clearContent();
+    }
+  }, [content, editor]);
 
   const addLink = () => {
-    const url = window.prompt('Enter URL:');
-    if (url && editor) {
-      editor.chain().focus().setLink({ href: url }).run();
+    if (!editor) return;
+    
+    const previousUrl = editor.getAttributes('link').href;
+    const url = window.prompt('Enter URL:', previousUrl || 'https://');
+    
+    if (url === null) return;
+    
+    if (url === '') {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      return;
+    }
+    
+    const { from, to } = editor.state.selection;
+    if (from === to) {
+      editor.chain().focus().insertContent(`<a href="${url}">${url}</a>`).run();
+    } else {
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
     }
   };
 
@@ -86,20 +111,31 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
     </button>
   );
 
-  const isOrange = accentColor === 'orange';
-  const borderClass = isOrange ? 'border-orange-500/30 focus-within:border-orange-500/60' : 'border-zinc-700';
+  const charCount = editor?.storage.characterCount?.characters() ?? 0;
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Title input */}
-      <input
-        type="text"
-        value={title}
-        onChange={(e) => onTitleChange(e.target.value)}
-        placeholder="Article title"
-        className={`w-full bg-zinc-900/50 border rounded-xl px-4 py-3 text-lg font-bold outline-none placeholder:text-zinc-600 ${borderClass}`}
-        maxLength={200}
-      />
+      {/* Title input with remove button */}
+      <div className="relative">
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => onTitleChange(e.target.value)}
+          placeholder="Article title"
+          className="w-full bg-zinc-900/50 border border-orange-500/30 focus-within:border-orange-500/60 rounded-xl px-4 py-3 pr-10 text-lg font-bold outline-none placeholder:text-zinc-600"
+          maxLength={200}
+        />
+        {onRemoveTitle && (
+          <button
+            type="button"
+            onClick={onRemoveTitle}
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-orange-400 transition-colors"
+            title="Remove title"
+          >
+            <X size={16} />
+          </button>
+        )}
+      </div>
 
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-0.5 p-2 bg-zinc-900/50 rounded-xl border border-zinc-800">
@@ -201,19 +237,21 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
       </div>
 
       {/* WYSIWYG Editor */}
-      <div className={`bg-zinc-900/30 border rounded-xl p-4 ${borderClass}`}>
+      <div className="bg-zinc-900/30 border border-orange-500/30 focus-within:border-orange-500/60 rounded-xl p-4">
         <EditorContent 
           editor={editor} 
-          className="prose prose-invert prose-sm max-w-none 
-            prose-headings:text-white prose-headings:font-bold prose-headings:mt-4 prose-headings:mb-2
-            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
-            prose-p:text-zinc-300 prose-p:my-2
-            prose-strong:text-orange-400 
-            prose-em:text-zinc-200
-            prose-a:text-orange-400 prose-a:no-underline hover:prose-a:underline
-            prose-blockquote:border-l-orange-500 prose-blockquote:bg-zinc-800/50 prose-blockquote:py-1 prose-blockquote:px-4 prose-blockquote:rounded-r-lg prose-blockquote:text-zinc-400 prose-blockquote:not-italic
-            prose-ul:text-zinc-300 prose-ol:text-zinc-300
-            prose-li:my-0.5
+          className="prose prose-invert max-w-none 
+            [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:text-white [&_h1]:mt-4 [&_h1]:mb-2
+            [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-white [&_h2]:mt-3 [&_h2]:mb-2
+            [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-white [&_h3]:mt-2 [&_h3]:mb-1
+            [&_p]:text-zinc-300 [&_p]:my-2 [&_p]:text-base
+            [&_strong]:text-orange-400 
+            [&_em]:text-zinc-200
+            [&_a]:text-orange-400 [&_a]:underline
+            [&_blockquote]:border-l-2 [&_blockquote]:border-orange-500 [&_blockquote]:bg-zinc-800/50 [&_blockquote]:py-2 [&_blockquote]:px-4 [&_blockquote]:rounded-r-lg [&_blockquote]:text-zinc-400 [&_blockquote]:my-3
+            [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ul]:text-zinc-300
+            [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_ol]:text-zinc-300
+            [&_li]:my-1 [&_li]:text-zinc-300 [&_li_p]:my-0
             [&_.is-editor-empty:first-child::before]:text-zinc-600 [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:pointer-events-none
           "
         />
@@ -221,10 +259,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
 
       {/* Character count */}
       <div className="flex items-center justify-between text-xs text-zinc-500">
-        <span>{editor?.storage.characterCount?.characters?.() ?? content.length} characters</span>
-        {(editor?.storage.characterCount?.characters?.() ?? content.length) < 100 && (
-          <span className="text-orange-400">Minimum 100 characters for articles</span>
-        )}
+        <span>{charCount} characters</span>
       </div>
     </div>
   );

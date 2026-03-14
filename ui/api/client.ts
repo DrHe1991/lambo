@@ -1,7 +1,7 @@
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001';
 
 interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   params?: Record<string, string | number | undefined>;
 }
@@ -46,40 +46,18 @@ export interface ApiUser {
   name: string;
   handle: string;
   avatar: string | null;
-  trust_score: number;
   bio?: string | null;
   created_at?: string;
   available_balance?: number;
-  free_posts_remaining?: number;
   followers_count?: number;
   following_count?: number;
   is_following?: boolean;
-  creator_score?: number;
-  curator_score?: number;
-  juror_score?: number;
-  risk_score?: number;
-}
-
-export interface ApiTrustBreakdown {
-  user_id: number;
-  trust_score: number;
-  tier: string;
-  fee_multiplier: number;
-  creator_score: number;
-  curator_score: number;
-  juror_score: number;
-  risk_score: number;
 }
 
 export interface ApiUserCosts {
   user_id: number;
-  trust_score: number;
-  tier: string;
-  fee_multiplier: number;
   costs: {
     post: number;
-    question: number;
-    answer: number;
     comment: number;
     reply: number;
     like_post: number;
@@ -243,6 +221,17 @@ export interface ApiMessage {
 
 // Reward, Challenge, and Boost types removed in minimal system
 
+export interface ApiDraft {
+  id: number;
+  post_type: 'note' | 'article' | 'question';
+  title: string | null;
+  content: string;
+  bounty: number | null;
+  has_title: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 // API methods
 export const api = {
   // Users
@@ -289,9 +278,6 @@ export const api = {
 
   getLedger: (userId: number, limit = 50, offset = 0) =>
     apiRequest<ApiLedgerEntry[]>(`/api/users/${userId}/ledger`, { params: { limit, offset } }),
-
-  getTrustBreakdown: (userId: number) =>
-    apiRequest<ApiTrustBreakdown>(`/api/users/${userId}/trust`),
 
   getUserCosts: (userId: number) =>
     apiRequest<ApiUserCosts>(`/api/users/${userId}/costs`),
@@ -525,4 +511,29 @@ export const api = {
     }),
 
   // Rewards, Challenges, and Boost removed in minimal system
+
+  // Drafts
+  getDrafts: (userId: number) =>
+    apiRequest<ApiDraft[]>('/api/drafts', { params: { user_id: userId } }),
+
+  createDraft: (userId: number, data: {
+    post_type: string;
+    title?: string;
+    content: string;
+    bounty?: number;
+    has_title: boolean;
+  }) =>
+    apiRequest<ApiDraft>('/api/drafts', { method: 'POST', body: data, params: { user_id: userId } }),
+
+  updateDraft: (draftId: number, userId: number, data: {
+    post_type?: string;
+    title?: string;
+    content?: string;
+    bounty?: number;
+    has_title?: boolean;
+  }) =>
+    apiRequest<ApiDraft>(`/api/drafts/${draftId}`, { method: 'PUT', body: data, params: { user_id: userId } }),
+
+  deleteDraft: (draftId: number, userId: number) =>
+    apiRequest<void>(`/api/drafts/${draftId}`, { method: 'DELETE', params: { user_id: userId } }),
 };

@@ -5,7 +5,6 @@ export interface User {
   name: string;
   handle: string;
   avatar: string | null;
-  trustScore: number;
   isFollowing?: boolean;
   bio?: string | null;
   followers_count?: number;
@@ -80,7 +79,6 @@ export function apiUserToUser(apiUser: {
   name: string;
   handle: string;
   avatar: string | null;
-  trust_score: number;
   is_following?: boolean;
   bio?: string | null;
   followers_count?: number;
@@ -91,7 +89,6 @@ export function apiUserToUser(apiUser: {
     name: apiUser.name,
     handle: apiUser.handle.startsWith('@') ? apiUser.handle : `@${apiUser.handle}`,
     avatar: apiUser.avatar || `https://i.pravatar.cc/150?u=${encodeURIComponent(apiUser.name)}`,
-    trustScore: apiUser.trust_score,
     isFollowing: apiUser.is_following,
     bio: apiUser.bio,
     followers_count: apiUser.followers_count,

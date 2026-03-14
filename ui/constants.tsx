@@ -6,18 +6,17 @@ export const MOCK_ME: User = {
   name: 'Satoshi Nakamoto',
   handle: '@satoshi',
   avatar: 'https://picsum.photos/id/64/200/200',
-  trustScore: 98,
   isFollowing: false
 };
 
 export const MOCK_USERS: User[] = [
-  { id: '1', name: 'Vitalik', handle: '@vbuterin', avatar: 'https://picsum.photos/id/1/200/200', trustScore: 95, isFollowing: true },
-  { id: '2', name: 'Jack', handle: '@jack', avatar: 'https://picsum.photos/id/2/200/200', trustScore: 68, isFollowing: false },
-  { id: '3', name: 'Elena', handle: '@elen_a', avatar: 'https://picsum.photos/id/3/200/200', trustScore: 55, isFollowing: true },
-  { id: '4', name: 'Nova', handle: '@nova_builds', avatar: 'https://picsum.photos/id/11/200/200', trustScore: 28, isFollowing: false },
-  { id: '5', name: 'Aiden', handle: '@aiden_l2', avatar: 'https://picsum.photos/id/12/200/200', trustScore: 73, isFollowing: true },
-  { id: '6', name: 'Mira', handle: '@mira_alpha', avatar: 'https://picsum.photos/id/13/200/200', trustScore: 84, isFollowing: false },
-  { id: '7', name: 'Orion', handle: '@orion_prime', avatar: 'https://picsum.photos/id/14/200/200', trustScore: 97, isFollowing: true },
+  { id: '1', name: 'Vitalik', handle: '@vbuterin', avatar: 'https://picsum.photos/id/1/200/200', isFollowing: true },
+  { id: '2', name: 'Jack', handle: '@jack', avatar: 'https://picsum.photos/id/2/200/200', isFollowing: false },
+  { id: '3', name: 'Elena', handle: '@elen_a', avatar: 'https://picsum.photos/id/3/200/200', isFollowing: true },
+  { id: '4', name: 'Nova', handle: '@nova_builds', avatar: 'https://picsum.photos/id/11/200/200', isFollowing: false },
+  { id: '5', name: 'Aiden', handle: '@aiden_l2', avatar: 'https://picsum.photos/id/12/200/200', isFollowing: true },
+  { id: '6', name: 'Mira', handle: '@mira_alpha', avatar: 'https://picsum.photos/id/13/200/200', isFollowing: false },
+  { id: '7', name: 'Orion', handle: '@orion_prime', avatar: 'https://picsum.photos/id/14/200/200', isFollowing: true },
 ];
 
 export const MOCK_POSTS: Post[] = [
