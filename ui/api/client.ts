@@ -232,6 +232,61 @@ export interface ApiDraft {
   updated_at: string;
 }
 
+// Crypto/Pay types
+export interface CryptoBalance {
+  token_symbol: string;
+  balance: number;
+  balance_formatted: string;
+}
+
+export interface CryptoBalanceResponse {
+  balances: CryptoBalance[];
+}
+
+export interface DepositAddress {
+  chain: string;
+  address: string;
+}
+
+export interface CryptoDeposit {
+  id: number;
+  chain: string;
+  tx_hash: string;
+  token_symbol: string;
+  amount: number;
+  amount_formatted: string;
+  status: string;
+  confirmations: number;
+  created_at: string;
+}
+
+export interface CryptoDepositsResponse {
+  deposits: CryptoDeposit[];
+}
+
+export interface CryptoWithdrawal {
+  id: number;
+  chain: string;
+  to_address: string;
+  token_symbol: string;
+  amount: number;
+  amount_formatted: string;
+  status: string;
+  tx_hash: string | null;
+  created_at: string;
+}
+
+export interface CryptoWithdrawalsResponse {
+  withdrawals: CryptoWithdrawal[];
+}
+
+export interface WithdrawalRequest {
+  to_address: string;
+  amount: number;
+  chain?: string;
+  token_symbol?: string;
+}
+
 // API methods
 export const api = {
   // Users
@@ -536,4 +591,24 @@ export const api = {
 
   deleteDraft: (draftId: number, userId: number) =>
     apiRequest<void>(`/api/drafts/${draftId}`, { method: 'DELETE', params: { user_id: userId } }),
+
+  // Pay / Crypto
+  getDepositAddress: (userId: number, chain = 'tron') =>
+    apiRequest<DepositAddress>('/api/pay/address', { params: { user_id: userId, chain } }),
+
+  getCryptoBalance: (userId: number) =>
+    apiRequest<CryptoBalanceResponse>('/api/pay/balance', { params: { user_id: userId } }),
+
+  getCryptoDeposits: (userId: number, limit = 50, offset = 0) =>
+    apiRequest<CryptoDepositsResponse>('/api/pay/deposits', { params: { user_id: userId, limit, offset } }),
+
+  requestWithdrawal: (userId: number, data: WithdrawalRequest) =>
+    apiRequest<CryptoWithdrawal>('/api/pay/withdraw', {
+      method: 'POST',
+      body: data,
+      params: { user_id: userId },
+    }),
+
+  getCryptoWithdrawals: (userId: number, limit = 50, offset = 0) =>
+    apiRequest<CryptoWithdrawalsResponse>('/api/pay/withdrawals', { params: { user_id: userId, limit, offset } }),
 };

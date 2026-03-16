@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_ME } from './constants';
-import { useUserStore, usePostStore, useChatStore } from './stores';
+import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText } from 'lucide-react';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 // TrustBadge removed - trust system simplified
 import { LoginPage } from './components/LoginPage';
@@ -13,12 +13,14 @@ import { LikeStakeModal } from './components/LikeStakeModal';
 import { ToastContainer, toast } from './components/Toast';
 import { ArticleEditor } from './components/ArticleEditor';
 import { ArticleRenderer } from './components/ArticleRenderer';
+import { DepositView } from './components/DepositView';
+import { WithdrawView } from './components/WithdrawView';
 // Trust theme removed - trust system simplified
 import { ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest, ApiDraft } from './api/client';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
 
 // Views
-type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP';
+type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW';
 
 // Avatar fallback - real human photos via Pravatar, seeded by name hash for consistency
 const getAvatarUrl = (avatar: string | null | undefined, name: string): string => {
@@ -77,6 +79,11 @@ const App: React.FC = () => {
     markSessionAsRead,
     updateSessionLastMessage,
   } = useChatStore();
+
+  const {
+    cryptoBalances,
+    fetchCryptoBalance,
+  } = useWalletStore();
 
   // Convert API data to UI format (no mock fallbacks)
   const posts: Post[] = apiPosts.map(apiPostToPost);
@@ -420,6 +427,15 @@ const App: React.FC = () => {
       fetchFeed(currentUser.id);
       fetchSessions(currentUser.id);
       fetchUserCosts(currentUser.id);
+    }
+  }, [isLoggedIn, currentUser?.id]);
+
+  // Fetch crypto balance when logged in
+  useEffect(() => {
+    if (isLoggedIn && currentUser) {
+      fetchCryptoBalance(currentUser.id).catch(() => {
+        // Silently fail - pay service may not be available
+      });
     }
   }, [isLoggedIn, currentUser?.id]);
 
@@ -1044,6 +1060,44 @@ const App: React.FC = () => {
               {change24h > 0 ? '+' : ''}{change24h.toLocaleString()} <span className="text-[10px] text-zinc-500">24h</span>
             </span>
           )}
+        </div>
+      </div>
+
+      {/* Crypto Wallet Section */}
+      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-zinc-500 text-[10px] font-bold uppercase">Crypto Wallet</span>
+          <span className="text-zinc-600 text-[10px]">TRON Testnet</span>
+        </div>
+        <div className="space-y-2 mb-4">
+          {cryptoBalances.length > 0 ? (
+            cryptoBalances.map((bal) => (
+              <div key={bal.token_symbol} className="flex items-center justify-between">
+                <span className="text-zinc-400 text-sm font-medium">{bal.token_symbol}</span>
+                <span className="text-zinc-100 font-bold">{bal.balance_formatted}</span>
+              </div>
+            ))
+          ) : (
+            <div className="text-zinc-500 text-sm text-center py-2">
+              No crypto balance yet
+            </div>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setCurrentView('DEPOSIT')}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-colors"
+          >
+            <Download size={16} />
+            <span>Deposit</span>
+          </button>
+          <button
+            onClick={() => setCurrentView('WITHDRAW')}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold rounded-xl border border-zinc-700 transition-colors"
+          >
+            <Upload size={16} />
+            <span>Withdraw</span>
+          </button>
         </div>
       </div>
 
@@ -3432,6 +3486,8 @@ const App: React.FC = () => {
       {currentView === 'GROUP_CHAT' && renderGroupChat()}
       {currentView === 'SCAN' && renderScan()}
       {currentView === 'SETTINGS' && renderSettings()}
+      {currentView === 'DEPOSIT' && <DepositView onBack={() => setCurrentView('MAIN')} />}
+      {currentView === 'WITHDRAW' && <WithdrawView onBack={() => setCurrentView('MAIN')} />}
       
       {/* Inline Comment Sheet */}
       {renderInlineCommentSheet()}

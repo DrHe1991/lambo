@@ -29,6 +29,9 @@ class User(Base):
     # Sat balance (Spend & Earn)
     available_balance: Mapped[int] = mapped_column(BigInteger, default=0)
 
+    # Pay service wallet ID (for crypto deposits/withdrawals)
+    pay_wallet_id: Mapped[int | None] = mapped_column(Integer, default=None)
+
     # Every new user gets 1 free public post
     free_posts_remaining: Mapped[int] = mapped_column(Integer, default=1)
 

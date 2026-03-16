@@ -181,4 +181,26 @@ test.describe('UI Screenshot Capture', () => {
       console.log('Following not found');
     }
   });
+
+  test('09 - crypto deposit', async ({ page }) => {
+    if (!await login(page)) return;
+    await clickIfVisible(page, '[data-testid="nav-profile"]');
+    await page.waitForTimeout(500);
+
+    if (await clickIfVisible(page, 'button:has-text("Deposit")')) {
+      await page.waitForTimeout(1500);
+      await capture(page, '13-crypto-deposit');
+    }
+  });
+
+  test('10 - crypto withdraw', async ({ page }) => {
+    if (!await login(page)) return;
+    await clickIfVisible(page, '[data-testid="nav-profile"]');
+    await page.waitForTimeout(500);
+
+    if (await clickIfVisible(page, 'button:has-text("Withdraw")')) {
+      await page.waitForTimeout(1000);
+      await capture(page, '14-crypto-withdraw');
+    }
+  });
 });

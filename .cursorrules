@@ -27,6 +27,38 @@
 - Use single quotes for strings
 - Use semicolons at end of statements
 
+## Frontend Testing (Playwright)
+- Test file: `ui/tests/screenshot-capture.spec.ts`
+- Screenshots dir: `~/Desktop/bitlink-screenshots/`
+- Dev server: `http://localhost:3003`
+- Run tests: `cd ui && npx playwright test screenshot-capture`
+- Run specific: `cd ui && npx playwright test --grep "crypto"`
+
+### Available Helpers
+- `capture(page, name)` - Take screenshot, saves to `{name}.png`
+- `clickIfVisible(page, selector, timeout?)` - Safe click, returns boolean
+- `login(page)` - Login with first user, returns boolean
+- `backToMain(page)` - Navigate back to feed tab
+
+### Adding New Tests
+```typescript
+test('XX - view name', async ({ page }) => {
+  if (!await login(page)) return;
+  await clickIfVisible(page, '[data-testid="nav-profile"]');
+  await page.waitForTimeout(500);
+  
+  if (await clickIfVisible(page, 'button:has-text("Button Text")')) {
+    await page.waitForTimeout(500);
+    await capture(page, 'XX-view-name');
+  }
+});
+```
+
+### Screenshot Naming
+- Use numbered prefix: `01-login-page.png`, `02-feed.png`, etc.
+- New views continue sequence: `13-crypto-deposit.png`, `14-crypto-withdraw.png`
+- Feature-specific: `inline-comment.png`, `search-results.png`
+
 ## Naming Conventions
 - Python: snake_case for functions/variables, PascalCase for classes
 - TypeScript: camelCase for functions/variables, PascalCase for components

@@ -30,6 +30,8 @@ Key views and how to reach them:
 - `05-profile.png` — Me tab
 - `07-post-detail.png` — click a post
 - `10-trust-detail.png` — Profile > Trust Score
+- `13-crypto-deposit.png` — Profile > Deposit button
+- `14-crypto-withdraw.png` — Profile > Withdraw button
 
 ## Step 3: Read the screenshot, identify the issue
 
@@ -68,6 +70,9 @@ Core views use numbered prefixes so they sort naturally:
 | New post editor | `09-new-post-editor.png` |
 | Post detail | `10-post-detail.png` |
 | Followers list | `11-followers-list.png` |
+| Following list | `12-following-list.png` |
+| Crypto deposit | `13-crypto-deposit.png` |
+| Crypto withdraw | `14-crypto-withdraw.png` |
 
 Feature-specific screenshots use plain descriptive names:
 - `inline-comment.png` — comment input popup on feed

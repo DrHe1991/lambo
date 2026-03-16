@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ''
     groq_api_key: str = ''
 
+    # Pay Service
+    pay_service_url: str = 'http://pay:8000'
+    pay_app_id: int = 1
+
     class Config:
         env_file = '.env'
         extra = 'ignore'
