@@ -3,7 +3,7 @@ import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionT
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload } from 'lucide-react';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload, RefreshCw } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 // TrustBadge removed - trust system simplified
 import { LoginPage } from './components/LoginPage';
@@ -15,12 +15,13 @@ import { ArticleEditor } from './components/ArticleEditor';
 import { ArticleRenderer } from './components/ArticleRenderer';
 import { DepositView } from './components/DepositView';
 import { WithdrawView } from './components/WithdrawView';
+import { ExchangeView } from './components/ExchangeView';
 // Trust theme removed - trust system simplified
 import { ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest, ApiDraft } from './api/client';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
 
 // Views
-type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW';
+type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW' | 'EXCHANGE';
 
 // Avatar fallback - real human photos via Pravatar, seeded by name hash for consistency
 const getAvatarUrl = (avatar: string | null | undefined, name: string): string => {
@@ -83,6 +84,8 @@ const App: React.FC = () => {
   const {
     cryptoBalances,
     fetchCryptoBalance,
+    stableBalance,
+    fetchUserBalances,
   } = useWalletStore();
 
   // Convert API data to UI format (no mock fallbacks)
@@ -433,9 +436,8 @@ const App: React.FC = () => {
   // Fetch crypto balance when logged in
   useEffect(() => {
     if (isLoggedIn && currentUser) {
-      fetchCryptoBalance(currentUser.id).catch(() => {
-        // Silently fail - pay service may not be available
-      });
+      fetchCryptoBalance(currentUser.id).catch(() => {});
+      fetchUserBalances(currentUser.id).catch(() => {});
     }
   }, [isLoggedIn, currentUser?.id]);
 
@@ -1052,50 +1054,44 @@ const App: React.FC = () => {
       </div>
 
       <div data-testid="balance-card" className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
-        <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Balance</span>
-        <div className="flex items-baseline justify-between">
-          <span data-testid="balance-amount" className="text-2xl font-black text-zinc-100">{availableBalance.toLocaleString()} <span className="text-orange-500 text-sm">sat</span></span>
-          {change24h !== 0 && (
-            <span className={`text-sm font-bold ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
-              {change24h > 0 ? '+' : ''}{change24h.toLocaleString()} <span className="text-[10px] text-zinc-500">24h</span>
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Crypto Wallet Section */}
-      <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
         <div className="flex items-center justify-between mb-3">
-          <span className="text-zinc-500 text-[10px] font-bold uppercase">Crypto Wallet</span>
-          <span className="text-zinc-600 text-[10px]">TRON Testnet</span>
-        </div>
-        <div className="space-y-2 mb-4">
-          {cryptoBalances.length > 0 ? (
-            cryptoBalances.map((bal) => (
-              <div key={bal.token_symbol} className="flex items-center justify-between">
-                <span className="text-zinc-400 text-sm font-medium">{bal.token_symbol}</span>
-                <span className="text-zinc-100 font-bold">{bal.balance_formatted}</span>
-              </div>
-            ))
-          ) : (
-            <div className="text-zinc-500 text-sm text-center py-2">
-              No crypto balance yet
+          <div>
+            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Balance</span>
+            <div className="flex items-baseline gap-1">
+              <span data-testid="balance-amount" className="text-2xl font-black text-zinc-100">{availableBalance.toLocaleString()}</span>
+              <span className="text-orange-500 text-sm font-bold">sat</span>
+              {change24h !== 0 && (
+                <span className={`text-xs font-bold ml-2 ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  {change24h > 0 ? '+' : ''}{change24h.toLocaleString()}
+                </span>
+              )}
             </div>
-          )}
+          </div>
+          <div className="text-right">
+            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">USDT</span>
+            <span className="text-xl font-black text-zinc-100">${(stableBalance / 1_000_000).toFixed(2)}</span>
+          </div>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setCurrentView('DEPOSIT')}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-xl transition-colors"
           >
-            <Download size={16} />
+            <Download size={14} />
             <span>Deposit</span>
           </button>
           <button
-            onClick={() => setCurrentView('WITHDRAW')}
-            className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 font-bold rounded-xl border border-zinc-700 transition-colors"
+            onClick={() => setCurrentView('EXCHANGE')}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-orange-400 text-xs font-semibold rounded-xl border border-orange-500/30 transition-colors"
           >
-            <Upload size={16} />
+            <RefreshCw size={14} />
+            <span>Exchange</span>
+          </button>
+          <button
+            onClick={() => setCurrentView('WITHDRAW')}
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-semibold rounded-xl border border-zinc-700 transition-colors"
+          >
+            <Upload size={14} />
             <span>Withdraw</span>
           </button>
         </div>
@@ -1592,6 +1588,9 @@ const App: React.FC = () => {
         challenge_reward: 'Challenge Reward',
         deposit: 'Deposit',
         withdraw: 'Withdraw',
+        exchange_buy_sat: 'USDT → sat',
+        exchange_sell_sat: 'sat → USDT',
+        exchange_bonus: 'Exchange Bonus',
       };
       return map[t] || t;
     };
@@ -3488,6 +3487,7 @@ const App: React.FC = () => {
       {currentView === 'SETTINGS' && renderSettings()}
       {currentView === 'DEPOSIT' && <DepositView onBack={() => setCurrentView('MAIN')} />}
       {currentView === 'WITHDRAW' && <WithdrawView onBack={() => setCurrentView('MAIN')} />}
+      {currentView === 'EXCHANGE' && <ExchangeView onBack={() => setCurrentView('MAIN')} />}
       
       {/* Inline Comment Sheet */}
       {renderInlineCommentSheet()}

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, BigInteger
+from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, BigInteger, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -29,8 +29,16 @@ class User(Base):
     # Sat balance (Spend & Earn)
     available_balance: Mapped[int] = mapped_column(BigInteger, default=0)
 
+    # Stablecoin balance (USDT, 6 decimals)
+    stable_balance: Mapped[int] = mapped_column(BigInteger, default=0)
+
     # Pay service wallet ID (for crypto deposits/withdrawals)
     pay_wallet_id: Mapped[int | None] = mapped_column(Integer, default=None)
+
+    # First exchange bonus tracking
+    first_deposit_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    first_exchange_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    welcome_bonus_claimed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Every new user gets 1 free public post
     free_posts_remaining: Mapped[int] = mapped_column(Integer, default=1)

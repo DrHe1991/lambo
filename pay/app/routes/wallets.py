@@ -24,15 +24,18 @@ TOKEN_DECIMALS = {
     'USDC': 6,
     'ETH': 18,
     'BTC': 8,
+    'SAT': 0,
 }
 
 
 def format_amount(amount: int, decimals: int = 6) -> str:
     """Format amount with proper decimal places."""
     if amount == 0:
-        return '0.00'
+        return '0' if decimals == 0 else '0.00'
     sign = '-' if amount < 0 else ''
     abs_amount = abs(amount)
+    if decimals == 0:
+        return f'{sign}{abs_amount}'
     integer_part = abs_amount // (10 ** decimals)
     decimal_part = abs_amount % (10 ** decimals)
     return f'{sign}{integer_part}.{str(decimal_part).zfill(decimals)[:2]}'

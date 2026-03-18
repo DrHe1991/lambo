@@ -49,6 +49,11 @@ class ActionType(str, Enum):
     REFUND_CANCEL = 'refund_cancel'  # Refund 70% on cancel
     PENALTY_CANCEL = 'penalty_cancel'  # 30% penalty on cancel
 
+    # Exchange actions (USDT <-> sat)
+    EXCHANGE_BUY_SAT = 'exchange_buy_sat'    # USDT -> sat
+    EXCHANGE_SELL_SAT = 'exchange_sell_sat'  # sat -> USDT
+    EXCHANGE_BONUS = 'exchange_bonus'        # First exchange bonus
+
 
 class RefType(str, Enum):
     """What entity a ledger entry references."""

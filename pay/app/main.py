@@ -4,8 +4,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routes import apps, wallets, deposits, withdrawals
+from app.routes import apps, wallets, deposits, withdrawals, exchange
 from app.services.monitor import start_monitor, stop_monitor
+from app.services.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,12 +19,14 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: start deposit monitor
+    # Startup: start deposit monitor and scheduler
     logger.info('Starting Pay Service...')
     await start_monitor()
+    start_scheduler()
     yield
-    # Shutdown: stop monitor
+    # Shutdown: stop monitor and scheduler
     logger.info('Shutting down Pay Service...')
+    stop_scheduler()
     await stop_monitor()
 
 
@@ -47,6 +50,7 @@ app.include_router(apps.router, prefix='/apps', tags=['Apps'])
 app.include_router(wallets.router, prefix='/wallets', tags=['Wallets'])
 app.include_router(deposits.router, prefix='/deposits', tags=['Deposits'])
 app.include_router(withdrawals.router, prefix='/withdrawals', tags=['Withdrawals'])
+app.include_router(exchange.router, prefix='/exchange', tags=['Exchange'])
 
 
 @app.get('/health')

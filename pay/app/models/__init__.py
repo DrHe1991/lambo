@@ -3,6 +3,15 @@ from app.models.wallet import Wallet, WalletBalance, DepositAddress, Chain
 from app.models.deposit import Deposit, DepositStatus
 from app.models.withdrawal import Withdrawal, WithdrawalStatus
 from app.models.ledger import PayLedger, LedgerAction
+from app.models.exchange import (
+    ExchangeQuota,
+    ExchangePreview,
+    Exchange,
+    RebalanceLog,
+    ReserveSnapshot,
+    ExchangeDirection,
+    ExchangeStatus,
+)
 
 __all__ = [
     'App',
@@ -16,4 +25,11 @@ __all__ = [
     'WithdrawalStatus',
     'PayLedger',
     'LedgerAction',
+    'ExchangeQuota',
+    'ExchangePreview',
+    'Exchange',
+    'RebalanceLog',
+    'ReserveSnapshot',
+    'ExchangeDirection',
+    'ExchangeStatus',
 ]

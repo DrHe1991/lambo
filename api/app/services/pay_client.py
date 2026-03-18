@@ -200,6 +200,85 @@ class PayClient:
             params={'limit': limit, 'offset': offset},
         )
 
+    # Exchange methods
+    async def get_btc_price(self) -> dict:
+        """Get current BTC price."""
+        return await self._request('GET', '/exchange/price')
+
+    async def get_exchange_quota(self) -> dict:
+        """Get current exchange quotas."""
+        return await self._request('GET', '/exchange/quota')
+
+    async def get_chain_fees(self) -> list:
+        """Get network fees per chain."""
+        return await self._request('GET', '/exchange/chain-fees')
+
+    async def create_exchange_preview(
+        self,
+        wallet_id: int,
+        amount: int,
+        direction: str,
+        include_bonus: bool = False,
+        is_first_exchange: bool = False,
+    ) -> dict:
+        """
+        Create an exchange preview (30s valid).
+
+        Args:
+            wallet_id: Pay wallet ID
+            amount: USDT (6 decimals) for buy_sat, sat for sell_sat
+            direction: 'buy_sat' or 'sell_sat'
+            include_bonus: Whether to include first exchange bonus
+            is_first_exchange: Whether this is user's first exchange
+
+        Returns:
+            Preview data with amounts and expiry
+        """
+        return await self._request(
+            'POST',
+            '/exchange/preview',
+            json={
+                'wallet_id': wallet_id,
+                'amount': amount,
+                'direction': direction,
+                'include_bonus': include_bonus,
+                'is_first_exchange': is_first_exchange,
+            },
+        )
+
+    async def confirm_exchange(self, preview_id: str, wallet_id: int) -> dict:
+        """
+        Confirm and execute an exchange.
+
+        Args:
+            preview_id: Preview ID from create_exchange_preview
+            wallet_id: Pay wallet ID
+
+        Returns:
+            Exchange result data
+        """
+        return await self._request(
+            'POST',
+            '/exchange/confirm',
+            json={
+                'preview_id': preview_id,
+                'wallet_id': wallet_id,
+            },
+        )
+
+    async def get_exchange_history(
+        self,
+        wallet_id: int,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """Get exchange history for a wallet."""
+        return await self._request(
+            'GET',
+            '/exchange/history',
+            params={'wallet_id': wallet_id, 'limit': limit, 'offset': offset},
+        )
+
 
 # Singleton instance
 _pay_client: Optional[PayClient] = None

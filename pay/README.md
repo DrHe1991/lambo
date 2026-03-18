@@ -1,15 +1,18 @@
 # Pay Service - Web3 Payment Gateway
 
-A standalone, extensible Web3 payment gateway supporting multi-chain deposits and withdrawals.
+A standalone, extensible Web3 payment gateway supporting multi-chain deposits, withdrawals, and CEX-backed USDT ↔ sat exchange.
 
 ## Features
 
 - **HD Wallet Address Generation**: Unique deposit addresses per user using BIP32/BIP44
-- **Multi-Chain Support**: Starting with TRON (USDT), extensible to ETH, BSC, Solana, Bitcoin
+- **Multi-Chain Support**: Starting with TRON (USDT), extensible to ETH, BSC, Polygon
 - **Real-time Deposit Monitoring**: Background worker polls blockchain for deposits
 - **Balance Management**: Automatic crediting after confirmation threshold
 - **Withdrawal Processing**: Queue-based withdrawal with signature support
 - **Multi-App Support**: Multiple applications can use the same payment gateway
+- **CEX Reserve Exchange**: USDT ↔ sat exchange backed by centralized exchange reserves
+- **Automated Rebalancing**: Periodic reserve rebalancing with quota management
+- **First Exchange Bonus**: 10% bonus on first USDT→sat exchange (up to $5)
 
 ## Architecture
 
@@ -18,12 +21,26 @@ pay/
 ├── app/
 │   ├── main.py              # FastAPI entry point
 │   ├── config.py            # Configuration settings
-│   ├── models/              # SQLAlchemy models
+│   ├── models/
+│   │   ├── wallet.py        # Wallet, DepositAddress, WalletBalance
+│   │   ├── deposit.py       # Deposit model
+│   │   ├── withdrawal.py    # Withdrawal model
+│   │   ├── exchange.py      # Exchange, Quota, Rebalance models
+│   │   └── ledger.py        # PayLedger for audit trail
 │   ├── services/
 │   │   ├── hd_wallet.py     # HD wallet address derivation
 │   │   ├── tron_service.py  # TRON blockchain operations
-│   │   └── monitor.py       # Deposit monitoring worker
-│   ├── routes/              # API endpoints
+│   │   ├── monitor.py       # Deposit monitoring worker
+│   │   ├── cex_client.py    # Binance API client
+│   │   ├── exchange_service.py  # USDT ↔ sat exchange
+│   │   ├── rebalance_service.py # CEX reserve management
+│   │   └── scheduler.py     # APScheduler for periodic tasks
+│   ├── routes/
+│   │   ├── apps.py          # App registration
+│   │   ├── wallets.py       # Wallet operations
+│   │   ├── deposits.py      # Deposit queries
+│   │   ├── withdrawals.py   # Withdrawal operations
+│   │   └── exchange.py      # Exchange endpoints
 │   ├── schemas/             # Pydantic schemas
 │   └── db/                  # Database setup
 ├── alembic/                 # Database migrations
@@ -114,6 +131,18 @@ uvicorn app.main:app --reload --port 8004
 | GET | `/withdrawals/{id}` | Get withdrawal details |
 | POST | `/withdrawals/{id}/cancel` | Cancel pending withdrawal |
 
+### Exchange (CEX Reserve System)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/exchange/price` | Get current BTC price |
+| GET | `/exchange/quota` | Get exchange quotas |
+| GET | `/exchange/chain-fees` | Get network fees per chain |
+| POST | `/exchange/preview` | Create 30s exchange preview |
+| POST | `/exchange/confirm` | Confirm exchange |
+| GET | `/exchange/history?wallet_id=1` | Get exchange history |
+| POST | `/exchange/rebalance` | Trigger manual rebalance |
+
 ## Example Usage
 
 ### 1. Register an App
@@ -186,12 +215,157 @@ Response:
 5. Monitor logs for deposit detection
 6. Check balance after ~20 confirmations (~1 minute)
 
+## CEX Reserve Exchange System
+
+The exchange system allows users to convert between USDT and sat (satoshis) using a centralized exchange (Binance) as the backing reserve.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Binance CEX Account                          │
+│   ┌─────────────┐                     ┌─────────────┐           │
+│   │ BTC Reserve │ ◄──── Rebalance ───►│ USDT Reserve│           │
+│   │   0.5 BTC   │                     │  $15,000    │           │
+│   └─────────────┘                     └─────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                   Platform Internal Quotas                       │
+│   ┌─────────────────────┐       ┌─────────────────────┐         │
+│   │ Buy Sat Quota       │       │ Sell Sat Quota      │         │
+│   │ (USDT → sat limit)  │       │ (sat → USDT limit)  │         │
+│   │ ~$24,000 remaining  │       │ ~20M sat remaining  │         │
+│   └─────────────────────┘       └─────────────────────┘         │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      User Exchange Flow                          │
+│   1. User requests preview → locks rate for 30s                  │
+│   2. User confirms → internal balance update                     │
+│   3. Quota deducted → no immediate CEX trade                     │
+│   4. When quota < 10% → trigger CEX rebalance                    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Quota System
+
+| Quota | Initial Value | Trigger Rebalance |
+|-------|---------------|-------------------|
+| buy_sat (USDT → sat) | CEX BTC × price × 80% | < 10% remaining |
+| sell_sat (sat → USDT) | CEX USDT × 80% | < 10% remaining |
+
+### Rebalancing
+
+Rebalancing maintains the target BTC/USDT ratio (default 50/50):
+
+- **Scheduled**: Every 12 hours
+- **Quota-triggered**: When any quota falls below 10%
+- **Manual**: Via `/exchange/rebalance` endpoint
+
+### Exchange Fee
+
+- 0.5% buffer fee on all exchanges (configurable via `exchange_buffer_rate`)
+
+### First Exchange Bonus
+
+- 10% bonus on first USDT → sat exchange
+- Maximum bonus: $5 worth of exchange (so max +$0.50 worth of sat)
+- Bonus applied at confirmation, advertised at deposit
+
+### Configuration
+
+```python
+# pay/app/config.py
+
+# CEX Configuration
+binance_api_key: str = ''
+binance_api_secret: str = ''
+binance_testnet: bool = True
+
+# Reserve Configuration
+target_btc_ratio: float = 0.50      # Target 50% BTC
+rebalance_deviation: float = 0.05   # Trade if deviation > 5%
+quota_trigger_ratio: float = 0.10   # Rebalance if quota < 10%
+reserve_usage_ratio: float = 0.80   # Use 80% of reserves
+
+# Exchange Configuration
+exchange_buffer_rate: float = 0.005  # 0.5% fee
+
+# First Exchange Bonus
+first_exchange_bonus_rate: float = 0.10   # 10%
+first_exchange_bonus_cap_usd: float = 5.0 # Max $5 eligible
+
+# Chain Fees (network fees for deposits)
+chain_configs = {
+    'tron': {'min_deposit': 5.0, 'network_fee': 0.15, 'enabled': True},
+    'polygon': {'min_deposit': 5.0, 'network_fee': 0.05, 'enabled': False},
+    'bsc': {'min_deposit': 10.0, 'network_fee': 0.20, 'enabled': False},
+    'eth': {'min_deposit': 50.0, 'network_fee': 5.0, 'enabled': False},
+}
+```
+
+### Exchange API Examples
+
+#### Get Quote
+```bash
+curl http://localhost:8005/exchange/price
+# {"btc_price": 62000.0}
+```
+
+#### Check Quotas
+```bash
+curl http://localhost:8005/exchange/quota
+# {
+#   "btc_price": 62000.0,
+#   "buy_sat": {"initial": 24000000000, "remaining": 24000000000, "remaining_usd": 24000.0},
+#   "sell_sat": {"initial": 20000000, "remaining": 20000000, "remaining_usd": 12000.0}
+# }
+```
+
+#### Create Preview (USDT → sat)
+```bash
+curl -X POST http://localhost:8005/exchange/preview \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wallet_id": 1,
+    "amount": 10000000,
+    "direction": "buy_sat",
+    "include_bonus": true,
+    "is_first_exchange": true
+  }'
+# {
+#   "preview_id": "abc-123-...",
+#   "amount_in": 10000000,
+#   "amount_out": 16045,
+#   "btc_price": 62000.0,
+#   "buffer_rate": 0.005,
+#   "bonus_sat": 1604,
+#   "total_out": 17649,
+#   "expires_in_seconds": 30
+# }
+```
+
+#### Confirm Exchange
+```bash
+curl -X POST http://localhost:8005/exchange/confirm \
+  -H "Content-Type: application/json" \
+  -d '{
+    "preview_id": "abc-123-...",
+    "wallet_id": 1
+  }'
+```
+
 ## Security Considerations
 
 - **xpub only**: The payment service only has the extended public key, not private keys
 - **Cold signing**: Withdrawals require signatures from a separate cold wallet
 - **API authentication**: Apps authenticate with API key/secret
 - **Idempotent processing**: Deposits are deduplicated by tx_hash
+- **CEX API security**: Binance API keys should have trade-only permissions (no withdrawal)
+- **Rate limiting**: Exchange previews expire after 30 seconds to limit price risk
 
 ## Extending to Other Chains
 
@@ -208,6 +382,43 @@ Example coin types (BIP44):
 - TRON: 195
 - Solana: 501
 - BSC: 60 (same as ETH)
+
+## Database Models
+
+### Core Models
+
+| Table | Description |
+|-------|-------------|
+| `pay_apps` | Registered client applications |
+| `pay_wallets` | User wallets per app |
+| `pay_wallet_balances` | Token balances per wallet (USDT, TRX, SAT) |
+| `pay_deposit_addresses` | HD-derived deposit addresses |
+| `pay_deposits` | Incoming deposits |
+| `pay_withdrawals` | Outgoing withdrawals |
+| `pay_ledger` | Immutable audit trail |
+
+### Exchange Models
+
+| Table | Description |
+|-------|-------------|
+| `pay_exchange_quotas` | Platform-wide exchange limits |
+| `pay_exchange_previews` | 30s valid exchange quotes |
+| `pay_exchanges` | Completed exchange records |
+| `pay_rebalance_logs` | CEX rebalancing history |
+| `pay_reserve_snapshots` | Periodic reserve state snapshots |
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_URL` | PostgreSQL connection | - |
+| `REDIS_URL` | Redis connection | - |
+| `TRON_NETWORK` | TRON network (mainnet/shasta) | shasta |
+| `TRON_XPUB` | Extended public key for HD wallets | - |
+| `TRON_API_KEY` | TronGrid API key | - |
+| `BINANCE_API_KEY` | Binance API key | - |
+| `BINANCE_API_SECRET` | Binance API secret | - |
+| `BINANCE_TESTNET` | Use Binance testnet | true |
 
 ## License
 

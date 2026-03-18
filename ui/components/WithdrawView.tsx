@@ -16,25 +16,34 @@ interface WithdrawViewProps {
 }
 
 type TokenType = 'TRX' | 'USDT';
+type WithdrawMode = 'crypto' | 'btc';
+
+const MIN_BTC_WITHDRAWAL_SAT = 1_000_000; // 0.01 BTC
 
 export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
   const { currentUser } = useUserStore();
   const {
     cryptoBalances,
     withdrawals,
+    satBalance,
+    chainFees,
     isLoadingBalance,
     isLoadingWithdrawals,
     isSubmitting,
     error,
     fetchCryptoBalance,
     fetchWithdrawals,
+    fetchUserBalances,
+    fetchChainFees,
     requestWithdrawal,
     clearError,
   } = useWalletStore();
 
+  const [withdrawMode, setWithdrawMode] = useState<WithdrawMode>('crypto');
   const [toAddress, setToAddress] = useState('');
   const [amount, setAmount] = useState('');
-  const [selectedToken, setSelectedToken] = useState<TokenType>('TRX');
+  const [selectedToken, setSelectedToken] = useState<TokenType>('USDT');
+  const [selectedChain, setSelectedChain] = useState('tron');
   const [submitError, setSubmitError] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState(false);
 
@@ -42,6 +51,8 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
     if (currentUser?.id) {
       fetchCryptoBalance(currentUser.id).catch(() => {});
       fetchWithdrawals(currentUser.id).catch(() => {});
+      fetchUserBalances(currentUser.id).catch(() => {});
+      fetchChainFees().catch(() => {});
     }
   }, [currentUser?.id]);
   
@@ -73,8 +84,18 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
     return Math.floor(num * 1_000_000);
   };
 
-  const validateAddress = (address: string): boolean => {
-    return address.startsWith('T') && address.length === 34;
+  const validateAddress = (address: string, mode: WithdrawMode): boolean => {
+    if (mode === 'btc') {
+      // Basic BTC address validation (starts with 1, 3, or bc1)
+      return (address.startsWith('1') || address.startsWith('3') || address.startsWith('bc1')) 
+        && address.length >= 26 && address.length <= 62;
+    }
+    // TRON address
+    if (selectedChain === 'tron') {
+      return address.startsWith('T') && address.length === 34;
+    }
+    // Other chains (basic ETH-like address)
+    return address.startsWith('0x') && address.length === 42;
   };
 
   const handleSubmit = async () => {
@@ -92,8 +113,29 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
       return;
     }
 
-    if (!validateAddress(toAddress.trim())) {
-      setSubmitError('Invalid TRON address. Must start with T and be 34 characters.');
+    if (!validateAddress(toAddress.trim(), withdrawMode)) {
+      if (withdrawMode === 'btc') {
+        setSubmitError('Invalid Bitcoin address');
+      } else if (selectedChain === 'tron') {
+        setSubmitError('Invalid TRON address. Must start with T and be 34 characters.');
+      } else {
+        setSubmitError('Invalid address format');
+      }
+      return;
+    }
+
+    if (withdrawMode === 'btc') {
+      const satAmount = parseInt(amount);
+      if (isNaN(satAmount) || satAmount < MIN_BTC_WITHDRAWAL_SAT) {
+        setSubmitError(`Minimum BTC withdrawal is 0.01 BTC (${MIN_BTC_WITHDRAWAL_SAT.toLocaleString()} sat)`);
+        return;
+      }
+      if (satAmount > satBalance) {
+        setSubmitError('Insufficient sat balance');
+        return;
+      }
+      // TODO: Implement BTC withdrawal via pay service
+      setSubmitError('BTC withdrawal coming soon');
       return;
     }
 
@@ -112,7 +154,7 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
       await requestWithdrawal(currentUser.id, {
         to_address: toAddress.trim(),
         amount: amountInSun,
-        chain: 'tron',
+        chain: selectedChain,
         token_symbol: selectedToken,
       });
       setSubmitSuccess(true);
@@ -175,42 +217,111 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
       </div>
 
       <div className="px-4 py-6 space-y-6">
+        {/* Mode Toggle */}
+        <div className="flex bg-zinc-900 rounded-lg p-1">
+          <button
+            onClick={() => { setWithdrawMode('crypto'); setAmount(''); }}
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition ${
+              withdrawMode === 'crypto'
+                ? 'bg-orange-500 text-white'
+                : 'text-gray-400'
+            }`}
+          >
+            Withdraw USDT
+          </button>
+          <button
+            onClick={() => { setWithdrawMode('btc'); setAmount(''); }}
+            className={`flex-1 py-2 rounded-md text-sm font-medium transition ${
+              withdrawMode === 'btc'
+                ? 'bg-orange-500 text-white'
+                : 'text-gray-400'
+            }`}
+          >
+            Withdraw BTC
+          </button>
+        </div>
+
         {/* Withdrawal Form */}
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
-          {/* Token Selection */}
-          <div>
-            <label className="text-zinc-500 text-sm mb-2 block">Token</label>
-            <div className="flex gap-2">
-              {(['TRX', 'USDT'] as TokenType[]).map((token) => {
-                const balance = getBalance(token);
-                return (
-                  <button
-                    key={token}
-                    onClick={() => setSelectedToken(token)}
-                    className={`flex-1 p-3 rounded-xl border transition-colors ${
-                      selectedToken === token
-                        ? 'bg-orange-500/10 border-orange-500 text-orange-500'
-                        : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
-                    }`}
-                  >
-                    <div className="font-bold">{token}</div>
-                    <div className="text-xs opacity-70">
-                      {balance ? balance.balance_formatted : '0'}
-                    </div>
-                  </button>
-                );
-              })}
+          {withdrawMode === 'crypto' ? (
+            <>
+              {/* Chain Selection */}
+              {chainFees.filter(c => c.enabled).length > 1 && (
+                <div>
+                  <label className="text-zinc-500 text-sm mb-2 block">Network</label>
+                  <div className="flex gap-2">
+                    {chainFees.filter(c => c.enabled).map((chain) => (
+                      <button
+                        key={chain.chain}
+                        onClick={() => setSelectedChain(chain.chain)}
+                        className={`flex-1 p-2 rounded-xl border transition-colors ${
+                          selectedChain === chain.chain
+                            ? 'bg-orange-500/10 border-orange-500 text-orange-500'
+                            : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                        }`}
+                      >
+                        <div className="font-bold text-sm">{chain.chain.toUpperCase()}</div>
+                        <div className="text-xs opacity-70">Fee: ${chain.network_fee}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Token Selection */}
+              <div>
+                <label className="text-zinc-500 text-sm mb-2 block">Token</label>
+                <div className="flex gap-2">
+                  {(['TRX', 'USDT'] as TokenType[]).map((token) => {
+                    const balance = getBalance(token);
+                    return (
+                      <button
+                        key={token}
+                        onClick={() => setSelectedToken(token)}
+                        className={`flex-1 p-3 rounded-xl border transition-colors ${
+                          selectedToken === token
+                            ? 'bg-orange-500/10 border-orange-500 text-orange-500'
+                            : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-600'
+                        }`}
+                      >
+                        <div className="font-bold">{token}</div>
+                        <div className="text-xs opacity-70">
+                          {balance ? balance.balance_formatted : '0'}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : (
+            /* BTC Mode - Sat Balance Display */
+            <div className="bg-zinc-800 rounded-xl p-4">
+              <div className="text-sm text-zinc-400 mb-1">Sat Balance</div>
+              <div className="text-xl font-semibold text-white">
+                {satBalance.toLocaleString()} sat
+              </div>
+              <div className="text-xs text-zinc-500 mt-1">
+                ≈ {(satBalance / 100_000_000).toFixed(8)} BTC
+              </div>
+              {satBalance < MIN_BTC_WITHDRAWAL_SAT && (
+                <div className="mt-2 text-xs text-amber-400">
+                  Min withdrawal: 0.01 BTC ({MIN_BTC_WITHDRAWAL_SAT.toLocaleString()} sat)
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           {/* Address Input */}
           <div>
-            <label className="text-zinc-500 text-sm mb-2 block">To Address</label>
+            <label className="text-zinc-500 text-sm mb-2 block">
+              To Address
+            </label>
             <input
               type="text"
               value={toAddress}
               onChange={(e) => setToAddress(e.target.value)}
-              placeholder="TRON address (starts with T)"
+              placeholder={withdrawMode === 'btc' ? 'Bitcoin address' : `${selectedChain.toUpperCase()} address`}
               className="w-full bg-zinc-800 border border-zinc-700 text-white py-3 px-4 rounded-xl font-mono text-sm focus:border-orange-500 focus:outline-none"
             />
           </div>
@@ -223,25 +334,36 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-                step="0.000001"
+                placeholder={withdrawMode === 'btc' ? '0' : '0.00'}
+                step={withdrawMode === 'btc' ? '1' : '0.000001'}
                 min="0"
                 className="w-full bg-zinc-800 border border-zinc-700 text-white py-3 px-4 pr-20 rounded-xl text-lg focus:border-orange-500 focus:outline-none"
               />
               <div className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 font-medium">
-                {selectedToken}
+                {withdrawMode === 'btc' ? 'sat' : selectedToken}
               </div>
             </div>
             <div className="flex justify-between mt-2 text-xs">
               <span className="text-zinc-500">
-                Available: {formatBalance(selectedBalance)}
+                {withdrawMode === 'btc' 
+                  ? `Available: ${satBalance.toLocaleString()} sat`
+                  : `Available: ${formatBalance(selectedBalance)}`
+                }
               </span>
-              {selectedBalance && selectedBalance.balance > 0 && (
+              {withdrawMode === 'crypto' && selectedBalance && selectedBalance.balance > 0 && (
                 <button
                   onClick={() => {
                     const maxAmount = selectedBalance.balance / 1_000_000;
                     setAmount(maxAmount.toString());
                   }}
+                  className="text-orange-500 hover:text-orange-400"
+                >
+                  MAX
+                </button>
+              )}
+              {withdrawMode === 'btc' && satBalance >= MIN_BTC_WITHDRAWAL_SAT && (
+                <button
+                  onClick={() => setAmount(satBalance.toString())}
                   className="text-orange-500 hover:text-orange-400"
                 >
                   MAX
@@ -267,7 +389,7 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
           {/* Submit Button */}
           <button
             onClick={handleSubmit}
-            disabled={isSubmitting || !toAddress || !amount}
+            disabled={isSubmitting || !toAddress || !amount || (withdrawMode === 'btc' && parseInt(amount) < MIN_BTC_WITHDRAWAL_SAT)}
             className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-zinc-700 disabled:text-zinc-500 text-white font-bold py-4 px-6 rounded-xl flex items-center justify-center gap-2 transition-colors"
           >
             {isSubmitting ? (
@@ -275,14 +397,17 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
             ) : (
               <>
                 <Send className="w-5 h-5" />
-                <span>Withdraw</span>
+                <span>Withdraw {withdrawMode === 'btc' ? 'BTC' : selectedToken}</span>
               </>
             )}
           </button>
 
           {/* Fee Notice */}
           <p className="text-zinc-600 text-xs text-center">
-            Network fees will be deducted from the withdrawal amount
+            {withdrawMode === 'btc' 
+              ? 'BTC network fee will be deducted. Min: 0.01 BTC'
+              : 'Network fees will be deducted from the withdrawal amount'
+            }
           </p>
         </div>
 

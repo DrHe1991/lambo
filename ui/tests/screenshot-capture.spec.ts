@@ -201,6 +201,43 @@ test.describe('UI Screenshot Capture', () => {
     if (await clickIfVisible(page, 'button:has-text("Withdraw")')) {
       await page.waitForTimeout(1000);
       await capture(page, '14-crypto-withdraw');
+
+      // Switch to BTC withdraw tab
+      if (await clickIfVisible(page, 'button:has-text("Withdraw BTC")')) {
+        await page.waitForTimeout(500);
+        await capture(page, '15-crypto-withdraw-btc');
+      }
+    }
+  });
+
+  test('11 - exchange view', async ({ page }) => {
+    if (!await login(page)) return;
+    await clickIfVisible(page, '[data-testid="nav-profile"]');
+    await page.waitForTimeout(500);
+
+    if (await clickIfVisible(page, 'button:has-text("Exchange")')) {
+      await page.waitForTimeout(1000);
+      await capture(page, '16-exchange-buy-sat');
+
+      // Enter an amount and get quote
+      const amountInput = page.locator('input[type="number"]').first();
+      try {
+        await amountInput.fill('10');
+        await page.waitForTimeout(300);
+
+        if (await clickIfVisible(page, 'button:has-text("Get Quote")')) {
+          await page.waitForTimeout(1500);
+          await capture(page, '17-exchange-quote');
+        }
+      } catch {
+        console.log('Could not fill exchange amount');
+      }
+
+      // Switch to sell_sat tab
+      if (await clickIfVisible(page, 'button:has-text("sat → USDT")')) {
+        await page.waitForTimeout(500);
+        await capture(page, '18-exchange-sell-sat');
+      }
     }
   });
 });

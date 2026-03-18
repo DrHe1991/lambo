@@ -13,6 +13,10 @@ class LedgerAction(str, Enum):
     TRANSFER_IN = 'transfer_in'
     TRANSFER_OUT = 'transfer_out'
     REFUND = 'refund'
+    # Exchange actions
+    EXCHANGE_IN = 'exchange_in'
+    EXCHANGE_OUT = 'exchange_out'
+    EXCHANGE_BONUS = 'exchange_bonus'
 
 
 class PayLedger(Base):

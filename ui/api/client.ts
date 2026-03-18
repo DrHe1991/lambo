@@ -287,6 +287,72 @@ export interface WithdrawalRequest {
   token_symbol?: string;
 }
 
+// Exchange types
+export interface ExchangeQuota {
+  btc_price: number;
+  buy_sat: {
+    initial: number;
+    remaining: number;
+    remaining_usd: number;
+  };
+  sell_sat: {
+    initial: number;
+    remaining: number;
+    remaining_usd: number;
+  };
+}
+
+export interface ChainFee {
+  chain: string;
+  min_deposit: number;
+  network_fee: number;
+  enabled: boolean;
+  receive_amount: number;
+}
+
+export interface ExchangePreview {
+  preview_id: string;
+  wallet_id: number;
+  direction: string;
+  amount_in: number;
+  amount_out: number;
+  btc_price: number;
+  buffer_rate: number;
+  bonus_sat: number;
+  total_out: number;
+  expires_in_seconds: number;
+}
+
+export interface ExchangeResult {
+  id: number;
+  wallet_id: number;
+  direction: string;
+  amount_in: number;
+  amount_out: number;
+  btc_price: number;
+  buffer_fee: number;
+  bonus_sat: number;
+  created_at: string;
+}
+
+export interface ExchangeHistoryItem {
+  id: number;
+  direction: string;
+  amount_in: number;
+  amount_out: number;
+  btc_price: number;
+  buffer_fee: number;
+  bonus_sat: number;
+  created_at: string;
+}
+
+export interface UserBalances {
+  sat_balance: number;
+  stable_balance: number;
+  stable_formatted: string;
+  first_exchange_eligible: boolean;
+}
+
 // API methods
 export const api = {
   // Users
@@ -611,4 +677,36 @@ export const api = {
 
   getCryptoWithdrawals: (userId: number, limit = 50, offset = 0) =>
     apiRequest<CryptoWithdrawalsResponse>('/api/pay/withdrawals', { params: { user_id: userId, limit, offset } }),
+
+  // Exchange
+  getBtcPrice: () =>
+    apiRequest<{ btc_price: number }>('/api/pay/exchange/price'),
+
+  getExchangeQuota: () =>
+    apiRequest<ExchangeQuota>('/api/pay/exchange/quota'),
+
+  getChainFees: () =>
+    apiRequest<ChainFee[]>('/api/pay/exchange/chain-fees'),
+
+  createExchangePreview: (userId: number, amount: number, direction: string) =>
+    apiRequest<ExchangePreview>('/api/pay/exchange/preview', {
+      method: 'POST',
+      body: { amount, direction },
+      params: { user_id: userId },
+    }),
+
+  confirmExchange: (userId: number, previewId: string) =>
+    apiRequest<ExchangeResult>('/api/pay/exchange/confirm', {
+      method: 'POST',
+      body: { preview_id: previewId },
+      params: { user_id: userId },
+    }),
+
+  getExchangeHistory: (userId: number, limit = 20, offset = 0) =>
+    apiRequest<{ exchanges: ExchangeHistoryItem[] }>('/api/pay/exchange/history', {
+      params: { user_id: userId, limit, offset },
+    }),
+
+  getUserBalances: (userId: number) =>
+    apiRequest<UserBalances>('/api/pay/user-balance', { params: { user_id: userId } }),
 };
