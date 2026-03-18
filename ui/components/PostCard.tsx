@@ -13,6 +13,16 @@ interface PostCardProps {
   likeCost?: number;
 }
 
+function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | null): string {
+  if (!isLiked) {
+    return 'text-zinc-400 hover:text-pink-400';
+  }
+  if (likeStatus === 'pending') {
+    return 'text-red-500';
+  }
+  return 'text-orange-500';
+}
+
 export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, isLiked, likeCost }) => {
   return (
     <div 
@@ -101,7 +111,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
         <div className="flex items-center gap-4">
           <button 
             data-testid={`like-button-${post.id}`}
-            className={`flex items-center gap-1.5 transition-colors ${isLiked ? 'text-pink-500' : 'text-zinc-400 hover:text-pink-400'}`}
+            className={`flex items-center gap-1.5 transition-colors ${getHeartColor(isLiked || false, post.likeStatus)}`}
             onClick={(e) => { e.stopPropagation(); onLike?.(post); }}
           >
             <Heart size={18} className={isLiked ? 'fill-current' : ''} />

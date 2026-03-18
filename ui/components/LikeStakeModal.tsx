@@ -42,7 +42,7 @@ export const LikeStakeModal: React.FC<LikeStakeModalProps> = ({
           Stake to Like
         </h3>
         <p className="text-zinc-500 text-sm text-center mb-6">
-          Prevents vote manipulation. Refunded in 24h.
+          1h lock period. 90% refund if cancelled.
         </p>
 
         {/* Stake info */}
@@ -53,7 +53,7 @@ export const LikeStakeModal: React.FC<LikeStakeModalProps> = ({
           </div>
           <div className="flex items-center gap-2 text-zinc-500 text-xs">
             <Clock size={12} />
-            <span>Auto-refunded after 24 hours</span>
+            <span>Settled after 1 hour (cannot cancel)</span>
           </div>
         </div>
 

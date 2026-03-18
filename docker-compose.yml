@@ -77,7 +77,20 @@ services:
     depends_on:
       - api
 
-  # Worker removed - minimal system uses immediate settlement
+  # Settlement Cron Job - settles expired pending likes every minute
+  cron:
+    image: curlimages/curl:8.5.0
+    container_name: bitlink-cron
+    restart: unless-stopped
+    user: root
+    depends_on:
+      - api
+    entrypoint: /bin/sh
+    command: >
+      -c "while true; do
+            sleep 60;
+            curl -s -X POST http://api:8000/api/settlement/settle-likes?batch_size=100;
+          done"
 
   # Web3 Payment Gateway
   pay:

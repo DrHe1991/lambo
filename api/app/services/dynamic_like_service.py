@@ -5,16 +5,24 @@ Two core rules:
 1. Dynamic pricing: cost = max(min, base / sqrt(1 + likes))
 2. Revenue split: 50% author, 40% early likers, 10% platform
 
+1h Lock System:
+- Likes are locked for 1 hour before settlement
+- User can cancel within 1h and get 90% refund
+- After 1h, the like is settled and cannot be cancelled
+
 Applies to both post likes and comment likes.
 """
-from datetime import date
+from datetime import date, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.models.post import Post, PostLike, Comment, CommentLike
+from app.models.post import Post, PostLike, Comment, CommentLike, InteractionStatus
 from app.models.ledger import Ledger, ActionType, RefType
 from app.models.revenue import PlatformRevenue
+
+LOCK_DURATION_HOURS = 1
+REFUND_RATE = 0.90
 
 
 AUTHOR_SHARE = 0.50
@@ -42,6 +50,11 @@ class AlreadyLiked(Exception):
 
 class CannotLikeOwnPost(Exception):
     """Raised when user tries to like their own post."""
+    pass
+
+
+class CannotUnlikeSettled(Exception):
+    """Raised when user tries to unlike a settled like (after 1h)."""
     pass
 
 
@@ -99,26 +112,34 @@ class DynamicLikeService:
         return like_cost(post.likes_count)
 
     async def like_post(self, user_id: int, post_id: int) -> dict:
-        """Like a post with dynamic pricing and early supporter revenue sharing.
+        """Like a post with 1h lock period.
         
-        Returns dict with like details and earnings distributed.
+        Sats are locked for 1 hour. User can cancel within this period (90% refund).
+        After 1h, the like is settled and revenue is distributed.
+        
+        Returns dict with like details.
         """
         post = await self.db.get(Post, post_id)
         if not post:
             raise ValueError(f'Post {post_id} not found')
 
-        if post.author_id == user_id:
-            raise CannotLikeOwnPost('Cannot like your own post')
-
-        # Check if already liked
-        existing = await self.db.execute(
+        # Check for existing like
+        existing_result = await self.db.execute(
             select(PostLike).where(
                 PostLike.post_id == post_id,
                 PostLike.user_id == user_id
             )
         )
-        if existing.scalar_one_or_none():
+        existing_like = existing_result.scalar_one_or_none()
+        
+        # If active like exists, raise error
+        if existing_like and existing_like.status != InteractionStatus.CANCELLED.value:
             raise AlreadyLiked('Already liked this post')
+        
+        # Delete any cancelled like to allow re-liking
+        if existing_like and existing_like.status == InteractionStatus.CANCELLED.value:
+            await self.db.delete(existing_like)
+            await self.db.flush()
 
         user = await self.db.get(User, user_id)
         if not user:
@@ -132,44 +153,28 @@ class DynamicLikeService:
                 f'Need {cost} sat but only have {user.available_balance}'
             )
 
-        # Deduct from user
+        # Deduct from user (lock the sats)
         user.available_balance -= cost
         await self._create_ledger(
             user_id, -cost, ActionType.SPEND_LIKE,
-            RefType.POST, post_id, f'liked post {post_id}'
+            RefType.POST, post_id, f'liked post {post_id} (locked for 1h)'
         )
-
-        # Calculate shares
-        author_share = int(cost * AUTHOR_SHARE)
-        early_liker_share = int(cost * EARLY_LIKER_SHARE)
-        platform_share = cost - author_share - early_liker_share
-
-        # Pay author (50%)
-        author = await self.db.get(User, post.author_id)
-        if author and author_share > 0:
-            author.available_balance += author_share
-            await self._create_ledger(
-                post.author_id, author_share, ActionType.EARN_LIKE,
-                RefType.POST, post_id, f'like from user {user_id}'
-            )
-
-        # Distribute to early likers (40%)
-        early_liker_earnings = await self._distribute_to_early_likers(
-            post_id, early_liker_share
-        )
-
-        # Platform revenue (10%)
-        await self._add_platform_revenue(platform_share)
 
         # Calculate weight for this like
         weight = liker_weight(cost, post.likes_count + 1)
 
-        # Create like record
+        # Set lock period
+        locked_until = datetime.utcnow() + timedelta(hours=LOCK_DURATION_HOURS)
+
+        # Create like record with PENDING status
         new_like = PostLike(
             post_id=post_id,
             user_id=user_id,
             cost_paid=cost,
             total_weight=weight,
+            status=InteractionStatus.PENDING.value,
+            locked_until=locked_until,
+            recipient_id=post.author_id,
             w_trust=1.0,
             n_novelty=1.0,
             s_source=1.0,
@@ -186,12 +191,10 @@ class DynamicLikeService:
 
         return {
             'cost': cost,
-            'author_share': author_share,
-            'early_liker_share': early_liker_share,
-            'platform_share': platform_share,
             'weight': weight,
             'like_rank': post.likes_count,
-            'early_liker_earnings': early_liker_earnings,
+            'status': InteractionStatus.PENDING.value,
+            'locked_until': locked_until,
         }
 
     async def _distribute_to_early_likers(
@@ -289,28 +292,218 @@ class DynamicLikeService:
         revenue.like_revenue += amount
         revenue.total += amount
 
-    async def unlike_post(self, user_id: int, post_id: int) -> bool:
-        """Unlike a post. No refund in the minimal system."""
+    async def unlike_post(self, user_id: int, post_id: int) -> dict:
+        """Unlike a post within the 1h lock period.
+        
+        - PENDING status: 90% refund, set status to CANCELLED
+        - SETTLED status: Cannot unlike, raise CannotUnlikeSettled
+        
+        Returns dict with refund details.
+        """
         result = await self.db.execute(
             select(PostLike).where(
                 PostLike.post_id == post_id,
-                PostLike.user_id == user_id
+                PostLike.user_id == user_id,
+                PostLike.status != InteractionStatus.CANCELLED.value
             )
         )
         like = result.scalar_one_or_none()
 
         if not like:
-            return False
+            return {'success': False, 'error': 'Like not found'}
 
-        # Remove like
-        await self.db.delete(like)
+        # Check if already settled
+        if like.status == InteractionStatus.SETTLED.value:
+            raise CannotUnlikeSettled('Cannot unlike after 1h - like has been settled')
+
+        # Calculate 90% refund
+        refund_amount = int(like.cost_paid * REFUND_RATE)
+        platform_keeps = like.cost_paid - refund_amount
+
+        # Refund user
+        user = await self.db.get(User, user_id)
+        if user:
+            user.available_balance += refund_amount
+            await self._create_ledger(
+                user_id, refund_amount, ActionType.EARN_LIKE,
+                RefType.POST, post_id, f'unlike refund (90% of {like.cost_paid})'
+            )
+
+        # Platform keeps 10%
+        if platform_keeps > 0:
+            await self._add_platform_revenue(platform_keeps)
+
+        # Mark as cancelled (don't delete - keep record)
+        like.status = InteractionStatus.CANCELLED.value
 
         # Update post count
         post = await self.db.get(Post, post_id)
         if post and post.likes_count > 0:
             post.likes_count -= 1
 
-        return True
+        return {
+            'success': True,
+            'refund_amount': refund_amount,
+            'platform_keeps': platform_keeps,
+        }
+
+    async def settle_like(self, like: PostLike) -> dict:
+        """Settle a single pending like after the 1h lock period.
+        
+        Distributes: 50% to author, 40% to early likers, 10% to platform.
+        """
+        if like.status != InteractionStatus.PENDING.value:
+            return {'settled': False, 'reason': 'not pending'}
+
+        if like.locked_until and datetime.utcnow() < like.locked_until:
+            return {'settled': False, 'reason': 'still locked'}
+
+        cost = like.cost_paid
+
+        # Calculate shares
+        author_share = int(cost * AUTHOR_SHARE)
+        early_liker_share = int(cost * EARLY_LIKER_SHARE)
+        platform_share = cost - author_share - early_liker_share
+
+        # Pay author (50%)
+        if like.recipient_id:
+            author = await self.db.get(User, like.recipient_id)
+            if author and author_share > 0:
+                author.available_balance += author_share
+                await self._create_ledger(
+                    like.recipient_id, author_share, ActionType.EARN_LIKE,
+                    RefType.POST, like.post_id, f'like settled from user {like.user_id}'
+                )
+
+        # Distribute to early likers (40%) - only SETTLED likes
+        early_liker_earnings = await self._distribute_to_early_settled_likers(
+            like.post_id, early_liker_share, exclude_like_id=like.id
+        )
+
+        # Platform revenue (10%)
+        await self._add_platform_revenue(platform_share)
+
+        # Mark as settled
+        like.status = InteractionStatus.SETTLED.value
+
+        return {
+            'settled': True,
+            'author_share': author_share,
+            'early_liker_share': early_liker_share,
+            'platform_share': platform_share,
+            'early_liker_earnings': early_liker_earnings,
+        }
+
+    async def settle_expired_likes(self, post_id: int | None = None) -> list[dict]:
+        """Settle all expired pending likes for a post (or all posts if None).
+        
+        Called on-demand when fetching posts to ensure state is current.
+        IMPORTANT: Settles in created_at order to ensure fair revenue distribution.
+        """
+        query = select(PostLike).where(
+            PostLike.status == InteractionStatus.PENDING.value,
+            PostLike.locked_until < datetime.utcnow()
+        ).order_by(PostLike.created_at)  # Critical: settle in order of creation
+        
+        if post_id:
+            query = query.where(PostLike.post_id == post_id)
+
+        result = await self.db.execute(query)
+        pending_likes = list(result.scalars().all())
+
+        settled = []
+        for like in pending_likes:
+            result = await self.settle_like(like)
+            if result.get('settled'):
+                settled.append({
+                    'like_id': like.id,
+                    'post_id': like.post_id,
+                    'user_id': like.user_id,
+                    **result,
+                })
+
+        return settled
+
+    async def _distribute_to_early_settled_likers(
+        self,
+        post_id: int,
+        total_amount: int,
+        exclude_like_id: int | None = None
+    ) -> list[dict]:
+        """Distribute revenue to SETTLED likers only (not pending)."""
+        if total_amount <= 0:
+            return []
+
+        # Get only SETTLED likes
+        query = select(PostLike).where(
+            PostLike.post_id == post_id,
+            PostLike.status == InteractionStatus.SETTLED.value
+        )
+        if exclude_like_id:
+            query = query.where(PostLike.id != exclude_like_id)
+
+        result = await self.db.execute(query)
+        likes = list(result.scalars().all())
+
+        if not likes:
+            await self._add_platform_revenue(total_amount)
+            return []
+
+        total_weight = sum(like.total_weight for like in likes)
+        if total_weight <= 0:
+            await self._add_platform_revenue(total_amount)
+            return []
+
+        earnings = []
+        distributed = 0
+
+        for like in likes:
+            share = int(total_amount * (like.total_weight / total_weight))
+            if share > 0:
+                liker = await self.db.get(User, like.user_id)
+                if liker:
+                    liker.available_balance += share
+                    like.earnings += share
+                    await self._create_ledger(
+                        like.user_id, share, ActionType.EARN_LIKE,
+                        RefType.POST, post_id, f'early supporter dividend (settled)'
+                    )
+                    distributed += share
+                    earnings.append({'user_id': like.user_id, 'share': share})
+
+        remainder = total_amount - distributed
+        if remainder > 0:
+            await self._add_platform_revenue(remainder)
+
+        return earnings
+
+    async def get_like_status(self, user_id: int, post_id: int) -> dict | None:
+        """Get the like status for a user's like on a post.
+        
+        Returns None if not liked, or dict with status and locked_until.
+        """
+        result = await self.db.execute(
+            select(PostLike).where(
+                PostLike.post_id == post_id,
+                PostLike.user_id == user_id,
+                PostLike.status != InteractionStatus.CANCELLED.value
+            )
+        )
+        like = result.scalar_one_or_none()
+
+        if not like:
+            return None
+
+        # Check if needs settlement
+        if (like.status == InteractionStatus.PENDING.value and
+                like.locked_until and datetime.utcnow() >= like.locked_until):
+            await self.settle_like(like)
+
+        return {
+            'status': like.status,
+            'locked_until': like.locked_until.isoformat() if like.locked_until else None,
+            'cost_paid': like.cost_paid,
+        }
 
     async def get_post_likers(self, post_id: int) -> list[dict]:
         """Get list of likers for a post with their weights and potential earnings."""
@@ -342,23 +535,32 @@ class DynamicLikeService:
         return comment_like_cost(comment.likes_count)
 
     async def like_comment(self, user_id: int, comment_id: int) -> dict:
-        """Like a comment with dynamic pricing and early supporter revenue sharing."""
+        """Like a comment with 1h lock period, same as post likes.
+        
+        Sats are locked for 1 hour. User can cancel within this period (90% refund).
+        After 1h, the like is settled and revenue is distributed.
+        """
         comment = await self.db.get(Comment, comment_id)
         if not comment:
             raise ValueError(f'Comment {comment_id} not found')
 
-        if comment.author_id == user_id:
-            raise CannotLikeOwnPost('Cannot like your own comment')
-
-        # Check if already liked
-        existing = await self.db.execute(
+        # Check for existing like
+        existing_result = await self.db.execute(
             select(CommentLike).where(
                 CommentLike.comment_id == comment_id,
                 CommentLike.user_id == user_id
             )
         )
-        if existing.scalar_one_or_none():
+        existing_like = existing_result.scalar_one_or_none()
+        
+        # If active like exists, raise error
+        if existing_like and existing_like.status != InteractionStatus.CANCELLED.value:
             raise AlreadyLiked('Already liked this comment')
+        
+        # Delete any cancelled like to allow re-liking
+        if existing_like and existing_like.status == InteractionStatus.CANCELLED.value:
+            await self.db.delete(existing_like)
+            await self.db.flush()
 
         user = await self.db.get(User, user_id)
         if not user:
@@ -372,43 +574,27 @@ class DynamicLikeService:
                 f'Need {cost} sat but only have {user.available_balance}'
             )
 
-        # Deduct from user
+        # Deduct from user (lock the sats)
         user.available_balance -= cost
         await self._create_ledger(
             user_id, -cost, ActionType.SPEND_COMMENT_LIKE,
-            RefType.COMMENT, comment_id, f'liked comment {comment_id}'
+            RefType.COMMENT, comment_id, f'liked comment {comment_id} (locked for 1h)'
         )
-
-        # Calculate shares
-        author_share = int(cost * AUTHOR_SHARE)
-        early_liker_share = int(cost * EARLY_LIKER_SHARE)
-        platform_share = cost - author_share - early_liker_share
-
-        # Pay comment author (50%)
-        author = await self.db.get(User, comment.author_id)
-        if author and author_share > 0:
-            author.available_balance += author_share
-            await self._create_ledger(
-                comment.author_id, author_share, ActionType.EARN_COMMENT,
-                RefType.COMMENT, comment_id, f'comment like from user {user_id}'
-            )
-
-        # Distribute to early comment likers (40%)
-        early_liker_earnings = await self._distribute_to_early_comment_likers(
-            comment_id, early_liker_share
-        )
-
-        # Platform revenue (10%)
-        await self._add_platform_revenue(platform_share)
 
         # Calculate weight for this like
         weight = liker_weight(cost, comment.likes_count + 1)
 
-        # Create like record
+        # Set lock period
+        locked_until = datetime.utcnow() + timedelta(hours=LOCK_DURATION_HOURS)
+
+        # Create like record with PENDING status (no immediate distribution)
         new_like = CommentLike(
             comment_id=comment_id,
             user_id=user_id,
             cost_paid=cost,
+            status=InteractionStatus.PENDING.value,
+            locked_until=locked_until,
+            recipient_id=comment.author_id,
         )
         self.db.add(new_like)
 
@@ -419,27 +605,162 @@ class DynamicLikeService:
 
         return {
             'cost': cost,
+            'weight': weight,
+            'like_rank': comment.likes_count,
+            'status': InteractionStatus.PENDING.value,
+            'locked_until': locked_until,
+        }
+
+    async def unlike_comment(self, user_id: int, comment_id: int) -> dict:
+        """Unlike a comment within the 1h lock period.
+        
+        - PENDING status: 90% refund, set status to CANCELLED
+        - SETTLED status: Cannot unlike, raise CannotUnlikeSettled
+        
+        Returns dict with refund details.
+        """
+        result = await self.db.execute(
+            select(CommentLike).where(
+                CommentLike.comment_id == comment_id,
+                CommentLike.user_id == user_id,
+                CommentLike.status != InteractionStatus.CANCELLED.value
+            )
+        )
+        like = result.scalar_one_or_none()
+
+        if not like:
+            return {'success': False, 'error': 'Like not found'}
+
+        # Check if already settled
+        if like.status == InteractionStatus.SETTLED.value:
+            raise CannotUnlikeSettled('Cannot unlike after 1h - like has been settled')
+
+        # Calculate 90% refund
+        refund_amount = int(like.cost_paid * REFUND_RATE)
+        platform_keeps = like.cost_paid - refund_amount
+
+        # Refund user
+        user = await self.db.get(User, user_id)
+        if user:
+            user.available_balance += refund_amount
+            await self._create_ledger(
+                user_id, refund_amount, ActionType.EARN_COMMENT,
+                RefType.COMMENT, comment_id, f'unlike refund (90% of {like.cost_paid})'
+            )
+
+        # Platform keeps 10%
+        if platform_keeps > 0:
+            await self._add_platform_revenue(platform_keeps)
+
+        # Mark as cancelled
+        like.status = InteractionStatus.CANCELLED.value
+
+        # Update comment count
+        comment = await self.db.get(Comment, comment_id)
+        if comment and comment.likes_count > 0:
+            comment.likes_count -= 1
+
+        return {
+            'success': True,
+            'refund_amount': refund_amount,
+            'platform_keeps': platform_keeps,
+        }
+
+    async def settle_comment_like(self, like: CommentLike) -> dict:
+        """Settle a single pending comment like after the 1h lock period.
+        
+        Distributes: 50% to author, 40% to early likers, 10% to platform.
+        """
+        if like.status != InteractionStatus.PENDING.value:
+            return {'settled': False, 'reason': 'not pending'}
+
+        if like.locked_until and datetime.utcnow() < like.locked_until:
+            return {'settled': False, 'reason': 'still locked'}
+
+        cost = like.cost_paid
+
+        # Calculate shares
+        author_share = int(cost * AUTHOR_SHARE)
+        early_liker_share = int(cost * EARLY_LIKER_SHARE)
+        platform_share = cost - author_share - early_liker_share
+
+        # Pay author (50%)
+        if like.recipient_id:
+            author = await self.db.get(User, like.recipient_id)
+            if author and author_share > 0:
+                author.available_balance += author_share
+                await self._create_ledger(
+                    like.recipient_id, author_share, ActionType.EARN_COMMENT,
+                    RefType.COMMENT, like.comment_id, f'comment like settled from user {like.user_id}'
+                )
+
+        # Distribute to early likers (40%) - only SETTLED likes
+        early_liker_earnings = await self._distribute_to_early_settled_comment_likers(
+            like.comment_id, early_liker_share, exclude_like_id=like.id
+        )
+
+        # Platform revenue (10%)
+        await self._add_platform_revenue(platform_share)
+
+        # Mark as settled
+        like.status = InteractionStatus.SETTLED.value
+
+        return {
+            'settled': True,
             'author_share': author_share,
             'early_liker_share': early_liker_share,
             'platform_share': platform_share,
-            'weight': weight,
-            'like_rank': comment.likes_count,
             'early_liker_earnings': early_liker_earnings,
         }
 
-    async def _distribute_to_early_comment_likers(
+    async def settle_expired_comment_likes(self, comment_id: int | None = None) -> list[dict]:
+        """Settle all expired pending comment likes (or for a specific comment).
+        
+        Called by cron job. IMPORTANT: Settles in created_at order for fair distribution.
+        """
+        query = select(CommentLike).where(
+            CommentLike.status == InteractionStatus.PENDING.value,
+            CommentLike.locked_until < datetime.utcnow()
+        ).order_by(CommentLike.created_at)  # Critical: settle in order of creation
+        
+        if comment_id:
+            query = query.where(CommentLike.comment_id == comment_id)
+
+        result = await self.db.execute(query)
+        pending_likes = list(result.scalars().all())
+
+        settled = []
+        for like in pending_likes:
+            result = await self.settle_comment_like(like)
+            if result.get('settled'):
+                settled.append({
+                    'like_id': like.id,
+                    'comment_id': like.comment_id,
+                    'user_id': like.user_id,
+                    **result,
+                })
+
+        return settled
+
+    async def _distribute_to_early_settled_comment_likers(
         self,
         comment_id: int,
-        total_amount: int
+        total_amount: int,
+        exclude_like_id: int | None = None
     ) -> list[dict]:
-        """Distribute revenue to previous comment likers based on cost paid."""
+        """Distribute revenue to SETTLED comment likers only (not pending)."""
         if total_amount <= 0:
             return []
 
-        # Get all existing likes
-        result = await self.db.execute(
-            select(CommentLike).where(CommentLike.comment_id == comment_id)
+        # Get only SETTLED likes
+        query = select(CommentLike).where(
+            CommentLike.comment_id == comment_id,
+            CommentLike.status == InteractionStatus.SETTLED.value
         )
+        if exclude_like_id:
+            query = query.where(CommentLike.id != exclude_like_id)
+
+        result = await self.db.execute(query)
         likes = list(result.scalars().all())
 
         if not likes:
@@ -463,13 +784,10 @@ class DynamicLikeService:
                     liker.available_balance += share
                     await self._create_ledger(
                         like.user_id, share, ActionType.EARN_COMMENT,
-                        RefType.COMMENT, comment_id, f'early comment supporter dividend'
+                        RefType.COMMENT, comment_id, f'early comment supporter dividend (settled)'
                     )
                     distributed += share
-                    earnings.append({
-                        'user_id': like.user_id,
-                        'share': share,
-                    })
+                    earnings.append({'user_id': like.user_id, 'share': share})
 
         remainder = total_amount - distributed
         if remainder > 0:
@@ -477,23 +795,30 @@ class DynamicLikeService:
 
         return earnings
 
-    async def unlike_comment(self, user_id: int, comment_id: int) -> bool:
-        """Unlike a comment. No refund."""
+    async def get_comment_like_status(self, user_id: int, comment_id: int) -> dict | None:
+        """Get the like status for a user's like on a comment.
+        
+        Returns None if not liked, or dict with status and locked_until.
+        """
         result = await self.db.execute(
             select(CommentLike).where(
                 CommentLike.comment_id == comment_id,
-                CommentLike.user_id == user_id
+                CommentLike.user_id == user_id,
+                CommentLike.status != InteractionStatus.CANCELLED.value
             )
         )
         like = result.scalar_one_or_none()
 
         if not like:
-            return False
+            return None
 
-        await self.db.delete(like)
+        # Check if needs settlement
+        if (like.status == InteractionStatus.PENDING.value and
+                like.locked_until and datetime.utcnow() >= like.locked_until):
+            await self.settle_comment_like(like)
 
-        comment = await self.db.get(Comment, comment_id)
-        if comment and comment.likes_count > 0:
-            comment.likes_count -= 1
-
-        return True
+        return {
+            'status': like.status,
+            'locked_until': like.locked_until.isoformat() if like.locked_until else None,
+            'cost_paid': like.cost_paid,
+        }

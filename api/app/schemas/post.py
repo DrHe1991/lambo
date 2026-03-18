@@ -38,6 +38,8 @@ class PostResponse(BaseModel):
     is_ai: bool
     created_at: datetime
     is_liked: bool = False
+    like_status: str | None = None
+    locked_until: str | None = None
 
     class Config:
         from_attributes = True
@@ -63,6 +65,8 @@ class CommentResponse(BaseModel):
     likes_count: int
     cost_paid: int = 0
     is_liked: bool = False
+    like_status: str | None = None
+    like_locked_until: str | None = None
     created_at: datetime
     interaction_status: str = 'settled'
     locked_until: datetime | None = None

@@ -1,53 +1,53 @@
 # BitLink 产品路线图
 
-> 极简版，专注核心机制验证
+> 内容预测市场，让优质内容得到回报
 
 ---
 
 ## 核心机制
 
 1. **动态点赞定价**：赞越少越贵，赞越多越便宜
-2. **早期点赞者分成**：后来人的钱，分给前面的人
+2. **早期点赞者分成**：50% 作者 + 40% 早期点赞者 + 10% 平台
+3. **1小时锁定期**：点赞后锁定1小时，期间可撤回（退90%），到期后自动结算
 
 ---
 
-## Phase 1：极简 MVP
+## Phase 1：极简 MVP ✅ 已完成
 
 **目标**：验证「点赞即投资」机制是否成立
 
-### 必做功能
-
-| 功能 | 说明 |
+| 功能 | 状态 |
 |------|------|
-| 用户注册/登录 | Google Sign-In |
-| 余额系统 | 新用户赠送 1000 sat |
-| 发帖 | 免费发帖 |
-| 点赞 | 动态定价 + 早期分成 |
-| Feed | 简单按时间排序 |
-
-### 不做的功能
-
-- 评论系统
-- 关注系统
-- 频道分类
-- 复杂推荐算法
-- 充值/提现
-- 任何复杂机制
-
-### 验收标准
-
-- 用户能发帖
-- 用户能点赞（看到动态价格）
-- 早期点赞者能看到收益增长
-- 作者能看到收入
+| 用户注册/登录 | ✅ 完成 |
+| 余额系统 | ✅ 完成 |
+| 发帖（免费，有频率限制） | ✅ 完成 |
+| 点赞（动态定价 + 早期分成） | ✅ 完成 |
+| Feed | ✅ 完成 |
+| 关注系统 | ✅ 完成 |
+| 私信聊天 | ✅ 完成 |
 
 ---
 
-## Phase 2：防作弊 + 身份验证
+## Phase 1.5：经济完善 ✅ 已完成
+
+**目标**：防止滥用，完善经济机制
+
+| 功能 | 状态 |
+|------|------|
+| 评论收费（5 sat → 帖子作者） | ✅ 完成 |
+| 回复收费（1 sat → 评论作者） | ✅ 完成 |
+| 评论点赞（动态定价 + 1h 锁定） | ✅ 完成 |
+| 帖子点赞锁定期（1h） | ✅ 完成 |
+| 频率限制（发帖 3/h、10/d；评论 3/min、20/h） | ✅ 完成 |
+| 后台定时结算服务 | ✅ 完成 |
+| 草稿自动保存 | ✅ 完成 |
+| 富文本编辑器 | ✅ 完成 |
+
+---
+
+## Phase 2：防作弊 + 身份验证 🚧 进行中
 
 **目标**：解决自刷、鲸鱼垄断问题
-
-### 功能
 
 | 功能 | 说明 |
 |------|------|
@@ -62,29 +62,23 @@
 
 **目标**：引入真实资金，可持续运营
 
-### 功能
-
 | 功能 | 说明 |
 |------|------|
-| 充值 | sat 购买 |
-| 提现 | sat 兑换 |
-| 广告系统 | 外部资金注入 |
-| 订阅功能 | 创作者变现 |
+| 充值 | USDT → sat |
+| 提现 | sat → USDT |
+| 创作者订阅 | 付费支持 |
 
 ---
 
-## Phase 4：社交功能
+## Phase 4：增长
 
-**目标**：增加留存和粘性
-
-### 功能
+**目标**：扩大用户规模
 
 | 功能 | 说明 |
 |------|------|
-| 评论 | 评论也能被赞 |
-| 关注 | 关注流 |
-| 私信 | 用户沟通 |
-| 通知 | 收益/互动提醒 |
+| 推荐算法优化 | 发现优质内容 |
+| 通知系统 | 收益/互动提醒 |
+| 移动端原生 | iOS/Android App |
 
 ---
 
@@ -94,64 +88,54 @@
 |------|------|
 | 后端 | Python FastAPI |
 | 数据库 | PostgreSQL |
-| 前端 | React + Capacitor |
-| 部署 | Docker |
+| 缓存 | Redis |
+| 前端 | React + Vite + Capacitor |
+| 定时任务 | Docker cron 服务 |
+| 部署 | Docker Compose |
 
 ---
 
-## 数据模型（Phase 1）
+## 经济机制详情
 
-```sql
--- 用户
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    username VARCHAR(50) UNIQUE NOT NULL,
-    balance BIGINT DEFAULT 1000,
-    created_at TIMESTAMP DEFAULT NOW()
-);
+### 帖子点赞定价公式
 
--- 帖子
-CREATE TABLE posts (
-    id SERIAL PRIMARY KEY,
-    author_id INTEGER REFERENCES users(id),
-    content TEXT NOT NULL,
-    like_count INTEGER DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT NOW()
-);
+```
+cost = max(5, 100 / sqrt(1 + likes))
 
--- 点赞
-CREATE TABLE likes (
-    id SERIAL PRIMARY KEY,
-    post_id INTEGER REFERENCES posts(id),
-    user_id INTEGER REFERENCES users(id),
-    cost_paid INTEGER NOT NULL,
-    weight FLOAT NOT NULL,
-    earnings INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(post_id, user_id)
-);
+| 点赞数 | 成本 |
+|--------|------|
+|   0    | 100  |
+|   5    |  41  |
+|  20    |  22  |
+| 100    |  10  |
+| 500+   |   5  |
 ```
 
----
+### 评论点赞定价公式
 
-## API 端点（Phase 1）
+```
+cost = max(2, 20 / sqrt(1 + likes))
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | /auth/register | 注册 |
-| POST | /auth/login | 登录 |
-| GET | /users/me | 获取当前用户 |
-| GET | /posts | 获取帖子列表 |
-| POST | /posts | 发帖 |
-| POST | /posts/{id}/like | 点赞 |
-| GET | /posts/{id}/like-cost | 获取当前点赞价格 |
+| 点赞数 | 成本 |
+|--------|------|
+|   0    |  20  |
+|   5    |   8  |
+|  20    |   4  |
+|  50+   |   2  |
+```
+
+### 收益分配
+
+```
+点赞收益 = 50% 作者 + 40% 早期点赞者 + 10% 平台
+评论收费 = 100% 内容创作者
+```
 
 ---
 
 ## 成功指标
 
-### Phase 1
+### Phase 1-2
 
 | 指标 | 目标 |
 |------|------|
@@ -160,7 +144,7 @@ CREATE TABLE likes (
 | 日均点赞 | 500+ |
 | 用户留存（7日） | 30%+ |
 
-### Phase 2+
+### Phase 3+
 
 | 指标 | 目标 |
 |------|------|
@@ -170,4 +154,4 @@ CREATE TABLE likes (
 
 ---
 
-*极简版路线图，2026-03-10*
+*最后更新: 2026-03-10*

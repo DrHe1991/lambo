@@ -16,7 +16,7 @@ export interface Post {
   author: User;
   title?: string | null;
   content: string;
-  contentFormat?: 'plain' | 'markdown';
+  contentFormat?: 'plain' | 'markdown' | 'html';
   stakedSats?: number;
   likes: number;
   comments: number;
@@ -30,6 +30,8 @@ export interface Post {
   bounty?: number;
   status?: string;
   isLiked?: boolean;
+  likeStatus?: 'pending' | 'settled' | null;
+  lockedUntil?: string | null;
 }
 
 export interface Comment {
@@ -104,11 +106,11 @@ export function apiPostToPost(apiPost: {
     name: string;
     handle: string;
     avatar: string | null;
-    trust_score: number;
+    trust_score?: number;
   };
   title?: string | null;
   content: string;
-  content_format?: 'plain' | 'markdown';
+  content_format?: 'plain' | 'markdown' | 'html';
   post_type: 'note' | 'article' | 'question';
   status: string;
   likes_count: number;
@@ -117,6 +119,8 @@ export function apiPostToPost(apiPost: {
   is_ai: boolean;
   created_at: string;
   is_liked: boolean;
+  like_status?: 'pending' | 'settled' | null;
+  locked_until?: string | null;
   boost_amount?: number;
   boost_remaining?: number;
 }): Post {
@@ -144,6 +148,8 @@ export function apiPostToPost(apiPost: {
     isAI: apiPost.is_ai,
     status: apiPost.status,
     isLiked: apiPost.is_liked,
+    likeStatus: apiPost.like_status,
+    lockedUntil: apiPost.locked_until,
     isBoosted,
     boostMultiplier: isBoosted ? boostMultiplier : undefined,
     boostRemaining: isBoosted ? boostRemaining : undefined,

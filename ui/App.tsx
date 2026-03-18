@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
@@ -23,18 +23,16 @@ import { useChatWebSocket } from './hooks/useChatWebSocket';
 // Views
 type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW' | 'EXCHANGE';
 
-// Avatar fallback - real human photos via Pravatar, seeded by name hash for consistency
+// Avatar fallback - must match apiUserToUser in types.ts so every view shows the same face
 const getAvatarUrl = (avatar: string | null | undefined, name: string): string => {
   if (avatar) return avatar;
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  return `https://i.pravatar.cc/150?u=${Math.abs(hash)}`;
+  return `https://i.pravatar.cc/150?u=${encodeURIComponent(name)}`;
 };
 
 const handleAvatarError = (e: React.SyntheticEvent<HTMLImageElement>, name: string) => {
-  let hash = 0;
-  for (let i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
-  (e.target as HTMLImageElement).src = `https://i.pravatar.cc/150?u=${Math.abs(hash)}`;
+  const img = e.target as HTMLImageElement;
+  img.onerror = null;
+  img.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=333&color=fff&size=150`;
 };
 
 const App: React.FC = () => {
@@ -126,6 +124,7 @@ const App: React.FC = () => {
   const [groupMemberIds, setGroupMemberIds] = useState<Set<string>>(new Set());
   const [commentDraft, setCommentDraft] = useState('');
   const [replyTarget, setReplyTarget] = useState<{ id: string; handle: string } | null>(null);
+  const commentInputRef = useRef<HTMLInputElement>(null);
   const [inlineCommentPost, setInlineCommentPost] = useState<Post | null>(null);
   const [inlineCommentDraft, setInlineCommentDraft] = useState('');
 
@@ -367,12 +366,45 @@ const App: React.FC = () => {
   const handleLikeToggle = async (post: Post) => {
     if (!currentUser) return;
     const isLiked = likedPosts.has(String(post.id)) || post.isLiked;
+    
+    // If trying to unlike a settled like, show error
+    if (isLiked && post.likeStatus === 'settled') {
+      toast.error('Cannot unlike - like has been settled after 1h');
+      return;
+    }
+    
+    // If trying to unlike a pending like, confirm first (90% refund)
+    if (isLiked && post.likeStatus === 'pending') {
+      const confirmed = window.confirm('Unlike this post? You will get a 90% refund (10% platform fee).');
+      if (!confirmed) return;
+    }
+    
     try {
       await toggleLikePost(Number(post.id), currentUser.id, isLiked);
       if (isLiked) {
         setLikedPosts(prev => { const s = new Set(prev); s.delete(String(post.id)); return s; });
+        // Update selectedPost if viewing this post
+        if (selectedPost && String(selectedPost.id) === String(post.id)) {
+          setSelectedPost({
+            ...selectedPost,
+            isLiked: false,
+            likeStatus: null,
+            likes: Math.max(0, selectedPost.likes - 1),
+          });
+        }
+        toast.success('Unliked! 90% refunded');
       } else {
         setLikedPosts(prev => new Set([...prev, String(post.id)]));
+        // Update selectedPost if viewing this post
+        if (selectedPost && String(selectedPost.id) === String(post.id)) {
+          setSelectedPost({
+            ...selectedPost,
+            isLiked: true,
+            likeStatus: 'pending',
+            likes: selectedPost.likes + 1,
+          });
+        }
+        toast.success('Liked! Locked for 1h');
       }
       fetchBalance(currentUser.id);
     } catch (error) {
@@ -497,7 +529,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentView === 'GROUP_CHAT' && currentUser) {
       setIsLoadingInvitableUsers(true);
-      api.searchUsers('', 50)
+      api.listUsers()
         .then(users => {
           setInvitableUsers(users
             .filter(u => u.id !== currentUser.id)
@@ -1233,10 +1265,18 @@ const App: React.FC = () => {
     );
   };
 
+  // Get comment heart color: pending=red, settled=orange, not liked=gray
+  const getCommentHeartColor = (c: ApiComment) => {
+    if (!c.is_liked) return 'text-zinc-500';
+    if (c.like_status === 'pending') return 'text-red-500';
+    return 'text-orange-400';  // settled or legacy
+  };
+
   // Shared comment-list component used by Post Detail & QA Detail
   const renderCommentItem = (c: ApiComment) => {
     const isLiked = c.is_liked;
     const canDelete = currentUser && c.author.id === currentUser.id && c.interaction_status === 'pending';
+    const heartColor = getCommentHeartColor(c);
 
     return (
       <div key={c.id} className={`flex gap-3 mb-5 ${c.parent_id ? 'ml-10' : ''}`}>
@@ -1255,28 +1295,44 @@ const App: React.FC = () => {
           <p className="text-sm text-zinc-400 break-words">{c.content}</p>
           <div className="flex items-center gap-4 mt-2">
             <button
-              className={`flex items-center gap-1 text-[10px] font-bold ${isLiked ? 'text-orange-400' : 'text-zinc-500'}`}
+              className={`flex items-center gap-1 text-[10px] font-bold ${heartColor}`}
               onClick={async () => {
                 if (!currentUser || !selectedPost) return;
                 try {
-                  await toggleLikeComment(Number(selectedPost.id), c.id, currentUser.id, isLiked);
+                  const result = await toggleLikeComment(Number(selectedPost.id), c.id, currentUser.id, isLiked);
                   fetchBalance(currentUser.id);
+                  if (!isLiked) {
+                    toast.success('Liked! Locked for 1h');
+                  } else {
+                    const res = result as { refund_amount?: number } | undefined;
+                    if (res?.refund_amount !== undefined) {
+                      toast.info(`Unliked! ${res.refund_amount} sat refunded`);
+                    }
+                  }
                 } catch (err) {
-                  toast.warning((err as Error).message);
+                  const msg = (err as Error).message;
+                  if (msg.includes('settled')) {
+                    toast.error('Cannot unlike after 1h');
+                  } else if (msg.includes('402') || msg.includes('Insufficient')) {
+                    toast.error('Insufficient balance');
+                  } else {
+                    toast.warning(msg);
+                  }
                 }
               }}
             >
               <Heart size={12} fill={isLiked ? 'currentColor' : 'none'} /> {c.likes_count}
-              <span className="text-zinc-600 ml-0.5">5</span>
             </button>
             <button
-              className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300"
+              className={`text-[10px] font-bold hover:text-zinc-300 ${replyTarget?.id === String(c.id) ? 'text-orange-400' : 'text-zinc-500'}`}
               onClick={() => {
-                setReplyTarget(prev => prev?.id === String(c.id) ? null : { id: String(c.id), handle: `@${c.author.handle}` });
-                if (!commentDraft.trim()) setCommentDraft(`@${c.author.handle} `);
+                const isToggleOff = replyTarget?.id === String(c.id);
+                setReplyTarget(isToggleOff ? null : { id: String(c.id), handle: `@${c.author.handle}` });
+                if (!isToggleOff && !commentDraft.trim()) setCommentDraft(`@${c.author.handle} `);
+                setTimeout(() => commentInputRef.current?.focus(), 100);
               }}
             >
-              Reply <span className="text-zinc-600">20</span>
+              Reply
             </button>
             {canDelete && (
               <button
@@ -1306,13 +1362,22 @@ const App: React.FC = () => {
   const handleSubmitComment = async () => {
     if (!commentDraft.trim() || !selectedPost || !currentUser) return;
     const parentId = replyTarget ? Number(replyTarget.id) : undefined;
+    const cost = parentId ? 1 : 5;  // Reply = 1 sat, Comment = 5 sat
     try {
       await createApiComment(Number(selectedPost.id), currentUser.id, commentDraft.trim(), parentId);
       setCommentDraft('');
       setReplyTarget(null);
       fetchBalance(currentUser.id);
+      toast.success(`Comment posted (${cost} sat)`);
     } catch (err) {
-      toast.warning((err as Error).message);
+      const msg = (err as Error).message;
+      if (msg.includes('402') || msg.includes('Insufficient')) {
+        toast.error(`Insufficient balance. Need ${cost} sat.`);
+      } else if (msg.includes('429') || msg.includes('Rate limit')) {
+        toast.warning('Too many comments. Please wait.');
+      } else {
+        toast.warning(msg);
+      }
     }
   };
 
@@ -1320,20 +1385,26 @@ const App: React.FC = () => {
   const handleInlineComment = async () => {
     if (!inlineCommentDraft.trim() || !inlineCommentPost || !currentUser) return;
     try {
-      const cost = inlineCommentPost.type === 'Question' ? 50 : 20;
       await createApiComment(Number(inlineCommentPost.id), currentUser.id, inlineCommentDraft.trim());
       setInlineCommentDraft('');
       setInlineCommentPost(null);
       fetchBalance(currentUser.id);
-      toast.success('Comment posted');
+      toast.success('Comment posted (5 sat)');
     } catch (err) {
-      toast.warning((err as Error).message);
+      const msg = (err as Error).message;
+      if (msg.includes('402') || msg.includes('Insufficient')) {
+        toast.error('Insufficient balance for comment');
+      } else if (msg.includes('429') || msg.includes('Rate limit')) {
+        toast.warning('Too many comments. Please wait.');
+      } else {
+        toast.warning(msg);
+      }
     }
   };
 
   const renderInlineCommentSheet = () => {
     if (!inlineCommentPost) return null;
-    const cost = inlineCommentPost.type === 'Question' ? '50 sat' : '20 sat';
+    const cost = '5 sat';  // Comment cost
     return (
       <div className="fixed inset-0 z-[70] flex flex-col justify-end" onClick={() => setInlineCommentPost(null)}>
         <div className="absolute inset-0 bg-black/60" />
@@ -1361,12 +1432,11 @@ const App: React.FC = () => {
     );
   };
 
-  // Determine comment input cost label (S6: updated costs)
+  // Determine comment input cost label
   const commentCostLabel = () => {
     if (!selectedPost) return '';
-    if (replyTarget) return '10 sat';
-    if (selectedPost.type === 'Question') return '50 sat';  // Answer
-    return '20 sat';  // Comment
+    if (replyTarget) return '1 sat';  // Reply to comment
+    return '5 sat';  // Comment on post
   };
 
   const renderPostDetail = () => {
@@ -1410,12 +1480,19 @@ const App: React.FC = () => {
               {/* Article content - always render HTML from TipTap editor */}
               <ArticleRenderer content={selectedPost.content} />
               
-              {/* Engagement stats */}
+              {/* Engagement stats - clickable like button */}
               <div className="flex items-center gap-6 mt-8 pt-6 border-t border-zinc-800">
-                <div className="flex items-center gap-2 text-zinc-400">
-                  <Heart size={20} />
+                <button
+                  className={`flex items-center gap-2 transition-colors ${
+                    (likedPosts.has(String(selectedPost.id)) || selectedPost.isLiked)
+                      ? selectedPost.likeStatus === 'pending' ? 'text-red-500' : 'text-orange-500'
+                      : 'text-zinc-400 hover:text-pink-400'
+                  }`}
+                  onClick={() => handleLikeToggle(selectedPost)}
+                >
+                  <Heart size={20} fill={(likedPosts.has(String(selectedPost.id)) || selectedPost.isLiked) ? 'currentColor' : 'none'} />
                   <span className="font-medium">{selectedPost.likes}</span>
-                </div>
+                </button>
                 <div className="flex items-center gap-2 text-zinc-400">
                   <MessageCircle size={20} />
                   <span className="font-medium">{selectedPost.comments}</span>
@@ -1451,6 +1528,7 @@ const App: React.FC = () => {
               </div>
             )}
             <input
+              ref={commentInputRef}
               value={commentDraft}
               onChange={(e) => setCommentDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
@@ -1510,26 +1588,44 @@ const App: React.FC = () => {
                <p className="text-sm text-zinc-200 leading-relaxed mb-3 break-words">{answer.content}</p>
                <div className="flex items-center gap-4">
                  <button
-                   className={`flex items-center gap-1 text-[10px] font-bold ${answer.is_liked ? 'text-orange-400' : 'text-zinc-500'}`}
+                   className={`flex items-center gap-1 text-[10px] font-bold ${getCommentHeartColor(answer)}`}
                    onClick={async () => {
                      if (!currentUser || !selectedPost) return;
                      try {
-                       await toggleLikeComment(Number(selectedPost.id), answer.id, currentUser.id, answer.is_liked);
+                       const result = await toggleLikeComment(Number(selectedPost.id), answer.id, currentUser.id, answer.is_liked);
                        fetchBalance(currentUser.id);
-                     } catch (err) { toast.warning((err as Error).message); }
+                       if (!answer.is_liked) {
+                         toast.success('Liked! Locked for 1h');
+                       } else {
+                         const res = result as { refund_amount?: number } | undefined;
+                         if (res?.refund_amount !== undefined) {
+                           toast.info(`Unliked! ${res.refund_amount} sat refunded`);
+                         }
+                       }
+                     } catch (err) {
+                       const msg = (err as Error).message;
+                       if (msg.includes('settled')) {
+                         toast.error('Cannot unlike after 1h');
+                       } else if (msg.includes('402') || msg.includes('Insufficient')) {
+                         toast.error('Insufficient balance');
+                       } else {
+                         toast.warning(msg);
+                       }
+                     }
                    }}
                  >
                    <Heart size={12} fill={answer.is_liked ? 'currentColor' : 'none'} /> {answer.likes_count}
-                   <span className="text-zinc-600 ml-0.5">5</span>
                  </button>
                  <button
-                   className="text-[10px] font-bold text-zinc-500 hover:text-zinc-300"
+                   className={`text-[10px] font-bold hover:text-zinc-300 ${replyTarget?.id === String(answer.id) ? 'text-orange-400' : 'text-zinc-500'}`}
                    onClick={() => {
-                     setReplyTarget(prev => prev?.id === String(answer.id) ? null : { id: String(answer.id), handle: `@${answer.author.handle}` });
-                     if (!commentDraft.trim()) setCommentDraft(`@${answer.author.handle} `);
+                     const isToggleOff = replyTarget?.id === String(answer.id);
+                     setReplyTarget(isToggleOff ? null : { id: String(answer.id), handle: `@${answer.author.handle}` });
+                     if (!isToggleOff && !commentDraft.trim()) setCommentDraft(`@${answer.author.handle} `);
+                     setTimeout(() => commentInputRef.current?.focus(), 100);
                    }}
                  >
-                   Reply <span className="text-zinc-600">20</span>
+                   Reply
                  </button>
                </div>
                {/* Sub-replies to this answer */}
@@ -1553,6 +1649,7 @@ const App: React.FC = () => {
               </div>
             )}
             <input
+              ref={commentInputRef}
               value={commentDraft}
               onChange={(e) => setCommentDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
@@ -3260,7 +3357,10 @@ const App: React.FC = () => {
                     onChange={async (e) => {
                       setAddMemberSearch(e.target.value);
                       try {
-                        const results = await api.searchUsers(e.target.value);
+                        const query = e.target.value.trim();
+                        const results = query
+                          ? await api.searchUsers(query)
+                          : await api.listUsers();
                         const existingIds = new Set(groupDetail.members.map(m => m.user.id));
                         setAddMemberResults(results.filter((u: any) => !existingIds.has(u.id)));
                       } catch (error) {

@@ -88,7 +88,7 @@ export interface ApiPost {
   author: ApiUser;
   title?: string | null;
   content: string;
-  content_format?: 'plain' | 'markdown';
+  content_format?: 'plain' | 'markdown' | 'html';
   post_type: 'note' | 'article' | 'question';
   status: string;
   likes_count: number;
@@ -98,6 +98,8 @@ export interface ApiPost {
   is_ai: boolean;
   created_at: string;
   is_liked: boolean;
+  like_status?: 'pending' | 'settled' | null;
+  locked_until?: string | null;
   boost_amount?: number;
   boost_remaining?: number;
 }
@@ -119,6 +121,8 @@ export interface ApiComment {
   likes_count: number;
   cost_paid: number;
   is_liked: boolean;
+  like_status?: 'pending' | 'settled' | null;
+  like_locked_until?: string | null;
   created_at: string;
   interaction_status?: 'pending' | 'settled' | 'cancelled';
   locked_until?: string | null;
@@ -436,10 +440,9 @@ export const api = {
     apiRequest<{
       likes_count: number;
       is_liked: boolean;
+      like_status: 'pending' | 'settled';
+      locked_until: string;
       cost: number;
-      author_share: number;
-      early_liker_share: number;
-      platform_share: number;
       your_weight: number;
       like_rank: number;
     }>(`/api/posts/${postId}/like`, {
@@ -448,7 +451,12 @@ export const api = {
     }),
 
   unlikePost: (postId: number, userId: number) =>
-    apiRequest<{ likes_count: number; is_liked: boolean; note: string }>(`/api/posts/${postId}/like`, {
+    apiRequest<{
+      likes_count: number;
+      is_liked: boolean;
+      refund_amount: number;
+      refund_rate: string;
+    }>(`/api/posts/${postId}/like`, {
       method: 'DELETE',
       params: { user_id: userId },
     }),
@@ -469,13 +477,26 @@ export const api = {
     }),
 
   likeComment: (postId: number, commentId: number, userId: number) =>
-    apiRequest<{ likes_count: number; is_liked: boolean }>(
+    apiRequest<{
+      likes_count: number;
+      is_liked: boolean;
+      like_status: 'pending' | 'settled';
+      locked_until: string;
+      cost: number;
+      your_weight: number;
+      like_rank: number;
+    }>(
       `/api/posts/${postId}/comments/${commentId}/like`,
       { method: 'POST', params: { user_id: userId } },
     ),
 
   unlikeComment: (postId: number, commentId: number, userId: number) =>
-    apiRequest<{ likes_count: number; is_liked: boolean }>(
+    apiRequest<{
+      likes_count: number;
+      is_liked: boolean;
+      refund_amount: number;
+      refund_rate: string;
+    }>(
       `/api/posts/${postId}/comments/${commentId}/like`,
       { method: 'DELETE', params: { user_id: userId } },
     ),

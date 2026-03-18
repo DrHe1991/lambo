@@ -16,8 +16,11 @@ from app.schemas.user import UserBrief
 from app.services.ledger_service import LedgerService
 from app.services.dynamic_like_service import (
     DynamicLikeService, like_cost as calc_like_cost,
-    AlreadyLiked, CannotLikeOwnPost,
+    AlreadyLiked, CannotLikeOwnPost, CannotUnlikeSettled,
     InsufficientBalance as DynamicInsufficientBalance,
+)
+from app.services.rate_limit_service import (
+    check_post_rate_limit, check_comment_rate_limit,
 )
 from app.models.reward import InteractionLog, InteractionType
 
@@ -51,8 +54,15 @@ def _user_brief(user: User) -> UserBrief:
     )
 
 
-def build_post_response(post: Post, is_liked: bool = False) -> PostResponse:
-    """Build PostResponse from Post model."""
+def build_post_response(
+    post: Post,
+    like_info: dict | None = None,
+) -> PostResponse:
+    """Build PostResponse from Post model with optional like info."""
+    is_liked = like_info is not None
+    like_status = like_info.get('status') if like_info else None
+    locked_until = like_info.get('locked_until') if like_info else None
+    
     return PostResponse(
         id=post.id,
         author=_user_brief(post.author),
@@ -68,10 +78,16 @@ def build_post_response(post: Post, is_liked: bool = False) -> PostResponse:
         is_ai=post.is_ai,
         created_at=post.created_at,
         is_liked=is_liked,
+        like_status=like_status,
+        locked_until=locked_until,
     )
 
 
-def _comment_response(c: Comment, author: User, is_liked: bool = False) -> CommentResponse:
+def _comment_response(c: Comment, author: User, like_info: dict | None = None) -> CommentResponse:
+    is_liked = like_info is not None
+    like_status = like_info.get('status') if like_info else None
+    like_locked_until = like_info.get('locked_until') if like_info else None
+    
     return CommentResponse(
         id=c.id,
         post_id=c.post_id,
@@ -81,34 +97,62 @@ def _comment_response(c: Comment, author: User, is_liked: bool = False) -> Comme
         likes_count=c.likes_count,
         cost_paid=c.cost_paid,
         is_liked=is_liked,
+        like_status=like_status,
+        like_locked_until=like_locked_until,
         created_at=c.created_at,
         interaction_status=c.interaction_status,
         locked_until=c.locked_until,
     )
 
 
-async def _check_post_liked(db: AsyncSession, post_ids: list[int], user_id: int) -> set[int]:
-    """Return set of post IDs that the user has liked."""
+async def _check_post_liked(db: AsyncSession, post_ids: list[int], user_id: int) -> dict[int, dict]:
+    """Return dict mapping post_id to like info {status, locked_until}.
+    
+    Only returns non-cancelled likes. Settlement is handled by background cron job.
+    """
     if not post_ids or not user_id:
-        return set()
+        return {}
+    
     result = await db.execute(
-        select(PostLike.post_id)
+        select(PostLike)
         .where(PostLike.user_id == user_id)
         .where(PostLike.post_id.in_(post_ids))
+        .where(PostLike.status != InteractionStatus.CANCELLED.value)
     )
-    return set(result.scalars().all())
+    likes = list(result.scalars().all())
+    
+    return {
+        like.post_id: {
+            'status': like.status,
+            'locked_until': like.locked_until.isoformat() if like.locked_until else None,
+        }
+        for like in likes
+    }
 
 
-async def _check_comment_liked(db: AsyncSession, comment_ids: list[int], user_id: int) -> set[int]:
-    """Return set of comment IDs that the user has liked."""
+async def _check_comment_liked(db: AsyncSession, comment_ids: list[int], user_id: int) -> dict[int, dict]:
+    """Return dict mapping comment_id to like info {status, locked_until}.
+    
+    Only returns non-cancelled likes.
+    """
     if not comment_ids or not user_id:
-        return set()
+        return {}
+    
     result = await db.execute(
-        select(CommentLike.comment_id)
+        select(CommentLike)
         .where(CommentLike.user_id == user_id)
         .where(CommentLike.comment_id.in_(comment_ids))
+        .where(CommentLike.status != InteractionStatus.CANCELLED.value)
     )
-    return set(result.scalars().all())
+    likes = list(result.scalars().all())
+    
+    return {
+        like.comment_id: {
+            'status': like.status,
+            'locked_until': like.locked_until.isoformat() if like.locked_until else None,
+        }
+        for like in likes
+    }
 
 
 # ── Posts ────────────────────────────────────────────────────────────────────
@@ -119,10 +163,15 @@ async def create_post(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new post. Free in minimal system."""
+    """Create a new post. Free but rate-limited (3/hour, 10/day)."""
     author = await db.get(User, author_id)
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
+
+    # Check rate limit
+    allowed, error_msg = await check_post_rate_limit(db, author_id)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=error_msg)
 
     # Articles require a title
     is_article = post_data.post_type == PostType.ARTICLE.value
@@ -192,8 +241,8 @@ async def get_posts(
     result = await db.execute(query)
     posts = list(result.scalars().all())
 
-    liked_ids = await _check_post_liked(db, [p.id for p in posts], user_id or 0)
-    return [build_post_response(p, is_liked=p.id in liked_ids) for p in posts]
+    like_info_map = await _check_post_liked(db, [p.id for p in posts], user_id or 0)
+    return [build_post_response(p, like_info=like_info_map.get(p.id)) for p in posts]
 
 
 def _feed_score(post: Post, following_ids: set[int]) -> float:
@@ -255,8 +304,8 @@ async def get_feed(
     posts.sort(key=lambda p: _feed_score(p, following_ids), reverse=True)
     page = posts[offset:offset + limit]
 
-    liked_ids = await _check_post_liked(db, [p.id for p in page], user_id)
-    return [build_post_response(p, is_liked=p.id in liked_ids) for p in page]
+    like_info_map = await _check_post_liked(db, [p.id for p in page], user_id)
+    return [build_post_response(p, like_info=like_info_map.get(p.id)) for p in page]
 
 
 @router.get('/{post_id}', response_model=PostResponse)
@@ -273,8 +322,8 @@ async def get_post(
     if not post:
         raise HTTPException(status_code=404, detail='Post not found')
 
-    liked_ids = await _check_post_liked(db, [post.id], user_id or 0)
-    return build_post_response(post, is_liked=post.id in liked_ids)
+    like_info_map = await _check_post_liked(db, [post.id], user_id or 0)
+    return build_post_response(post, like_info=like_info_map.get(post.id))
 
 
 @router.patch('/{post_id}', response_model=PostResponse)
@@ -347,10 +396,11 @@ async def like_post(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a post with dynamic pricing and early supporter revenue sharing.
+    """Like a post with 1h lock period.
     
-    - Cost decreases as more people like: cost = max(5, 100 / sqrt(1 + likes))
-    - Revenue split: 50% author, 40% early likers, 10% platform
+    - Sats are locked for 1 hour before settlement
+    - User can unlike within 1h for 90% refund
+    - After 1h, like is settled and revenue is distributed
     """
     service = DynamicLikeService(db)
     
@@ -362,10 +412,9 @@ async def like_post(
         return {
             'likes_count': post.likes_count if post else 0,
             'is_liked': True,
+            'like_status': result['status'],
+            'locked_until': result['locked_until'].isoformat(),
             'cost': result['cost'],
-            'author_share': result['author_share'],
-            'early_liker_share': result['early_liker_share'],
-            'platform_share': result['platform_share'],
             'your_weight': result['weight'],
             'like_rank': result['like_rank'],
         }
@@ -373,7 +422,13 @@ async def like_post(
         raise HTTPException(status_code=400, detail='Cannot like your own post')
     except AlreadyLiked:
         post = await db.get(Post, post_id)
-        return {'likes_count': post.likes_count if post else 0, 'is_liked': True}
+        like_info = await service.get_like_status(user_id, post_id)
+        return {
+            'likes_count': post.likes_count if post else 0,
+            'is_liked': True,
+            'like_status': like_info['status'] if like_info else None,
+            'locked_until': like_info['locked_until'] if like_info else None,
+        }
     except DynamicInsufficientBalance as e:
         raise HTTPException(status_code=402, detail=str(e))
     except ValueError as e:
@@ -386,18 +441,33 @@ async def unlike_post(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlike a post. No refund in the minimal system."""
+    """Unlike a post within the 1h lock period.
+    
+    - PENDING like: 90% refund, 10% to platform
+    - SETTLED like: Cannot unlike (returns error)
+    """
     service = DynamicLikeService(db)
     
-    result = await service.unlike_post(user_id, post_id)
-    await db.commit()
-    
-    post = await db.get(Post, post_id)
-    return {
-        'likes_count': post.likes_count if post else 0,
-        'is_liked': False,
-        'note': 'No refund in minimal system',
-    }
+    try:
+        result = await service.unlike_post(user_id, post_id)
+        await db.commit()
+        
+        post = await db.get(Post, post_id)
+        
+        if not result.get('success'):
+            raise HTTPException(status_code=404, detail=result.get('error', 'Like not found'))
+        
+        return {
+            'likes_count': post.likes_count if post else 0,
+            'is_liked': False,
+            'refund_amount': result.get('refund_amount', 0),
+            'refund_rate': '90%',
+        }
+    except CannotUnlikeSettled:
+        raise HTTPException(
+            status_code=400,
+            detail='Cannot unlike after 1h - like has been settled',
+        )
 
 
 @router.get('/{post_id}/likers')
@@ -416,6 +486,10 @@ async def get_post_likers(
 
 # ── Comments ─────────────────────────────────────────────────────────────────
 
+COMMENT_COST_TOP_LEVEL = 5  # Commenting on post: 5 sats to post author
+COMMENT_COST_REPLY = 1      # Replying to comment: 1 sat to parent comment author
+
+
 @router.post(
     '/{post_id}/comments', response_model=CommentResponse,
     status_code=status.HTTP_201_CREATED,
@@ -426,7 +500,10 @@ async def create_comment(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a comment or reply. FREE in minimal system - earn via likes."""
+    """Create a comment or reply. Costs 5 sats (comment) or 1 sat (reply).
+    
+    Rate limited: 3/minute, 20/hour.
+    """
     post = await db.get(Post, post_id)
     if not post or post.status != PostStatus.ACTIVE.value:
         raise HTTPException(status_code=404, detail='Post not found')
@@ -435,22 +512,83 @@ async def create_comment(
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
 
-    # Validate parent comment
-    if comment_data.parent_id:
-        parent = await db.get(Comment, comment_data.parent_id)
-        if not parent or parent.post_id != post_id:
-            raise HTTPException(status_code=400, detail='Invalid parent comment')
+    # Check rate limit
+    allowed, error_msg = await check_comment_rate_limit(db, author_id)
+    if not allowed:
+        raise HTTPException(status_code=429, detail=error_msg)
 
-    # Comments are FREE - no cost, no lock
+    # Validate parent comment and flatten nested replies
+    actual_parent_id = comment_data.parent_id
+    parent_comment = None
+    if comment_data.parent_id:
+        parent_comment = await db.get(Comment, comment_data.parent_id)
+        if not parent_comment or parent_comment.post_id != post_id:
+            raise HTTPException(status_code=400, detail='Invalid parent comment')
+        # If replying to a reply, flatten to same level (use the top-level comment as parent)
+        if parent_comment.parent_id:
+            actual_parent_id = parent_comment.parent_id
+            # Get the actual parent for payment
+            parent_comment = await db.get(Comment, actual_parent_id)
+
+    # Determine cost and recipient
+    if actual_parent_id and parent_comment:
+        # Reply to comment: 1 sat to parent comment author
+        cost = COMMENT_COST_REPLY
+        recipient_id = parent_comment.author_id
+        action_type = ActionType.SPEND_REPLY
+    else:
+        # Top-level comment: 5 sats to post author
+        cost = COMMENT_COST_TOP_LEVEL
+        recipient_id = post.author_id
+        action_type = ActionType.SPEND_COMMENT
+
+    # Check balance
+    if author.available_balance < cost:
+        raise HTTPException(
+            status_code=402,
+            detail=f'Insufficient balance. Need {cost} sat, have {author.available_balance}'
+        )
+
+    # Deduct from commenter
+    author.available_balance -= cost
+    
+    # Create spend ledger entry
+    spend_entry = Ledger(
+        user_id=author_id,
+        amount=-cost,
+        balance_after=author.available_balance,
+        action_type=action_type.value,
+        ref_type=RefType.POST.value if not actual_parent_id else RefType.COMMENT.value,
+        ref_id=post_id if not actual_parent_id else actual_parent_id,
+        note=f'comment on post {post_id}' if not actual_parent_id else f'reply to comment {actual_parent_id}',
+    )
+    db.add(spend_entry)
+
+    # Pay recipient (instant settlement, no lock)
+    recipient = await db.get(User, recipient_id)
+    if recipient:
+        recipient.available_balance += cost
+        earn_entry = Ledger(
+            user_id=recipient_id,
+            amount=cost,
+            balance_after=recipient.available_balance,
+            action_type=ActionType.EARN_COMMENT.value,
+            ref_type=RefType.POST.value if not actual_parent_id else RefType.COMMENT.value,
+            ref_id=post_id if not actual_parent_id else actual_parent_id,
+            note=f'comment from user {author_id}',
+        )
+        db.add(earn_entry)
+
+    # Create comment
     comment = Comment(
         post_id=post_id,
         author_id=author_id,
         content=comment_data.content,
-        parent_id=comment_data.parent_id,
-        cost_paid=0,
+        parent_id=actual_parent_id,
+        cost_paid=cost,
         interaction_status=InteractionStatus.SETTLED.value,
         locked_until=None,
-        recipient_id=None,
+        recipient_id=recipient_id,
     )
     db.add(comment)
     post.comments_count += 1
@@ -490,12 +628,12 @@ async def get_comments(
     )
     comments = list(result.scalars().all())
 
-    liked_ids = await _check_comment_liked(
+    like_info_map = await _check_comment_liked(
         db, [c.id for c in comments], user_id or 0,
     )
 
     return [
-        _comment_response(c, c.author, is_liked=c.id in liked_ids)
+        _comment_response(c, c.author, like_info=like_info_map.get(c.id))
         for c in comments
     ]
 
@@ -562,7 +700,12 @@ async def like_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a comment with dynamic pricing. 50% author, 40% early likers, 10% platform."""
+    """Like a comment with 1h lock period.
+    
+    - Sats are locked for 1 hour before settlement
+    - User can unlike within 1h for 90% refund
+    - After 1h, like is settled and revenue is distributed
+    """
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
@@ -580,14 +723,22 @@ async def like_comment(
         return {
             'likes_count': comment.likes_count,
             'is_liked': True,
+            'like_status': result['status'],
+            'locked_until': result['locked_until'].isoformat(),
             'cost': result['cost'],
-            'author_share': result['author_share'],
-            'early_liker_share': result['early_liker_share'],
+            'your_weight': result['weight'],
+            'like_rank': result['like_rank'],
         }
     except CannotLikeOwnPost:
         raise HTTPException(status_code=400, detail='Cannot like your own comment')
     except AlreadyLiked:
-        return {'likes_count': comment.likes_count, 'is_liked': True}
+        like_info = await service.get_comment_like_status(user_id, comment_id)
+        return {
+            'likes_count': comment.likes_count,
+            'is_liked': True,
+            'like_status': like_info['status'] if like_info else None,
+            'locked_until': like_info['locked_until'] if like_info else None,
+        }
     except DynamicInsufficientBalance as e:
         raise HTTPException(status_code=402, detail=str(e))
 
@@ -602,19 +753,35 @@ async def unlike_comment(
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlike a comment. No refund in minimal system."""
+    """Unlike a comment within the 1h lock period.
+    
+    - PENDING like: 90% refund, 10% to platform
+    - SETTLED like: Cannot unlike (returns error)
+    """
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
 
     service = DynamicLikeService(db)
-    removed = await service.unlike_comment(user_id, comment_id)
-    await db.commit()
-
-    return {
-        'likes_count': comment.likes_count,
-        'is_liked': not removed,
-    }
+    
+    try:
+        result = await service.unlike_comment(user_id, comment_id)
+        await db.commit()
+        
+        if not result.get('success'):
+            raise HTTPException(status_code=404, detail=result.get('error', 'Like not found'))
+        
+        return {
+            'likes_count': comment.likes_count,
+            'is_liked': False,
+            'refund_amount': result.get('refund_amount', 0),
+            'refund_rate': '90%',
+        }
+    except CannotUnlikeSettled:
+        raise HTTPException(
+            status_code=400,
+            detail='Cannot unlike after 1h - like has been settled',
+        )
 
 
 # Boost endpoints removed in minimal system

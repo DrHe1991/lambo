@@ -23,7 +23,7 @@ interface PostState {
   createPost: (authorId: number, content: string, postType: string, bounty?: number) => Promise<ApiPost>;
   toggleLikePost: (postId: number, userId: number, isLiked: boolean) => Promise<void>;
   createComment: (postId: number, authorId: number, content: string, parentId?: number) => Promise<ApiComment>;
-  toggleLikeComment: (postId: number, commentId: number, userId: number, isLiked: boolean) => Promise<void>;
+  toggleLikeComment: (postId: number, commentId: number, userId: number, isLiked: boolean) => Promise<unknown>;
   deleteComment: (commentId: number, postId: number, userId: number) => Promise<{ refunded: number; penalty: number }>;
   clearCurrentPost: () => void;
 }
@@ -123,7 +123,19 @@ export const usePostStore = create<PostState>((set, get) => ({
     const doToggle = isLiked ? api.unlikePost : api.likePost;
     try {
       const result = await doToggle(postId, userId);
-      const patch = { likes_count: result.likes_count, is_liked: result.is_liked };
+      const patch: Partial<ApiPost> = {
+        likes_count: result.likes_count,
+        is_liked: result.is_liked,
+      };
+      
+      if ('like_status' in result) {
+        patch.like_status = result.like_status;
+        patch.locked_until = result.locked_until;
+      } else {
+        patch.like_status = null;
+        patch.locked_until = null;
+      }
+
       set((state) => ({
         posts: state.posts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
         feedPosts: state.feedPosts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
@@ -155,13 +167,26 @@ export const usePostStore = create<PostState>((set, get) => ({
     const doToggle = isLiked ? api.unlikeComment : api.likeComment;
     try {
       const result = await doToggle(postId, commentId, userId);
+      const patch: Partial<ApiComment> = {
+        likes_count: result.likes_count,
+        is_liked: result.is_liked,
+      };
+      
+      if ('like_status' in result) {
+        patch.like_status = result.like_status;
+        patch.like_locked_until = result.locked_until;
+      } else {
+        patch.like_status = null;
+        patch.like_locked_until = null;
+      }
+      
       set((state) => ({
         comments: state.comments.map((c) =>
-          c.id === commentId
-            ? { ...c, likes_count: result.likes_count, is_liked: result.is_liked }
-            : c,
+          c.id === commentId ? { ...c, ...patch } : c,
         ),
       }));
+      
+      return result;
     } catch (error) {
       throw error;
     }
