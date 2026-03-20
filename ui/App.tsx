@@ -131,7 +131,7 @@ const App: React.FC = () => {
 
   // Chat detail state
   type ChatMessageReaction = { emoji: string; user_id: number; user_name: string };
-  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; content: string; messageType: 'text' | 'system'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; senderName?: string; senderAvatar?: string | null; content: string; messageType: 'text' | 'system'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
   const [removedFromSessions, setRemovedFromSessions] = useState<Set<number>>(new Set());
@@ -242,7 +242,9 @@ const App: React.FC = () => {
         
         return [...updated, { 
           id: message.id, 
-          senderId: message.sender_id, 
+          senderId: message.sender_id,
+          senderName: message.sender?.name,
+          senderAvatar: message.sender?.avatar,
           content: message.content, 
           messageType: message.message_type,
           status: message.status,
@@ -558,7 +560,9 @@ const App: React.FC = () => {
         const msgs = await api.getMessages(Number(selectedChat.id), currentUser.id);
         setChatMessages(msgs.map(m => ({ 
           id: m.id, 
-          senderId: m.sender_id, 
+          senderId: m.sender_id,
+          senderName: m.sender?.name,
+          senderAvatar: m.sender?.avatar,
           content: m.content, 
           messageType: m.message_type,
           status: m.status,
@@ -2166,7 +2170,9 @@ const App: React.FC = () => {
             .filter(m => !existingIds.has(m.id))
             .map(m => ({ 
               id: m.id, 
-              senderId: m.sender_id, 
+              senderId: m.sender_id,
+              senderName: m.sender?.name,
+              senderAvatar: m.sender?.avatar,
               content: m.content, 
               messageType: m.message_type,
               status: m.status,
@@ -2398,12 +2404,44 @@ const App: React.FC = () => {
               No messages yet. Say hi! 👋
             </div>
           )}
-          {/* Render all messages in chronological order */}
-          {chatMessages.map(msg => {
+          {/* Render all messages in chronological order with WeChat-style grouping */}
+          {chatMessages.map((msg, idx) => {
             const isMe = msg.senderId === currentUser?.id || msg.senderId === currentMe.id;
             const isPending = msg.status === 'pending';
             const isSystem = msg.messageType === 'system';
             const isSelected = selectedMessageId === msg.id;
+            
+            // Previous and next message for grouping logic
+            const prevMsg = idx > 0 ? chatMessages[idx - 1] : null;
+            const nextMsg = idx < chatMessages.length - 1 ? chatMessages[idx + 1] : null;
+            
+            // Time gap detection (WeChat style: show timestamp if gap > 5 minutes)
+            const msgTime = msg.createdAt ? new Date(msg.createdAt) : null;
+            const prevTime = prevMsg?.createdAt ? new Date(prevMsg.createdAt) : null;
+            const showTimestamp = !prevMsg || (msgTime && prevTime && (msgTime.getTime() - prevTime.getTime() > 5 * 60 * 1000));
+            
+            // Format timestamp like WeChat
+            const formatChatTime = (date: Date) => {
+              const now = new Date();
+              const isToday = date.toDateString() === now.toDateString();
+              const yesterday = new Date(now);
+              yesterday.setDate(yesterday.getDate() - 1);
+              const isYesterday = date.toDateString() === yesterday.toDateString();
+              
+              const timeStr = date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+              if (isToday) return timeStr;
+              if (isYesterday) return `Yesterday ${timeStr}`;
+              return `${date.getMonth() + 1}/${date.getDate()} ${timeStr}`;
+            };
+            
+            // Message grouping: same sender within 2 minutes = same group
+            const isSameSenderAsPrev = prevMsg && prevMsg.senderId === msg.senderId && prevMsg.messageType !== 'system';
+            const isSameSenderAsNext = nextMsg && nextMsg.senderId === msg.senderId && nextMsg.messageType !== 'system';
+            const isWithinGroupTime = prevTime && msgTime && (msgTime.getTime() - prevTime.getTime() < 2 * 60 * 1000);
+            const isNextWithinGroupTime = nextMsg?.createdAt && msgTime && (new Date(nextMsg.createdAt).getTime() - msgTime.getTime() < 2 * 60 * 1000);
+            
+            const isFirstInGroup = !isSameSenderAsPrev || !isWithinGroupTime || showTimestamp;
+            const isLastInGroup = !isSameSenderAsNext || !isNextWithinGroupTime;
 
             // System message (warning banner style, in chat history)
             if (isSystem) {
@@ -2433,48 +2471,75 @@ const App: React.FC = () => {
             }
 
             // Normal text message
+            // For group chats, use message sender info; for 1:1 chats, use chatPartner
+            const msgSenderName = isGroup ? (msg.senderName || 'Unknown') : (chatPartner?.name || 'User');
+            const msgSenderAvatar = isGroup ? msg.senderAvatar : chatPartner?.avatar;
+            
             return (
-              <div key={msg.id} ref={el => { messageRefs.current[String(msg.id)] = el; }} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'} relative transition-colors duration-500 ${highlightedMsgId === msg.id ? 'bg-orange-500/15 rounded-xl' : ''}`}>
-                {!isMe && (
-                  <button onClick={handleOpenProfile} className="flex-shrink-0">
-                    <img src={getAvatarUrl(chatPartner?.avatar, chatPartner?.name || 'User')} className="w-7 h-7 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, chatPartner?.name || 'User')} />
-                  </button>
+              <div key={msg.id}>
+                {/* WeChat-style centered timestamp */}
+                {showTimestamp && msgTime && (
+                  <div className="flex justify-center my-3">
+                    <span className="text-[10px] text-zinc-500 bg-zinc-900/50 px-2 py-0.5 rounded">
+                      {formatChatTime(msgTime)}
+                    </span>
+                  </div>
                 )}
-                <div className={`flex flex-col gap-1 max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
-                  {/* Reply preview - click to scroll to original */}
-                  {msg.replyTo && (
-                    <button
-                      onClick={() => scrollToMessage(msg.replyTo!.id)}
-                      className="text-[10px] text-zinc-500 bg-zinc-900/50 px-2 py-1 rounded-lg border-l-2 border-orange-500 text-left cursor-pointer hover:bg-zinc-800/60 transition-colors max-w-full"
-                    >
-                      <span className="text-orange-400 font-medium">{msg.replyTo.sender_name}</span>
-                      <span className="ml-1 line-clamp-1">↩ {msg.replyTo.content}</span>
-                    </button>
+                
+                <div 
+                  ref={el => { messageRefs.current[String(msg.id)] = el; }} 
+                  className={`flex items-start gap-2 ${isMe ? 'justify-end' : 'justify-start'} ${isFirstInGroup ? 'mt-3' : 'mt-1'} relative transition-colors duration-500 ${highlightedMsgId === msg.id ? 'bg-orange-500/15 rounded-xl' : ''}`}
+                >
+                  {/* Avatar: show on first message in group, placeholder for others */}
+                  {!isMe && (
+                    <div className="w-8 flex-shrink-0 pt-0.5">
+                      {isFirstInGroup ? (
+                        <button onClick={handleOpenProfile}>
+                          <img src={getAvatarUrl(msgSenderAvatar, msgSenderName)} className="w-8 h-8 rounded-full object-cover" onError={(e) => handleAvatarError(e, msgSenderName)} />
+                        </button>
+                      ) : null}
+                    </div>
                   )}
-                  <button
-                    className={`px-4 py-2.5 text-sm break-words text-left select-none ${
-                      isMe
-                          ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
-                          : 'bg-zinc-900 text-zinc-200 rounded-2xl rounded-bl-sm'
-                    } ${isSelected ? 'ring-2 ring-orange-400' : ''}`}
-                    onClick={(e) => handleMessageClick(e, msg.id)}
-                    onMouseDown={(e) => handleLongPressStart(msg.id, e)}
-                    onMouseUp={handleLongPressEnd}
-                    onMouseLeave={handleLongPressEnd}
-                    onTouchStart={(e) => handleLongPressStart(msg.id, e)}
-                    onTouchEnd={handleLongPressEnd}
-                    onContextMenu={(e) => { 
-                      e.preventDefault(); 
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setSelectedMessageId(msg.id); 
-                      setMenuPosition({ x: rect.left + rect.width / 2, y: rect.bottom + 8 }); 
-                      setEmojiPage(0);
-                    }}
-                  >
-                    {msg.content}
-                  </button>
-                  {/* Reactions display */}
-                  {msg.reactions && msg.reactions.length > 0 && (
+                  
+                  <div className={`flex flex-col gap-0.5 max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
+                    {/* Show sender name in group chats, only on first message in group */}
+                    {isGroup && !isMe && isFirstInGroup && (
+                      <span className="text-[11px] text-zinc-500 mb-0.5">{msgSenderName}</span>
+                    )}
+                    {/* Reply preview - click to scroll to original */}
+                    {msg.replyTo && (
+                      <button
+                        onClick={() => scrollToMessage(msg.replyTo!.id)}
+                        className="text-[10px] text-zinc-500 bg-zinc-900/50 px-2 py-1 rounded-lg border-l-2 border-orange-500 text-left cursor-pointer hover:bg-zinc-800/60 transition-colors max-w-full"
+                      >
+                        <span className="text-orange-400 font-medium">{msg.replyTo.sender_name}</span>
+                        <span className="ml-1 line-clamp-1">↩ {msg.replyTo.content}</span>
+                      </button>
+                    )}
+                    <button
+                      className={`px-3 py-2 text-sm break-words text-left select-none ${
+                        isMe
+                            ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
+                            : 'bg-zinc-800 text-zinc-100 rounded-2xl rounded-bl-sm'
+                      } ${isSelected ? 'ring-2 ring-orange-400' : ''}`}
+                      onClick={(e) => handleMessageClick(e, msg.id)}
+                      onMouseDown={(e) => handleLongPressStart(msg.id, e)}
+                      onMouseUp={handleLongPressEnd}
+                      onMouseLeave={handleLongPressEnd}
+                      onTouchStart={(e) => handleLongPressStart(msg.id, e)}
+                      onTouchEnd={handleLongPressEnd}
+                      onContextMenu={(e) => { 
+                        e.preventDefault(); 
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setSelectedMessageId(msg.id); 
+                        setMenuPosition({ x: rect.left + rect.width / 2, y: rect.bottom + 8 }); 
+                        setEmojiPage(0);
+                      }}
+                    >
+                      {msg.content}
+                    </button>
+                    {/* Reactions display */}
+                    {msg.reactions && msg.reactions.length > 0 && (
                     <div className="flex gap-1 flex-wrap relative">
                       {Object.entries(
                         msg.reactions.reduce((acc, r) => {
@@ -2588,6 +2653,7 @@ const App: React.FC = () => {
                     </div>
                   </>
                 )}
+                </div>
               </div>
             );
           })}

@@ -583,6 +583,7 @@ async def get_messages(
         latest_id = max(m.id for m in sent_messages)
         if not membership.last_read_message_id or latest_id > membership.last_read_message_id:
             membership.last_read_message_id = latest_id
+            await db.commit()  # Persist the read status
 
     # Reverse to chronological order
     messages = list(reversed(messages))
