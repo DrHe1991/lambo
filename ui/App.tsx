@@ -705,8 +705,8 @@ const App: React.FC = () => {
   );
 
   const renderFollowing = () => (
-    <div className="p-4">
-      <h2 className="text-xl font-bold mb-4 px-2">Timeline</h2>
+    <div className="">
+      <div className="px-4 pb-4">
       {feedPostsConverted.map(post => (
         <PostCard 
           key={post.id} 
@@ -736,6 +736,7 @@ const App: React.FC = () => {
         <p className="text-center text-zinc-600 text-xs py-6">No more posts</p>
       )}
       <div ref={feedSentinelRef} className="h-1" />
+      </div>
     </div>
   );
 

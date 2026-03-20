@@ -282,13 +282,14 @@ async def get_session(
         )
         last_msg = last_msg_result.scalar_one_or_none()
 
-        # Get unread count (only count messages visible to this user, exclude system msgs)
+        # Get unread count (only count messages visible to this user, exclude system msgs and own messages)
         user_membership = next((m for m in session.members if m.user_id == user_id and m.left_at is None), None)
         unread_count = 0
         visibility_filter = and_(
             Message.session_id == session_id,
             Message.message_type == 'text',
             Message.status == 'sent',
+            Message.sender_id != user_id,  # Exclude own messages from unread count
             (Message.visible_to == None) | (Message.visible_to == user_id)
         )
         if user_membership and user_membership.last_read_message_id:
@@ -302,7 +303,7 @@ async def get_session(
             )
             unread_count = unread_result or 0
         elif last_msg:
-            # Never read = count all visible text messages
+            # Never read = count all visible text messages (excluding own)
             unread_result = await db.scalar(
                 select(func.count()).where(visibility_filter)
             )
