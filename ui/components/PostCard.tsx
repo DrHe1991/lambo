@@ -25,13 +25,20 @@ function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | nu
 }
 
 export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, isLiked, likeCost }) => {
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  const contentText = post.content.trim();
+  const articlePreview = contentText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const shouldClampContent = post.type !== 'Article' && (
+    contentText.length > 140 || contentText.split('\n').length > 3
+  );
+
   return (
     <div
       data-testid={`post-card-${post.id}`}
-      className="border border-stone-800 rounded-2xl p-4 mb-3 active:scale-[0.98] transition-transform duration-100 bg-stone-900"
+      className="border border-stone-800 rounded-2xl p-3 mb-2.5 active:scale-[0.98] transition-all duration-100 bg-stone-900 post-card"
       onClick={() => onClick?.(post)}
     >
-      <div className="flex items-start gap-3 mb-3">
+      <div className="flex items-start gap-3 mb-2.5">
         <button
           className="w-10 h-10 rounded-full shrink-0"
           onClick={(e) => { e.stopPropagation(); onUserClick?.(String(post.author.id)); }}
@@ -70,7 +77,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
       </div>
 
       {post.type === 'Question' && (
-        <div className="mb-2">
+        <div className="mb-1.5">
           <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full mr-2 uppercase tracking-tight">
             Question
           </span>
@@ -83,31 +90,45 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
       )}
 
       {post.type === 'Article' && post.title && (
-        <h3 className="text-lg font-bold text-white mb-2">{post.title}</h3>
+        <h3 className="text-lg font-bold text-white mb-1.5">{post.title}</h3>
       )}
 
       {post.type === 'Article' ? (
         <>
-          <p className="text-stone-200 text-sm leading-relaxed mb-4">
-            {(() => {
-              const text = post.content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
-              return text.length > 150 ? `${text.slice(0, 150).trim()}...` : text;
-            })()}
+          <p className="text-stone-200 text-sm leading-relaxed mb-3">
+            {articlePreview.length > 150 ? `${articlePreview.slice(0, 150).trim()}...` : articlePreview}
           </p>
           <button
-            className="text-orange-400 text-sm font-medium hover:text-orange-300 transition-colors mb-3"
+            className="text-orange-400 text-sm font-medium hover:text-orange-300 transition-colors mb-2.5"
             onClick={(e) => { e.stopPropagation(); onClick?.(post); }}
           >
             Read full article →
           </button>
         </>
       ) : (
-        <p className="text-stone-200 text-sm leading-relaxed mb-4 whitespace-pre-wrap">
-          {post.content}
-        </p>
+        <>
+          <p
+            className={`text-stone-200 text-sm leading-relaxed mb-2 whitespace-pre-wrap break-words ${
+              shouldClampContent && !isExpanded ? 'line-clamp-4' : ''
+            }`}
+          >
+            {contentText}
+          </p>
+          {shouldClampContent && (
+            <button
+              className="text-stone-500 text-xs font-medium hover:text-stone-300 transition-colors mb-2.5"
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsExpanded((prev) => !prev);
+              }}
+            >
+              {isExpanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
+        </>
       )}
 
-      <div className="flex items-center justify-between pt-2 border-t border-stone-800/50">
+      <div className="flex items-center justify-between pt-1.5 border-t border-stone-800/50">
         <div className="flex items-center gap-4">
           <button
             data-testid={`like-button-${post.id}`}

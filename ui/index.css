@@ -16,30 +16,30 @@
 /* ─── Light mode ─── */
 /* Flip the stone palette so dark surfaces become light, muted text stays legible */
 [data-theme="light"] {
-  /* Inverted stone scale — warm neutrals */
-  --color-stone-50:  #1c1917;  /* darkest — replaces lightest */
-  --color-stone-100: #292524;
-  --color-stone-200: #44403c;
-  --color-stone-300: #57534e;
-  --color-stone-400: #78716c;
-  --color-stone-500: #a8a29e;
-  --color-stone-600: #d6d3d1;
-  --color-stone-700: #e7e5e4;
-  --color-stone-800: #f0efed;
-  --color-stone-900: #f8f7f6;
-  --color-stone-950: #fdfcfb;
+  /* Inverted stone scale — refined ivory neutrals */
+  --color-stone-50:  #1d1713;  /* darkest — replaces lightest */
+  --color-stone-100: #2f241d;
+  --color-stone-200: #4d3d31;
+  --color-stone-300: #6b5b4d;
+  --color-stone-400: #8f7e70;
+  --color-stone-500: #b1a091;
+  --color-stone-600: #d9d0c6;
+  --color-stone-700: #e8e0d7;
+  --color-stone-800: #f2ece4;
+  --color-stone-900: #fbf7f1;
+  --color-stone-950: #fefcf8;
 
-  /* Swap black → warm white for page backgrounds */
-  --color-black: #fafaf9;
+  /* Swap black → tinted ivory for page backgrounds */
+  --color-black: #faf6f0;
   /* Swap white → warm near-black for primary text */
-  --color-white: #1c1917;
+  --color-white: #1d1713;
 
   /* Semantic surfaces */
-  --bg-base: #f5f4f2;
-  --bg-surface: #ffffff;
-  --bg-elevated: #ffffff;
-  --border-default: #e7e5e4;
-  --border-subtle: #f0efed;
+  --bg-base: #f3eee7;
+  --bg-surface: #fcf8f2;
+  --bg-elevated: #fffdfa;
+  --border-default: #e3dbd1;
+  --border-subtle: #eee7de;
 
   /* Make green/red dark tints work on light bg */
   --color-green-900: #dcfce7;
@@ -54,7 +54,10 @@
 }
 
 [data-theme="light"] body {
-  color: #1c1917;
+  color: #1d1713;
+  background-image:
+    radial-gradient(circle at top, rgba(255, 253, 249, 0.82), rgba(255, 253, 249, 0) 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0) 220px);
 }
 
 /* Keep text/icons white on colored backgrounds in light mode */
@@ -90,6 +93,30 @@
 /* Image overlays must stay dark for legibility */
 [data-theme="light"] .absolute .bg-black\/50 {
   background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* Light mode: soft shadows instead of borders for cards & nav */
+[data-theme="light"] .post-card {
+  background-color: rgba(255, 252, 248, 0.96);
+  background-image: none;
+  border-color: rgba(201, 188, 174, 0.16);
+  box-shadow: 0 1px 2px rgba(60, 39, 18, 0.025);
+}
+[data-theme="light"] .top-nav {
+  background-color: rgba(255, 252, 248, 0.97);
+  background-image: none;
+  border-bottom: 1px solid rgba(201, 188, 174, 0.2);
+  box-shadow: 0 2px 8px rgba(60, 40, 20, 0.04);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-theme="light"] .bottom-nav {
+  background-color: rgba(255, 252, 248, 0.97);
+  background-image: none;
+  border-color: rgba(201, 188, 174, 0.2);
+  box-shadow: 0 -2px 8px rgba(60, 40, 20, 0.04);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* bg-white stays truly white (QR codes, CTA buttons with text-black) */

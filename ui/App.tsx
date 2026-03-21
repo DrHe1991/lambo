@@ -610,7 +610,7 @@ const App: React.FC = () => {
   const renderHeader = () => {
     if (currentView !== 'MAIN') return null;
     return (
-      <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between">
+      <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
         <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">
           <span className="text-orange-500">Bit</span>Link
         </span>
@@ -632,7 +632,7 @@ const App: React.FC = () => {
   const renderBottomNav = () => {
     if (currentView !== 'MAIN' || isPublishing) return null;
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-stone-800 safe-bottom-nav">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-stone-800 safe-bottom-nav bottom-nav">
         <div className="max-w-md mx-auto px-4 py-2 grid grid-cols-5 items-center">
           <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-stone-500'}`}>
             <Home size={22} />
@@ -669,7 +669,7 @@ const App: React.FC = () => {
   // Sub-Views
   const renderFeed = () => (
     <div className="">
-      <div className="px-4 pb-4">
+      <div className="px-4 py-3">
         {feedPostsConverted.map(post => (
           <PostCard 
             key={post.id} 
@@ -706,7 +706,7 @@ const App: React.FC = () => {
 
   const renderFollowing = () => (
     <div className="">
-      <div className="px-4 pb-4">
+      <div className="px-4 py-3">
       {feedPostsConverted.map(post => (
         <PostCard 
           key={post.id} 
