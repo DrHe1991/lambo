@@ -73,8 +73,8 @@ const SingleToast: React.FC<{ item: ToastItem }> = ({ item }) => {
       } ${visible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2'}`}
     >
       {iconMap[item.type]}
-      <span className="text-sm font-medium text-zinc-200 flex-1">{item.message}</span>
-      <button onClick={handleDismiss} className="p-0.5 text-zinc-500 hover:text-zinc-300">
+      <span className="text-sm font-medium text-stone-200 flex-1">{item.message}</span>
+      <button onClick={handleDismiss} className="p-0.5 text-stone-500 hover:text-stone-300 transition-colors" aria-label="Dismiss">
         <X size={14} />
       </button>
     </div>

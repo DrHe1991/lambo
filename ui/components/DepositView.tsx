@@ -1,7 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { Copy, Check, RefreshCw, ArrowLeft, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Copy, Check, RefreshCw, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useWalletStore, useUserStore } from '../stores';
+import { Header } from './ui/Header';
+import { Spinner } from './ui/Spinner';
+import { Badge } from './ui/Badge';
+import { EmptyState } from './ui/EmptyState';
+import { ErrorMessage } from './ui/ErrorMessage';
 
 interface DepositViewProps {
   onBack: () => void;
@@ -62,7 +67,7 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
       fetchDeposits(currentUser.id).catch(() => {});
     }
   };
-  
+
   const isLoading = isLoadingAddress || isLoadingDeposits;
   const selectedChainFee = chainFees.find(f => f.chain === selectedChain);
 
@@ -73,7 +78,7 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
       case 'pending':
         return <Clock className="w-4 h-4 text-yellow-500" />;
       default:
-        return <AlertCircle className="w-4 h-4 text-zinc-500" />;
+        return <AlertCircle className="w-4 h-4 text-stone-500" />;
     }
   };
 
@@ -89,40 +94,38 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
 
   return (
     <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-      {/* Header */}
-      <div className="sticky top-0 z-10 bg-black/95 backdrop-blur-xl border-b border-zinc-800">
-        <div className="flex items-center justify-between px-4 py-3">
-          <button onClick={onBack} className="p-2 -ml-2 text-zinc-400 hover:text-white">
-            <ArrowLeft className="w-6 h-6" />
-          </button>
-          <h1 className="text-lg font-bold text-white">Deposit</h1>
+      <Header
+        title="Deposit"
+        onBack={onBack}
+        rightContent={
           <button
             onClick={handleRefresh}
             disabled={isLoading}
-            className="p-2 -mr-2 text-zinc-400 hover:text-white disabled:opacity-50"
+            className="p-2 -mr-2 text-stone-400 hover:text-white disabled:opacity-50 transition-colors"
+            aria-label="Refresh"
           >
             <RefreshCw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
-        </div>
-      </div>
+        }
+      />
 
       <div className="px-4 py-6 space-y-6">
         {/* Chain Selector */}
         {chainFees.length > 0 && (
           <div className="space-y-2">
-            <h3 className="text-sm font-medium text-zinc-400">Select Network</h3>
+            <h3 className="text-sm font-medium text-stone-400">Select Network</h3>
             <div className="grid grid-cols-2 gap-2">
               {chainFees.map((chain) => (
                 <button
                   key={chain.chain}
                   onClick={() => chain.enabled && handleChainSelect(chain.chain)}
                   disabled={!chain.enabled}
-                  className={`p-3 rounded-xl border transition ${
+                  className={`p-3 rounded-xl border transition-colors ${
                     selectedChain === chain.chain
                       ? 'bg-orange-500/10 border-orange-500'
                       : chain.enabled
-                        ? 'bg-zinc-900 border-zinc-800 hover:border-zinc-700'
-                        : 'bg-zinc-900/50 border-zinc-800 opacity-50 cursor-not-allowed'
+                        ? 'bg-stone-900 border-stone-800 hover:border-stone-700'
+                        : 'bg-stone-900/50 border-stone-800 opacity-50 cursor-not-allowed'
                   }`}
                 >
                   <div className="flex items-center gap-2 mb-1">
@@ -134,11 +137,11 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
                     </span>
                   </div>
                   {chain.enabled ? (
-                    <div className="text-xs text-zinc-400">
+                    <div className="text-xs text-stone-400">
                       Receive ${chain.receive_amount.toFixed(2)} (min ${chain.min_deposit})
                     </div>
                   ) : (
-                    <div className="text-xs text-zinc-500">Coming soon</div>
+                    <div className="text-xs text-stone-500">Coming soon</div>
                   )}
                 </button>
               ))}
@@ -162,17 +165,17 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
         )}
 
         {/* QR Code Card */}
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+        <div className="bg-stone-900 border border-stone-800 rounded-2xl p-6">
           <div className="text-center mb-4">
-            <span className="inline-flex items-center gap-2 bg-orange-500/10 text-orange-500 text-sm font-medium px-3 py-1 rounded-full">
+            <Badge variant="orange">
               {CHAIN_ICONS[selectedChain]} {selectedChain.toUpperCase()} Network
               {selectedChain === 'tron' && ' (Shasta Testnet)'}
-            </span>
+            </Badge>
           </div>
 
           {isLoadingAddress && !depositAddress ? (
             <div className="flex justify-center py-12">
-              <div className="w-8 h-8 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
+              <Spinner size="lg" />
             </div>
           ) : addressError ? (
             <div className="text-center py-8">
@@ -195,19 +198,20 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
 
               {/* Address */}
               <div className="space-y-2">
-                <p className="text-zinc-500 text-xs text-center">Deposit Address</p>
-                <div className="bg-zinc-800 rounded-xl p-3 flex items-center gap-3">
+                <p className="text-stone-500 text-xs text-center">Deposit Address</p>
+                <div className="bg-stone-800 rounded-xl p-3 flex items-center gap-3">
                   <p className="flex-1 text-white text-sm font-mono break-all">
                     {depositAddress}
                   </p>
                   <button
                     onClick={handleCopy}
-                    className="shrink-0 p-2 bg-zinc-700 hover:bg-zinc-600 rounded-lg transition-colors"
+                    className="shrink-0 p-2 bg-stone-700 hover:bg-stone-600 rounded-lg transition-colors"
+                    aria-label={copied ? "Copied" : "Copy address"}
                   >
                     {copied ? (
                       <Check className="w-5 h-5 text-green-500" />
                     ) : (
-                      <Copy className="w-5 h-5 text-zinc-400" />
+                      <Copy className="w-5 h-5 text-stone-400" />
                     )}
                   </button>
                 </div>
@@ -231,18 +235,17 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
         {/* Recent Deposits */}
         <div>
           <h2 className="text-white font-bold mb-3">Recent Deposits</h2>
-          
+
           {deposits.length === 0 ? (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center">
-              <Clock className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
-              <p className="text-zinc-500 text-sm">No deposits yet</p>
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-2">
+              <EmptyState icon={Clock} message="No deposits yet" />
             </div>
           ) : (
             <div className="space-y-2">
               {deposits.map((deposit) => (
                 <div
                   key={deposit.id}
-                  className="bg-zinc-900 border border-zinc-800 rounded-xl p-4"
+                  className="bg-stone-900 border border-stone-800 rounded-xl p-4"
                 >
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
@@ -251,21 +254,17 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
                         +{deposit.amount_formatted}
                       </span>
                     </div>
-                    <span className="text-zinc-500 text-xs">
+                    <span className="text-stone-500 text-xs">
                       {formatDate(deposit.created_at)}
                     </span>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-zinc-500 text-xs font-mono">
+                    <span className="text-stone-500 text-xs font-mono">
                       {deposit.tx_hash.slice(0, 8)}...{deposit.tx_hash.slice(-8)}
                     </span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      deposit.status === 'confirmed'
-                        ? 'bg-green-500/10 text-green-500'
-                        : 'bg-yellow-500/10 text-yellow-500'
-                    }`}>
-                      {deposit.confirmations} confirmations
-                    </span>
+                    <Badge variant={deposit.status === 'confirmed' ? 'green' : 'yellow'}>
+                      {deposit.confirmations} confirmation{deposit.confirmations !== 1 ? 's' : ''}
+                    </Badge>
                   </div>
                 </div>
               ))}

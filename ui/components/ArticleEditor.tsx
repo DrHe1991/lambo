@@ -64,22 +64,38 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
 
   const addLink = () => {
     if (!editor) return;
-    
+
     const previousUrl = editor.getAttributes('link').href;
     const url = window.prompt('Enter URL:', previousUrl || 'https://');
-    
+
     if (url === null) return;
-    
+
     if (url === '') {
       editor.chain().focus().extendMarkRange('link').unsetLink().run();
       return;
     }
-    
+
+    // Validate URL to prevent XSS via javascript: or data: URIs
+    let sanitizedUrl: string;
+    try {
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return;
+      sanitizedUrl = parsed.href;
+    } catch {
+      // If not a valid URL, prefix with https://
+      sanitizedUrl = `https://${url}`;
+    }
+
     const { from, to } = editor.state.selection;
     if (from === to) {
-      editor.chain().focus().insertContent(`<a href="${url}">${url}</a>`).run();
+      // Use TipTap's setLink API instead of raw HTML insertion
+      editor.chain().focus()
+        .insertContent(sanitizedUrl)
+        .setTextSelection({ from, to: from + sanitizedUrl.length })
+        .setLink({ href: sanitizedUrl })
+        .run();
     } else {
-      editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run();
+      editor.chain().focus().extendMarkRange('link').setLink({ href: sanitizedUrl }).run();
     }
   };
 
@@ -104,7 +120,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
       className={`p-2 rounded-lg transition-colors ${
         isActive 
           ? 'bg-orange-500/20 text-orange-400' 
-          : 'text-zinc-400 hover:bg-zinc-800 hover:text-white'
+          : 'text-stone-400 hover:bg-stone-800 hover:text-white'
       } ${disabled ? 'opacity-30 cursor-not-allowed' : ''}`}
     >
       {children}
@@ -122,14 +138,14 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           value={title}
           onChange={(e) => onTitleChange(e.target.value)}
           placeholder="Article title"
-          className="w-full bg-zinc-900/50 border border-orange-500/30 focus-within:border-orange-500/60 rounded-xl px-4 py-3 pr-10 text-lg font-bold outline-none placeholder:text-zinc-600"
+          className="w-full bg-stone-900/50 border border-orange-500/30 focus-within:border-orange-500/60 rounded-xl px-4 py-3 pr-10 text-lg font-bold outline-none placeholder:text-stone-600"
           maxLength={200}
         />
         {onRemoveTitle && (
           <button
             type="button"
             onClick={onRemoveTitle}
-            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-orange-400 transition-colors"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-stone-500 hover:text-orange-400 transition-colors"
             title="Remove title"
           >
             <X size={16} />
@@ -138,7 +154,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
       </div>
 
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-0.5 p-2 bg-zinc-900/50 rounded-xl border border-zinc-800">
+      <div className="flex flex-wrap items-center gap-0.5 p-2 bg-stone-900/50 rounded-xl border border-stone-800">
         <ToolbarButton
           onClick={() => editor?.chain().focus().toggleBold().run()}
           isActive={editor?.isActive('bold') ?? false}
@@ -163,7 +179,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           <UnderlineIcon size={16} />
         </ToolbarButton>
 
-        <div className="w-px h-5 bg-zinc-700 mx-1" />
+        <div className="w-px h-5 bg-stone-700 mx-1" />
         
         <ToolbarButton
           onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}
@@ -181,7 +197,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           <Heading2 size={16} />
         </ToolbarButton>
 
-        <div className="w-px h-5 bg-zinc-700 mx-1" />
+        <div className="w-px h-5 bg-stone-700 mx-1" />
         
         <ToolbarButton
           onClick={() => editor?.chain().focus().toggleBulletList().run()}
@@ -207,7 +223,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           <Quote size={16} />
         </ToolbarButton>
 
-        <div className="w-px h-5 bg-zinc-700 mx-1" />
+        <div className="w-px h-5 bg-stone-700 mx-1" />
         
         <ToolbarButton
           onClick={addLink}
@@ -237,28 +253,28 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
       </div>
 
       {/* WYSIWYG Editor */}
-      <div className="bg-zinc-900/30 border border-orange-500/30 focus-within:border-orange-500/60 rounded-xl p-4">
+      <div className="bg-stone-900/30 border border-orange-500/30 focus-within:border-orange-500/60 rounded-xl p-4">
         <EditorContent 
           editor={editor} 
           className="prose prose-invert max-w-none 
             [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:text-white [&_h1]:mt-4 [&_h1]:mb-2
             [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-white [&_h2]:mt-3 [&_h2]:mb-2
             [&_h3]:text-lg [&_h3]:font-semibold [&_h3]:text-white [&_h3]:mt-2 [&_h3]:mb-1
-            [&_p]:text-zinc-300 [&_p]:my-2 [&_p]:text-base
+            [&_p]:text-stone-300 [&_p]:my-2 [&_p]:text-base
             [&_strong]:text-orange-400 
-            [&_em]:text-zinc-200
+            [&_em]:text-stone-200
             [&_a]:text-orange-400 [&_a]:underline
-            [&_blockquote]:border-l-2 [&_blockquote]:border-orange-500 [&_blockquote]:bg-zinc-800/50 [&_blockquote]:py-2 [&_blockquote]:px-4 [&_blockquote]:rounded-r-lg [&_blockquote]:text-zinc-400 [&_blockquote]:my-3
-            [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ul]:text-zinc-300
-            [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_ol]:text-zinc-300
-            [&_li]:my-1 [&_li]:text-zinc-300 [&_li_p]:my-0
-            [&_.is-editor-empty:first-child::before]:text-zinc-600 [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:pointer-events-none
+            [&_blockquote]:border-l-2 [&_blockquote]:border-orange-500 [&_blockquote]:bg-stone-800/50 [&_blockquote]:py-2 [&_blockquote]:px-4 [&_blockquote]:rounded-r-lg [&_blockquote]:text-stone-400 [&_blockquote]:my-3
+            [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ul]:text-stone-300
+            [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_ol]:text-stone-300
+            [&_li]:my-1 [&_li]:text-stone-300 [&_li_p]:my-0
+            [&_.is-editor-empty:first-child::before]:text-stone-600 [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:pointer-events-none
           "
         />
       </div>
 
       {/* Character count */}
-      <div className="flex items-center justify-between text-xs text-zinc-500">
+      <div className="flex items-center justify-between text-xs text-stone-500">
         <span>{charCount} characters</span>
       </div>
     </div>

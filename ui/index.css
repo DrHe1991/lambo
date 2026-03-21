@@ -1,11 +1,133 @@
 @import "tailwindcss";
 
-body {
-  font-family: 'Inter', sans-serif;
-  background-color: #0a0a0a;
+/* Custom easing curves — natural deceleration, not bounce */
+:root {
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Warm dark palette — tinted toward orange/brown */
+  --bg-base: #0c0a09;
+  --bg-surface: #1c1917;
+  --bg-elevated: #292524;
+  --border-default: #44403c;
+  --border-subtle: #292524;
+}
+
+/* ─── Light mode ─── */
+/* Flip the stone palette so dark surfaces become light, muted text stays legible */
+[data-theme="light"] {
+  /* Inverted stone scale — warm neutrals */
+  --color-stone-50:  #1c1917;  /* darkest — replaces lightest */
+  --color-stone-100: #292524;
+  --color-stone-200: #44403c;
+  --color-stone-300: #57534e;
+  --color-stone-400: #78716c;
+  --color-stone-500: #a8a29e;
+  --color-stone-600: #d6d3d1;
+  --color-stone-700: #e7e5e4;
+  --color-stone-800: #f0efed;
+  --color-stone-900: #f8f7f6;
+  --color-stone-950: #fdfcfb;
+
+  /* Swap black → warm white for page backgrounds */
+  --color-black: #fafaf9;
+  /* Swap white → warm near-black for primary text */
+  --color-white: #1c1917;
+
+  /* Semantic surfaces */
+  --bg-base: #f5f4f2;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --border-default: #e7e5e4;
+  --border-subtle: #f0efed;
+
+  /* Make green/red dark tints work on light bg */
+  --color-green-900: #dcfce7;
+  --color-green-300: #166534;
+  --color-red-900: #fee2e2;
+  --color-red-300: #991b1b;
+
+  /* Slightly deepen orange accent for contrast on white */
+  --color-orange-500: #ea580c;
+
+  color-scheme: light;
+}
+
+[data-theme="light"] body {
+  color: #1c1917;
+}
+
+/* Keep text/icons white on colored backgrounds in light mode */
+[data-theme="light"] .bg-orange-500,
+[data-theme="light"] .bg-orange-600,
+[data-theme="light"] .bg-pink-500,
+[data-theme="light"] .bg-blue-500,
+[data-theme="light"] [class*="bg-gradient-to"] {
+  --color-white: #ffffff;
   color: #ffffff;
+}
+[data-theme="light"] .bg-orange-500 svg,
+[data-theme="light"] .bg-orange-600 svg,
+[data-theme="light"] .bg-pink-500 svg,
+[data-theme="light"] .bg-blue-500 svg,
+[data-theme="light"] [class*="bg-gradient-to"] svg {
+  color: #ffffff;
+}
+
+/* Keep "fill-white" actually white on colored surfaces */
+[data-theme="light"] .bg-orange-500 .fill-white,
+[data-theme="light"] [class*="bg-gradient-to"] .fill-white {
+  fill: #ffffff;
+}
+
+/* Login page background: swap via-black to via-white */
+[data-theme="light"] .from-orange-900\/10 {
+  --tw-gradient-from: rgba(234, 88, 12, 0.06);
+  --tw-gradient-via: rgba(250, 250, 249, 1);
+  --tw-gradient-to: rgba(245, 158, 11, 0.03);
+}
+
+/* Image overlays must stay dark for legibility */
+[data-theme="light"] .absolute .bg-black\/50 {
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+/* bg-white stays truly white (QR codes, CTA buttons with text-black) */
+[data-theme="light"] .bg-white {
+  background-color: #ffffff;
+  --color-black: #1c1917;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background-color: var(--bg-base);
+  color: #fafaf9;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Overlay backdrops — always dark regardless of theme */
+.overlay-dim {
+  background-color: rgba(0, 0, 0, 0.8) !important;
+}
+.overlay-dim-50 {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+}
+.overlay-dim-60 {
+  background-color: rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Display font for headings and brand elements */
+h1, h2, h3, .font-display {
+  font-family: 'Space Grotesk', sans-serif;
+}
+
+/* Tabular numbers for financial data */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* Hide scrollbars but keep functionality */
@@ -24,4 +146,87 @@ body {
 /* Bottom nav needs extra breathing room above iOS safe area. */
 .safe-bottom-nav {
   padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+}
+
+/* Fade-in-up for feed items and list entries */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.3s var(--ease-out-quart) both;
+}
+
+/* Staggered children — apply to parent container */
+.stagger-children > * {
+  animation: fade-in-up 0.3s var(--ease-out-quart) both;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(n+6) { animation-delay: 250ms; }
+
+/* Slide up for bottom sheets */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s var(--ease-out-expo) both;
+}
+
+/* Success checkmark */
+@keyframes scale-check {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-scale-check {
+  animation: scale-check 0.4s var(--ease-out-quart) both;
+}
+
+/* Like heart pop */
+@keyframes heart-pop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+.animate-heart-pop {
+  animation: heart-pop 0.3s var(--ease-out-quart);
+}
+
+/* Respect user preference for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

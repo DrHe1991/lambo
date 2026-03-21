@@ -3,7 +3,7 @@ import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionT
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload, RefreshCw } from 'lucide-react';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload, RefreshCw, Sun, Moon } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 // TrustBadge removed - trust system simplified
 import { LoginPage } from './components/LoginPage';
@@ -19,6 +19,7 @@ import { ExchangeView } from './components/ExchangeView';
 // Trust theme removed - trust system simplified
 import { ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest, ApiDraft } from './api/client';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
+import { useTheme } from './hooks/useTheme';
 
 // Views
 type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW' | 'EXCHANGE';
@@ -36,6 +37,9 @@ const handleAvatarError = (e: React.SyntheticEvent<HTMLImageElement>, name: stri
 };
 
 const App: React.FC = () => {
+  // Theme
+  const { theme, toggleTheme, isDark } = useTheme();
+
   // Stores
   const {
     currentUser,
@@ -222,13 +226,10 @@ const App: React.FC = () => {
 
   // WebSocket message handler - stable reference using ref
   const handleWebSocketMessage = useCallback((message: ApiMessage) => {
-    console.log('[WS] Received message:', message);
     const currentChat = selectedChatRef.current;
-    console.log('[WS] Current chat:', currentChat?.id, 'Message session:', message.session_id);
-    
+
     if (currentChat && Number(message.session_id) === Number(currentChat.id)) {
       // User is viewing this chat - add message directly
-      console.log('[WS] Adding message to chat');
       setChatMessages(prev => {
         if (prev.some(m => Number(m.id) === Number(message.id))) return prev;
         
@@ -253,7 +254,6 @@ const App: React.FC = () => {
       });
     } else {
       // User is not viewing this chat - refresh sessions to update unread count
-      console.log('[WS] Refreshing sessions list');
       if (currentUser?.id) {
         fetchSessions(currentUser.id);
       }
@@ -430,7 +430,7 @@ const App: React.FC = () => {
   const handleLogin = async () => {
     // In Phase 2, this will trigger actual Google OAuth
     // For now, users must use the "Create Account" button
-    console.log('Google login will be implemented in Phase 2');
+    // Google login will be implemented in Phase 2
   };
 
   // Load user from storage on mount
@@ -496,7 +496,7 @@ const App: React.FC = () => {
   // Fetch drafts when opening publish overlay
   useEffect(() => {
     if (isPublishing && currentUser) {
-      api.getDrafts(currentUser.id).then(setDrafts).catch(console.error);
+      api.getDrafts(currentUser.id).then(setDrafts).catch(() => {});
     }
   }, [isPublishing, currentUser?.id]);
 
@@ -519,7 +519,7 @@ const App: React.FC = () => {
             setCurrentDraftId(draft.id);
           }
         } catch (err) {
-          console.error('Auto-save failed:', err);
+          // Auto-save failed silently
         }
       }
     };
@@ -543,7 +543,7 @@ const App: React.FC = () => {
               trustScore: u.trust_score,
             })) as User[]);
         })
-        .catch(console.error)
+        .catch(() => {})
         .finally(() => setIsLoadingInvitableUsers(false));
     }
   }, [currentView, currentUser]);
@@ -573,7 +573,7 @@ const App: React.FC = () => {
         // Clear unread count after messages are loaded (backend already marked as read)
         markSessionAsRead(Number(selectedChat.id));
       } catch (error) {
-        console.error('Failed to load messages:', error);
+        // Failed to load messages
         setChatMessages([]);
       } finally {
         setIsLoadingChatMessages(false);
@@ -611,18 +611,18 @@ const App: React.FC = () => {
     if (currentView !== 'MAIN') return null;
     return (
       <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between">
-        <span className="text-[19px] text-white select-none" style={{ fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, letterSpacing: '-0.03em' }}>
+        <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">
           <span className="text-orange-500">Bit</span>Link
         </span>
         <div className="flex items-center gap-1">
           <button
-            className="p-2.5 rounded-full hover:bg-zinc-800/60 transition-colors"
+            className="p-2.5 rounded-full hover:bg-stone-800/60 transition-colors"
             onClick={() => setCurrentView('SEARCH')}
           >
-            <Search className="text-zinc-300" size={20} />
+            <Search className="text-stone-300" size={20} />
           </button>
-          <button className="p-2.5 rounded-full hover:bg-zinc-800/60 transition-colors relative">
-            <Bell className="text-zinc-300" size={20} />
+          <button className="p-2.5 rounded-full hover:bg-stone-800/60 transition-colors relative">
+            <Bell className="text-stone-300" size={20} />
           </button>
         </div>
       </header>
@@ -632,15 +632,15 @@ const App: React.FC = () => {
   const renderBottomNav = () => {
     if (currentView !== 'MAIN' || isPublishing) return null;
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-zinc-800 safe-bottom-nav">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-stone-800 safe-bottom-nav">
         <div className="max-w-md mx-auto px-4 py-2 grid grid-cols-5 items-center">
-          <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-stone-500'}`}>
             <Home size={22} />
-            <span className="text-[10px] font-medium">Feed</span>
+            <span className="text-xs font-medium">Feed</span>
           </button>
-          <button data-testid="nav-following" onClick={() => { setActiveTab('Following'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-following" onClick={() => { setActiveTab('Following'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Following' ? 'text-orange-500' : 'text-stone-500'}`}>
             <Users size={22} />
-            <span className="text-[10px] font-medium">Following</span>
+            <span className="text-xs font-medium">Following</span>
           </button>
           
           <div className="flex justify-center relative">
@@ -653,13 +653,13 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          <button data-testid="nav-chat" onClick={() => { setActiveTab('Chat'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-chat" onClick={() => { setActiveTab('Chat'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Chat' ? 'text-orange-500' : 'text-stone-500'}`}>
             <MessageCircle size={22} />
-            <span className="text-[10px] font-medium">Chat</span>
+            <span className="text-xs font-medium">Chat</span>
           </button>
-          <button data-testid="nav-profile" onClick={() => { setActiveTab('Profile'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-zinc-500'}`}>
+          <button data-testid="nav-profile" onClick={() => { setActiveTab('Profile'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Profile' ? 'text-orange-500' : 'text-stone-500'}`}>
             <UserIcon size={22} />
-            <span className="text-[10px] font-medium">Me</span>
+            <span className="text-xs font-medium">Me</span>
           </button>
         </div>
       </nav>
@@ -697,7 +697,7 @@ const App: React.FC = () => {
           </div>
         )}
         {!feedHasMore && feedPostsConverted.length > 0 && (
-          <p className="text-center text-zinc-600 text-xs py-6">No more posts</p>
+          <p className="text-center text-stone-600 text-xs py-6">No more posts</p>
         )}
         <div ref={feedSentinelRef} className="h-1" />
       </div>
@@ -733,7 +733,7 @@ const App: React.FC = () => {
         </div>
       )}
       {!feedHasMore && feedPostsConverted.length > 0 && (
-        <p className="text-center text-zinc-600 text-xs py-6">No more posts</p>
+        <p className="text-center text-stone-600 text-xs py-6">No more posts</p>
       )}
       <div ref={feedSentinelRef} className="h-1" />
       </div>
@@ -751,10 +751,10 @@ const App: React.FC = () => {
     return (
       <div className="p-4">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-bold tracking-wide uppercase text-zinc-100">Messages</h2>
+          <h2 className="text-lg font-bold tracking-wide uppercase text-stone-100">Messages</h2>
           <div className="relative">
             <button
-              className="p-2 bg-zinc-900 border border-zinc-800 rounded-full"
+              className="p-2 bg-stone-900 border border-stone-800 rounded-full"
               onClick={() => setShowChatActions(prev => !prev)}
               aria-label="Open chat quick actions"
             >
@@ -763,11 +763,11 @@ const App: React.FC = () => {
             {showChatActions && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setShowChatActions(false)} />
-                <div className="absolute right-0 top-12 w-44 bg-zinc-950 border border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20">
+                <div className="absolute right-0 top-12 w-44 bg-stone-950 border border-stone-800 rounded-xl shadow-xl overflow-hidden z-20">
                   {chatQuickActions.map(action => (
                     <button
                       key={action.id}
-                      className="w-full px-3 py-2.5 text-left text-sm text-zinc-200 hover:bg-zinc-900 flex items-center gap-2"
+                      className="w-full px-3 py-2.5 text-left text-sm text-stone-200 hover:bg-stone-900 flex items-center gap-2"
                       onClick={() => {
                         setShowChatActions(false);
                         setCurrentView(action.view);
@@ -798,21 +798,21 @@ const App: React.FC = () => {
               }}
             >
               <div className="relative">
-                <img src={getAvatarUrl(displayUser?.avatar, displayUser?.name || 'User')} className="w-14 h-14 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, displayUser?.name || 'User')} />
+                <img src={getAvatarUrl(displayUser?.avatar, displayUser?.name || 'User')} className="w-14 h-14 rounded-full border border-stone-800 object-cover" onError={(e) => handleAvatarError(e, displayUser?.name || 'User')} />
                 {chat.isGroup && otherParticipants[1] && (
                    <img src={getAvatarUrl(otherParticipants[1].avatar, otherParticipants[1].name)} className="w-8 h-8 rounded-full border-2 border-black absolute -bottom-1 -right-1 object-cover" onError={(e) => handleAvatarError(e, otherParticipants[1].name)} />
                 )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
-                  <span className="font-bold text-zinc-100">{chat.isGroup ? (chat.name || 'Group Chat') : displayUser?.name}</span>
-                  <span className="text-[10px] text-zinc-500">{chat.timestamp}</span>
+                  <span className="font-bold text-stone-100">{chat.isGroup ? (chat.name || 'Group Chat') : displayUser?.name}</span>
+                  <span className="text-xs text-stone-500">{chat.timestamp}</span>
                 </div>
-                <p className="text-sm text-zinc-500 truncate">{chat.lastMessage}</p>
+                <p className="text-sm text-stone-500 truncate">{chat.lastMessage}</p>
               </div>
               {chat.unreadCount > 0 && (
                 <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center">
-                  <span className="text-[10px] font-black text-white">{chat.unreadCount}</span>
+                  <span className="text-xs font-bold text-white">{chat.unreadCount}</span>
                 </div>
               )}
             </div>
@@ -824,7 +824,7 @@ const App: React.FC = () => {
 
   const renderUserListPage = (title: 'Followers' | 'Following', users: User[]) => (
     <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <h2 className="text-lg font-bold uppercase tracking-wide">{title}</h2>
       </div>
@@ -833,20 +833,20 @@ const App: React.FC = () => {
           {users.map(user => (
             <button
               key={user.id}
-              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-2xl p-3 flex items-center justify-between"
+              className="w-full bg-stone-900/50 border border-stone-800 rounded-2xl p-3 flex items-center justify-between"
               onClick={() => {
                 setSelectedUser(user);
                 setCurrentView('USER_PROFILE');
               }}
             >
               <div className="flex items-center gap-3">
-                <img src={getAvatarUrl(user.avatar, user.name)} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, user.name)} />
+                <img src={getAvatarUrl(user.avatar, user.name)} className="w-11 h-11 rounded-full border border-stone-800 object-cover" onError={(e) => handleAvatarError(e, user.name)} />
                 <div className="text-left">
-                  <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
-                  <span className="text-[11px] text-zinc-500">{user.handle}</span>
+                  <span className="text-sm font-bold text-stone-100 block">{user.name}</span>
+                  <span className="text-xs text-stone-500">{user.handle}</span>
                 </div>
               </div>
-              <ArrowLeft className="rotate-180 text-zinc-700" size={14} />
+              <ArrowLeft className="rotate-180 text-stone-700" size={14} />
             </button>
           ))}
         </div>
@@ -880,15 +880,15 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-lg font-bold uppercase tracking-wide">My QR Code</h2>
         </div>
         <div className="flex flex-col items-center justify-center p-8 pt-16">
           {/* QR Code placeholder - in real app would generate actual QR */}
           <div className="w-64 h-64 bg-white rounded-3xl p-4 flex items-center justify-center mb-8">
-            <div className="w-full h-full bg-gradient-to-br from-zinc-200 to-zinc-100 rounded-2xl flex items-center justify-center relative">
-              <QrCode size={180} className="text-zinc-800" />
+            <div className="w-full h-full bg-gradient-to-br from-stone-200 to-stone-100 rounded-2xl flex items-center justify-center relative">
+              <QrCode size={180} className="text-stone-800" />
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-lg">
                   <Zap className="w-8 h-8 text-white fill-white" />
@@ -898,19 +898,19 @@ const App: React.FC = () => {
           </div>
 
           <div className="text-center mb-8">
-            <h3 className="text-2xl font-black text-white mb-1">{currentMe.name}</h3>
+            <h3 className="text-2xl font-bold text-white mb-1">{currentMe.name}</h3>
             <p className="text-orange-400 font-bold text-lg">@{currentMe.handle}</p>
           </div>
 
           <button
             onClick={handleCopyHandle}
-            className="flex items-center gap-3 bg-zinc-900 border border-zinc-800 rounded-xl px-6 py-3"
+            className="flex items-center gap-3 bg-stone-900 border border-stone-800 rounded-xl px-6 py-3"
           >
             <Copy size={18} className="text-orange-400" />
-            <span className="text-zinc-300 font-medium">Copy Handle</span>
+            <span className="text-stone-300 font-medium">Copy Handle</span>
           </button>
 
-          <p className="text-zinc-600 text-sm text-center mt-8 px-8">
+          <p className="text-stone-600 text-sm text-center mt-8 px-8">
             Others can scan this code or search your handle <span className="text-orange-400">@{currentMe.handle}</span> to find you
           </p>
         </div>
@@ -962,25 +962,25 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-lg font-bold uppercase tracking-wide">New Group</h2>
         </div>
         <div className="p-4">
-          <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-2">Group Name</label>
+          <label className="text-xs font-bold text-stone-500 uppercase tracking-wide block mb-2">Group Name</label>
           <input
             value={groupChatName}
             onChange={(e) => setGroupChatName(e.target.value)}
             placeholder="Enter group name"
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-sm mb-5"
+            className="w-full bg-stone-900 border border-stone-800 rounded-xl px-4 py-3 text-sm mb-5"
           />
 
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Select Members</span>
+            <span className="text-xs font-bold text-stone-500 uppercase tracking-wide">Select Members</span>
             <span className="text-xs text-orange-400 font-bold">{groupMemberIds.size} selected</span>
           </div>
 
-          <p className="text-xs text-zinc-500 mb-4">
+          <p className="text-xs text-stone-500 mb-4">
             Only showing users who follow you or have a conversation with you.
           </p>
 
@@ -989,7 +989,7 @@ const App: React.FC = () => {
               <div className="w-6 h-6 border-2 border-orange-500/30 border-t-orange-500 rounded-full animate-spin" />
             </div>
           ) : candidates.length === 0 ? (
-            <div className="text-center py-8 text-zinc-500">
+            <div className="text-center py-8 text-stone-500">
               <p>No contacts available to invite.</p>
               <p className="text-xs mt-2">Users must follow you or have an established conversation.</p>
             </div>
@@ -1001,18 +1001,18 @@ const App: React.FC = () => {
                   <button
                     key={user.id}
                     className={`w-full rounded-2xl p-3 border flex items-center justify-between ${
-                      selected ? 'bg-orange-500/10 border-orange-500/40' : 'bg-zinc-900/50 border-zinc-800'
+                      selected ? 'bg-orange-500/10 border-orange-500/40' : 'bg-stone-900/50 border-stone-800'
                     }`}
                     onClick={() => toggleMember(user.id)}
                   >
                     <div className="flex items-center gap-3">
-                      <img src={getAvatarUrl(user.avatar, user.name)} className="w-11 h-11 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, user.name)} />
+                      <img src={getAvatarUrl(user.avatar, user.name)} className="w-11 h-11 rounded-full border border-stone-800 object-cover" onError={(e) => handleAvatarError(e, user.name)} />
                       <div className="text-left">
-                        <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
-                        <span className="text-[11px] text-zinc-500">{user.handle}</span>
+                        <span className="text-sm font-bold text-stone-100 block">{user.name}</span>
+                        <span className="text-xs text-stone-500">{user.handle}</span>
                       </div>
                     </div>
-                    <div className={`w-5 h-5 rounded-full border-2 ${selected ? 'bg-orange-500 border-orange-500' : 'border-zinc-600'}`} />
+                    <div className={`w-5 h-5 rounded-full border-2 ${selected ? 'bg-orange-500 border-orange-500' : 'border-stone-600'}`} />
                   </button>
                 );
               })}
@@ -1020,8 +1020,8 @@ const App: React.FC = () => {
           )}
 
           <button
-            className={`w-full py-3 rounded-xl text-sm font-black uppercase tracking-wide ${
-              canCreateGroup ? 'bg-orange-500 text-white' : 'bg-zinc-800 text-zinc-500'
+            className={`w-full py-3 rounded-xl text-sm font-bold uppercase tracking-wide ${
+              canCreateGroup ? 'bg-orange-500 text-white' : 'bg-stone-800 text-stone-500'
             }`}
             onClick={handleCreateGroup}
             disabled={!canCreateGroup}
@@ -1035,20 +1035,20 @@ const App: React.FC = () => {
 
   const renderScan = () => (
     <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <h2 className="text-lg font-bold uppercase tracking-wide">Scan</h2>
       </div>
       <div className="p-4 flex flex-col items-center">
-        <p className="text-sm text-zinc-400 mb-6 text-center">Scan friend QR code to add instantly</p>
-        <div className="w-72 h-72 rounded-3xl border-2 border-dashed border-orange-500/60 bg-zinc-900/40 flex items-center justify-center mb-6 relative">
+        <p className="text-sm text-stone-400 mb-6 text-center">Scan friend QR code to add instantly</p>
+        <div className="w-72 h-72 rounded-3xl border-2 border-dashed border-orange-500/60 bg-stone-900/40 flex items-center justify-center mb-6 relative">
           <div className="absolute inset-4 border border-orange-500/30 rounded-2xl" />
           <ScanLine size={64} className="text-orange-500/80" />
         </div>
-        <button className="w-full bg-orange-500 text-white font-black py-3 rounded-xl text-sm uppercase tracking-wide mb-3">
+        <button className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl text-sm uppercase tracking-wide mb-3">
           Open Camera
         </button>
-        <button className="w-full bg-zinc-900 border border-zinc-800 text-zinc-300 font-bold py-3 rounded-xl text-sm uppercase tracking-wide">
+        <button className="w-full bg-stone-900 border border-stone-800 text-stone-300 font-bold py-3 rounded-xl text-sm uppercase tracking-wide">
           My QR Code
         </button>
       </div>
@@ -1070,32 +1070,32 @@ const App: React.FC = () => {
         <div className="relative w-28 h-28 mb-4">
            <img src={getAvatarUrl(currentMe.avatar, currentMe.name)} className="w-full h-full rounded-full border-4 border-orange-500 object-cover" onError={(e) => handleAvatarError(e, currentMe.name)} />
         </div>
-        <h2 className="text-xl font-black italic tracking-tighter">{currentMe.name}</h2>
-        <span className="text-zinc-500 text-xs font-medium">{currentMe.handle}</span>
+        <h2 className="text-xl font-bold tracking-tight font-display">{currentMe.name}</h2>
+        <span className="text-stone-500 text-xs font-medium">{currentMe.handle}</span>
         <div className="flex items-center gap-6 mt-4">
           <button
             className="text-center active:scale-[0.98]"
             onClick={() => setCurrentView('FOLLOWERS_LIST')}
           >
-            <span className="text-base font-black text-zinc-100 block leading-none">{followerCount}</span>
-            <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Followers</span>
+            <span className="text-base font-bold text-stone-100 block leading-none">{followerCount}</span>
+            <span className="text-xs font-bold uppercase tracking-wide text-stone-500">Followers</span>
           </button>
           <button
             className="text-center active:scale-[0.98]"
             onClick={() => setCurrentView('FOLLOWING_LIST')}
           >
-            <span className="text-base font-black text-zinc-100 block leading-none">{followingCount}</span>
-            <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Following</span>
+            <span className="text-base font-bold text-stone-100 block leading-none">{followingCount}</span>
+            <span className="text-xs font-bold uppercase tracking-wide text-stone-500">Following</span>
           </button>
         </div>
       </div>
 
-      <div data-testid="balance-card" className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-4">
+      <div data-testid="balance-card" className="bg-stone-900 border border-stone-800 p-4 rounded-2xl mb-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Balance</span>
+            <span className="text-stone-500 text-xs font-bold uppercase block mb-1">Balance</span>
             <div className="flex items-baseline gap-1">
-              <span data-testid="balance-amount" className="text-2xl font-black text-zinc-100">{availableBalance.toLocaleString()}</span>
+              <span data-testid="balance-amount" className="text-2xl font-bold text-stone-100">{availableBalance.toLocaleString()}</span>
               <span className="text-orange-500 text-sm font-bold">sat</span>
               {change24h !== 0 && (
                 <span className={`text-xs font-bold ml-2 ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
@@ -1105,8 +1105,8 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="text-right">
-            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">USDT</span>
-            <span className="text-xl font-black text-zinc-100">${(stableBalance / 1_000_000).toFixed(2)}</span>
+            <span className="text-stone-500 text-xs font-bold uppercase block mb-1">USDT</span>
+            <span className="text-xl font-bold text-stone-100">${(stableBalance / 1_000_000).toFixed(2)}</span>
           </div>
         </div>
         <div className="flex gap-2">
@@ -1119,14 +1119,14 @@ const App: React.FC = () => {
           </button>
           <button
             onClick={() => setCurrentView('EXCHANGE')}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-orange-400 text-xs font-semibold rounded-xl border border-orange-500/30 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-stone-800 hover:bg-stone-700 text-orange-400 text-xs font-semibold rounded-xl border border-orange-500/30 transition-colors"
           >
             <RefreshCw size={14} />
             <span>Exchange</span>
           </button>
           <button
             onClick={() => setCurrentView('WITHDRAW')}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs font-semibold rounded-xl border border-zinc-700 transition-colors"
+            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-100 text-xs font-semibold rounded-xl border border-stone-700 transition-colors"
           >
             <Upload size={14} />
             <span>Withdraw</span>
@@ -1142,13 +1142,13 @@ const App: React.FC = () => {
           <button 
             key={idx} 
             onClick={item.action}
-            className="w-full flex items-center justify-between p-4 bg-zinc-950/50 border border-zinc-900 rounded-2xl active:bg-zinc-900"
+            className="w-full flex items-center justify-between p-4 bg-stone-950/50 border border-stone-900 rounded-2xl active:bg-stone-900"
           >
             <div className="flex items-center gap-4">
               <span className="text-orange-500">{item.icon}</span>
-              <span className="text-sm font-bold text-zinc-300">{item.label}</span>
+              <span className="text-sm font-bold text-stone-300">{item.label}</span>
             </div>
-            <ArrowLeft className="rotate-180 text-zinc-700" size={16} />
+            <ArrowLeft className="rotate-180 text-stone-700" size={16} />
           </button>
         ))}
       </div>
@@ -1156,7 +1156,7 @@ const App: React.FC = () => {
       {/* Logout button */}
       <button 
         onClick={() => logout()}
-        className="w-full mt-6 py-3 text-zinc-500 text-sm font-medium"
+        className="w-full mt-6 py-3 text-stone-500 text-sm font-medium"
       >
         Sign Out
       </button>
@@ -1174,17 +1174,17 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => { setCurrentView('MAIN'); setFriendSearch(''); setFriendSearchResults([]); }}><ArrowLeft /></button>
-          <div className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2 flex items-center gap-3">
-            <Search size={18} className="text-zinc-500" />
+          <div className="flex-1 bg-stone-900 border border-stone-800 rounded-xl px-4 py-2 flex items-center gap-3">
+            <Search size={18} className="text-stone-500" />
             <input 
               autoFocus
               value={friendSearch}
               onChange={(e) => setFriendSearch(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleFriendSearch()}
               placeholder="Search @handle or topics..." 
-              className="bg-transparent border-none outline-none text-sm w-full text-zinc-100" 
+              className="bg-transparent border-none outline-none text-sm w-full text-stone-100" 
             />
             {friendSearch.trim() && (
               <button
@@ -1201,24 +1201,24 @@ const App: React.FC = () => {
           {/* User search results */}
           {friendSearchResults.length > 0 && (
             <div className="mb-6">
-              <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-3">Users</h3>
+              <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-3">Users</h3>
               <div className="space-y-2">
                 {friendSearchResults.map(user => (
                   <div 
                     key={user.id} 
-                    className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-3 flex items-center gap-3"
+                    className="bg-stone-900/50 border border-stone-800 rounded-xl p-3 flex items-center gap-3"
                     onClick={() => handleViewProfile(user)}
                   >
                     <img 
                       src={getAvatarUrl(user.avatar, user.name)} 
-                      className="w-10 h-10 rounded-full border border-zinc-700 object-cover"
+                      className="w-10 h-10 rounded-full border border-stone-700 object-cover"
                       onError={(e) => handleAvatarError(e, user.name)}
                     />
                     <div className="flex-1">
-                      <span className="text-sm font-bold text-zinc-100 block">{user.name}</span>
-                      <span className="text-[11px] text-zinc-500">{user.handle}</span>
+                      <span className="text-sm font-bold text-stone-100 block">{user.name}</span>
+                      <span className="text-xs text-stone-500">{user.handle}</span>
                     </div>
-                    <span className="text-zinc-600 text-xs">→</span>
+                    <span className="text-stone-600 text-xs">→</span>
                   </div>
                 ))}
               </div>
@@ -1230,7 +1230,7 @@ const App: React.FC = () => {
           )}
 
           {friendSearch.trim() && friendSearchResults.length === 0 && !isFriendSearching && (
-            <p className="text-zinc-500 text-sm text-center py-6 mb-4">
+            <p className="text-stone-500 text-sm text-center py-6 mb-4">
               No users found for "{friendSearch}"
             </p>
           )}
@@ -1238,27 +1238,27 @@ const App: React.FC = () => {
           {/* Show trending when no search */}
           {!friendSearch.trim() && (
             <>
-              <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Trending Now</h3>
+              <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-4">Trending Now</h3>
               <div className="flex flex-wrap gap-2 mb-8">
                 {['#Bitcoin2025', '#AI_Moderation', '#SatStaking', '#Privacy', '#L2_Growth'].map(tag => (
-                  <span key={tag} className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-xs font-bold text-orange-400">
+                  <span key={tag} className="px-3 py-1.5 bg-stone-900 border border-stone-800 rounded-lg text-xs font-bold text-orange-400">
                     {tag}
                   </span>
                 ))}
               </div>
               
-              <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Popular Posts</h3>
+              <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-4">Popular Posts</h3>
               <div className="grid grid-cols-2 gap-3">
                 {posts.slice(0, 4).map((p, i) => (
-                  <div key={i} className="bg-zinc-950 border border-zinc-900 rounded-xl p-3 h-40 overflow-hidden relative">
+                  <div key={i} className="bg-stone-950 border border-stone-900 rounded-xl p-3 h-40 overflow-hidden relative">
                     <div className="flex items-center gap-2 mb-2">
                       <img src={getAvatarUrl(p.author.avatar, p.author.name)} className="w-5 h-5 rounded-full" onError={(e) => handleAvatarError(e, p.author.name)} />
-                      <span className="text-[10px] font-bold text-zinc-500">{p.author.handle}</span>
+                      <span className="text-xs font-bold text-stone-500">{p.author.handle}</span>
                     </div>
-                    <p className="text-[11px] text-zinc-300 leading-tight">{p.content}</p>
+                    <p className="text-xs text-stone-300 leading-tight">{p.content}</p>
                     <div className="absolute bottom-2 right-2 bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded flex items-center gap-1">
                        <Heart size={10} className="text-orange-500" />
-                       <span className="text-[10px] font-bold">{p.likes}</span>
+                       <span className="text-xs font-bold">{p.likes}</span>
                     </div>
                   </div>
                 ))}
@@ -1272,7 +1272,7 @@ const App: React.FC = () => {
 
   // Get comment heart color: pending=red, settled=orange, not liked=gray
   const getCommentHeartColor = (c: ApiComment) => {
-    if (!c.is_liked) return 'text-zinc-500';
+    if (!c.is_liked) return 'text-stone-500';
     if (c.like_status === 'pending') return 'text-red-500';
     return 'text-orange-400';  // settled or legacy
   };
@@ -1288,19 +1288,19 @@ const App: React.FC = () => {
         <div className="w-8 h-8 rounded-full shrink-0">
           <img
             src={getAvatarUrl(c.author.avatar, c.author.name)}
-            className="w-full h-full rounded-full object-cover border-2 border-zinc-700"
+            className="w-full h-full rounded-full object-cover border-2 border-stone-700"
             onError={(e) => handleAvatarError(e, c.author.name)}
           />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-bold truncate">{c.author.name}</span>
-            <span className="text-[10px] text-zinc-500 font-medium">@{c.author.handle}</span>
+            <span className="text-xs text-stone-500 font-medium">@{c.author.handle}</span>
           </div>
-          <p className="text-sm text-zinc-400 break-words">{c.content}</p>
+          <p className="text-sm text-stone-400 break-words">{c.content}</p>
           <div className="flex items-center gap-4 mt-2">
             <button
-              className={`flex items-center gap-1 text-[10px] font-bold ${heartColor}`}
+              className={`flex items-center gap-1 text-xs font-bold ${heartColor}`}
               onClick={async () => {
                 if (!currentUser || !selectedPost) return;
                 try {
@@ -1329,7 +1329,7 @@ const App: React.FC = () => {
               <Heart size={12} fill={isLiked ? 'currentColor' : 'none'} /> {c.likes_count}
             </button>
             <button
-              className={`text-[10px] font-bold hover:text-zinc-300 ${replyTarget?.id === String(c.id) ? 'text-orange-400' : 'text-zinc-500'}`}
+              className={`text-xs font-bold hover:text-stone-300 ${replyTarget?.id === String(c.id) ? 'text-orange-400' : 'text-stone-500'}`}
               onClick={() => {
                 const isToggleOff = replyTarget?.id === String(c.id);
                 setReplyTarget(isToggleOff ? null : { id: String(c.id), handle: `@${c.author.handle}` });
@@ -1341,7 +1341,7 @@ const App: React.FC = () => {
             </button>
             {canDelete && (
               <button
-                className="text-[10px] font-bold text-zinc-500 hover:text-zinc-400 flex items-center gap-1"
+                className="text-xs font-bold text-stone-500 hover:text-stone-400 flex items-center gap-1"
                 onClick={async () => {
                   if (!currentUser || !selectedPost) return;
                   if (!confirm('Delete this comment? You will get 70% refund, 30% penalty.')) return;
@@ -1412,14 +1412,14 @@ const App: React.FC = () => {
     const cost = '5 sat';  // Comment cost
     return (
       <div className="fixed inset-0 z-[70] flex flex-col justify-end" onClick={() => setInlineCommentPost(null)}>
-        <div className="absolute inset-0 bg-black/60" />
+        <div className="absolute inset-0 overlay-dim-60" />
         <div
-          className="relative bg-zinc-950 border-t border-zinc-800 rounded-t-2xl p-4 pb-8"
+          className="relative bg-stone-950 border-t border-stone-800 rounded-t-2xl p-4 pb-8"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs text-zinc-500">Replying to</span>
-            <span className="text-xs font-bold text-zinc-300">{inlineCommentPost.author.name}</span>
+            <span className="text-xs text-stone-500">Replying to</span>
+            <span className="text-xs font-bold text-stone-300">{inlineCommentPost.author.name}</span>
           </div>
           <div className="flex items-center gap-3">
             <input
@@ -1428,7 +1428,7 @@ const App: React.FC = () => {
               onChange={(e) => setInlineCommentDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleInlineComment()}
               placeholder="Add your insight..."
-              className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
+              className="flex-1 bg-stone-900 border border-stone-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
             />
             <button className="bg-orange-500 p-3 rounded-xl shrink-0" onClick={handleInlineComment}><Send size={18} /></button>
           </div>
@@ -1452,7 +1452,7 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center justify-between">
+        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center justify-between">
           <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
           <div className="w-6" />
           <button><MoreHorizontal /></button>
@@ -1462,23 +1462,23 @@ const App: React.FC = () => {
             <div className="mb-8">
               {/* Title */}
               {selectedPost.title && (
-                <h1 className="text-2xl font-black text-white mb-4 leading-tight">
+                <h1 className="text-2xl font-bold text-white mb-4 leading-tight">
                   {selectedPost.title}
                 </h1>
               )}
               
               {/* Author info */}
-              <div className="flex items-center gap-3 mb-6 pb-6 border-b border-zinc-800">
+              <div className="flex items-center gap-3 mb-6 pb-6 border-b border-stone-800">
                 <div className="w-12 h-12 rounded-full shrink-0">
                   <img
                     src={getAvatarUrl(selectedPost.author.avatar, selectedPost.author.name)}
-                    className="w-full h-full rounded-full object-cover border-2 border-zinc-700"
+                    className="w-full h-full rounded-full object-cover border-2 border-stone-700"
                     onError={(e) => handleAvatarError(e, selectedPost.author.name)}
                   />
                 </div>
                 <div>
                   <span className="font-bold text-white block">{selectedPost.author.name}</span>
-                  <span className="text-zinc-500 text-sm">{selectedPost.author.handle} · {selectedPost.timestamp}</span>
+                  <span className="text-stone-500 text-sm">{selectedPost.author.handle} · {selectedPost.timestamp}</span>
                 </div>
               </div>
               
@@ -1486,19 +1486,19 @@ const App: React.FC = () => {
               <ArticleRenderer content={selectedPost.content} />
               
               {/* Engagement stats - clickable like button */}
-              <div className="flex items-center gap-6 mt-8 pt-6 border-t border-zinc-800">
+              <div className="flex items-center gap-6 mt-8 pt-6 border-t border-stone-800">
                 <button
                   className={`flex items-center gap-2 transition-colors ${
                     (likedPosts.has(String(selectedPost.id)) || selectedPost.isLiked)
                       ? selectedPost.likeStatus === 'pending' ? 'text-red-500' : 'text-orange-500'
-                      : 'text-zinc-400 hover:text-pink-400'
+                      : 'text-stone-400 hover:text-pink-400'
                   }`}
                   onClick={() => handleLikeToggle(selectedPost)}
                 >
                   <Heart size={20} fill={(likedPosts.has(String(selectedPost.id)) || selectedPost.isLiked) ? 'currentColor' : 'none'} />
                   <span className="font-medium">{selectedPost.likes}</span>
                 </button>
-                <div className="flex items-center gap-2 text-zinc-400">
+                <div className="flex items-center gap-2 text-stone-400">
                   <MessageCircle size={20} />
                   <span className="font-medium">{selectedPost.comments}</span>
                 </div>
@@ -1511,8 +1511,8 @@ const App: React.FC = () => {
 
 
           {apiComments.length > 0 && (
-            <div className="mt-8 border-t border-zinc-900 pt-6">
-              <h3 className="text-sm font-black mb-4 uppercase tracking-wider text-zinc-500">
+            <div className="mt-8 border-t border-stone-900 pt-6">
+              <h3 className="text-sm font-bold mb-4 uppercase tracking-wider text-stone-500">
                 Discussion · {apiComments.length}
               </h3>
               {topLevel.map(c => (
@@ -1524,12 +1524,12 @@ const App: React.FC = () => {
             </div>
           )}
         </div>
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950 border-t border-zinc-900 flex items-center gap-3">
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-stone-950 border-t border-stone-900 flex items-center gap-3">
           <div className="flex-1">
             {replyTarget && (
               <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-[10px] font-bold text-orange-400 uppercase tracking-wide">Replying to {replyTarget.handle}</span>
-                <button className="text-[10px] text-zinc-500" onClick={() => setReplyTarget(null)}>Cancel</button>
+                <span className="text-xs font-bold text-orange-400 uppercase tracking-wide">Replying to {replyTarget.handle}</span>
+                <button className="text-xs text-stone-500" onClick={() => setReplyTarget(null)}>Cancel</button>
               </div>
             )}
             <input
@@ -1538,7 +1538,7 @@ const App: React.FC = () => {
               onChange={(e) => setCommentDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
               placeholder={replyTarget ? `Reply to ${replyTarget.handle}...` : 'Add your insight...'}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
+              className="w-full bg-stone-900 border border-stone-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
             />
           </div>
           <button className="bg-orange-500 p-3 rounded-xl shrink-0" onClick={handleSubmitComment}><Send size={18} /></button>
@@ -1554,13 +1554,13 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center justify-between">
+        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center justify-between">
           <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
           <div className="w-6" />
           <button><MoreHorizontal /></button>
         </div>
         <div className="p-4 bg-orange-500/5 border-b border-orange-500/10 mb-4">
-           <div className="bg-orange-500 text-white text-[10px] font-black px-2 py-1 rounded inline-block mb-3 uppercase tracking-widest">Question</div>
+           <div className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-3 uppercase tracking-tight">Question</div>
            <h2 className="text-xl font-bold mb-4">{selectedPost.content}</h2>
            <div className="flex items-center justify-between">
              <div className="flex items-center gap-2">
@@ -1568,32 +1568,32 @@ const App: React.FC = () => {
                <span className="text-xs font-bold">{selectedPost.author.handle}</span>
              </div>
              {selectedPost.bounty ? (
-               <div className="text-orange-500 font-black text-sm uppercase">💰 {selectedPost.bounty.toLocaleString()} sat bounty</div>
+               <div className="text-orange-500 font-bold text-sm uppercase">💰 {selectedPost.bounty.toLocaleString()} sat bounty</div>
              ) : null}
            </div>
         </div>
         <div className="p-4 pb-28">
 
-          <h3 className="text-xs font-black uppercase text-zinc-500 mb-4 tracking-widest">{answers.length} Answers</h3>
+          <h3 className="text-xs font-bold uppercase text-stone-500 mb-4 tracking-widest">{answers.length} Answers</h3>
           {answers.map(answer => (
-            <div key={answer.id} className="bg-zinc-900/50 border border-zinc-900 rounded-2xl p-4 mb-4">
+            <div key={answer.id} className="bg-stone-900/50 border border-stone-900 rounded-2xl p-4 mb-4">
                <div className="flex items-center gap-2 mb-3">
                   <div className="w-8 h-8 rounded-full shrink-0">
                     <img
                       src={getAvatarUrl(answer.author.avatar, answer.author.name)}
-                      className="w-full h-full rounded-full object-cover border-2 border-zinc-700"
+                      className="w-full h-full rounded-full object-cover border-2 border-stone-700"
                       onError={(e) => handleAvatarError(e, answer.author.name)}
                     />
                   </div>
                   <div>
                     <span className="text-xs font-bold">{answer.author.name}</span>
-                    <span className="text-[10px] text-zinc-500 italic block">@{answer.author.handle}</span>
+                    <span className="text-xs text-stone-500 italic block">@{answer.author.handle}</span>
                   </div>
                </div>
-               <p className="text-sm text-zinc-200 leading-relaxed mb-3 break-words">{answer.content}</p>
+               <p className="text-sm text-stone-200 leading-relaxed mb-3 break-words">{answer.content}</p>
                <div className="flex items-center gap-4">
                  <button
-                   className={`flex items-center gap-1 text-[10px] font-bold ${getCommentHeartColor(answer)}`}
+                   className={`flex items-center gap-1 text-xs font-bold ${getCommentHeartColor(answer)}`}
                    onClick={async () => {
                      if (!currentUser || !selectedPost) return;
                      try {
@@ -1622,7 +1622,7 @@ const App: React.FC = () => {
                    <Heart size={12} fill={answer.is_liked ? 'currentColor' : 'none'} /> {answer.likes_count}
                  </button>
                  <button
-                   className={`text-[10px] font-bold hover:text-zinc-300 ${replyTarget?.id === String(answer.id) ? 'text-orange-400' : 'text-zinc-500'}`}
+                   className={`text-xs font-bold hover:text-stone-300 ${replyTarget?.id === String(answer.id) ? 'text-orange-400' : 'text-stone-500'}`}
                    onClick={() => {
                      const isToggleOff = replyTarget?.id === String(answer.id);
                      setReplyTarget(isToggleOff ? null : { id: String(answer.id), handle: `@${answer.author.handle}` });
@@ -1635,22 +1635,22 @@ const App: React.FC = () => {
                </div>
                {/* Sub-replies to this answer */}
                {answerReplies.filter(r => r.parent_id === answer.id).length > 0 && (
-                 <div className="mt-3 pt-3 border-t border-zinc-800">
+                 <div className="mt-3 pt-3 border-t border-stone-800">
                    {answerReplies.filter(r => r.parent_id === answer.id).map(r => renderCommentItem(r))}
                  </div>
                )}
             </div>
           ))}
           {answers.length === 0 && (
-            <p className="text-zinc-600 text-sm text-center py-4">No answers yet. Be the first!</p>
+            <p className="text-stone-600 text-sm text-center py-4">No answers yet. Be the first!</p>
           )}
         </div>
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-zinc-950 border-t border-zinc-900 flex items-center gap-3">
+        <div className="fixed bottom-0 left-0 right-0 p-4 bg-stone-950 border-t border-stone-900 flex items-center gap-3">
           <div className="flex-1">
             {replyTarget && (
               <div className="flex items-center justify-between mb-2 px-1">
-                <span className="text-[10px] font-bold text-orange-400 uppercase tracking-wide">Replying to {replyTarget.handle}</span>
-                <button className="text-[10px] text-zinc-500" onClick={() => setReplyTarget(null)}>Cancel</button>
+                <span className="text-xs font-bold text-orange-400 uppercase tracking-wide">Replying to {replyTarget.handle}</span>
+                <button className="text-xs text-stone-500" onClick={() => setReplyTarget(null)}>Cancel</button>
               </div>
             )}
             <input
@@ -1659,7 +1659,7 @@ const App: React.FC = () => {
               onChange={(e) => setCommentDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSubmitComment()}
               placeholder={replyTarget ? `Reply to ${replyTarget.handle}...` : 'Submit your answer...'}
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
+              className="w-full bg-stone-900 border border-stone-700 rounded-xl px-4 py-3 text-sm outline-none focus:border-orange-500/60"
             />
           </div>
           <button className="bg-orange-500 p-3 rounded-xl shrink-0" onClick={handleSubmitComment}><Send size={18} /></button>
@@ -1699,32 +1699,32 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-xl font-black italic tracking-tighter uppercase">Transactions</h2>
+          <h2 className="text-xl font-bold tracking-tight font-display uppercase">Transactions</h2>
         </div>
         
         <div className="p-4">
-          <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-2xl mb-6">
-            <span className="text-zinc-500 text-[10px] font-bold uppercase block mb-1">Balance</span>
-            <span className="text-2xl font-black text-zinc-100">{availableBalance.toLocaleString()} <span className="text-orange-500 text-sm">sat</span></span>
+          <div className="bg-stone-900 border border-stone-800 p-4 rounded-2xl mb-6">
+            <span className="text-stone-500 text-xs font-bold uppercase block mb-1">Balance</span>
+            <span className="text-2xl font-bold text-stone-100">{availableBalance.toLocaleString()} <span className="text-orange-500 text-sm">sat</span></span>
           </div>
 
           <div className="space-y-3">
             {ledgerEntries.length === 0 && (
-              <p className="text-zinc-600 text-center py-8">No transactions yet</p>
+              <p className="text-stone-600 text-center py-8">No transactions yet</p>
             )}
             {ledgerEntries.map(tx => (
-              <div key={tx.id} className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-4">
+              <div key={tx.id} className="bg-stone-900/50 border border-stone-800 rounded-xl p-4">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-bold text-zinc-200">{tx.note || actionLabel(tx.action_type)}</span>
-                  <span className={`text-sm font-black ${tx.amount > 0 ? 'text-green-500' : 'text-red-400'}`}>
+                  <span className="text-sm font-bold text-stone-200">{tx.note || actionLabel(tx.action_type)}</span>
+                  <span className={`text-sm font-bold ${tx.amount > 0 ? 'text-green-500' : 'text-red-400'}`}>
                     {tx.amount > 0 ? '+' : ''}{tx.amount} sat
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-zinc-600">{new Date(tx.created_at).toLocaleString()}</span>
-                  <span className="text-[10px] text-zinc-600">{tx.balance_after.toLocaleString()} sat</span>
+                  <span className="text-xs text-stone-600">{new Date(tx.created_at).toLocaleString()}</span>
+                  <span className="text-xs text-stone-600">{tx.balance_after.toLocaleString()} sat</span>
                 </div>
               </div>
             ))}
@@ -1740,31 +1740,31 @@ const App: React.FC = () => {
     
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-xl font-black italic tracking-tighter uppercase">Invite Friends</h2>
+          <h2 className="text-xl font-bold tracking-tight font-display uppercase">Invite Friends</h2>
         </div>
         
         <div className="p-4">
           {/* Reward info */}
           <div className="bg-gradient-to-br from-orange-600/20 to-amber-600/20 border border-orange-500/30 rounded-3xl p-6 mb-6 text-center">
             <Gift className="w-12 h-12 text-orange-500 mx-auto mb-4" />
-            <h3 className="text-2xl font-black text-white mb-2">Referral Reward</h3>
-            <p className="text-zinc-400 text-sm mb-4">For each friend who signs up</p>
-            <div className="bg-black/50 rounded-2xl p-4">
-              <span className="text-3xl font-black text-orange-500">+500</span>
+            <h3 className="text-2xl font-bold text-white mb-2">Referral Reward</h3>
+            <p className="text-stone-400 text-sm mb-4">For each friend who signs up</p>
+            <div className="bg-stone-900/50 rounded-2xl p-4">
+              <span className="text-3xl font-bold text-orange-500">+500</span>
               <span className="text-lg font-bold text-orange-400 ml-2">sat</span>
             </div>
           </div>
 
           {/* Invite code */}
           <div className="mb-6">
-            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-3">Your Invite Code</label>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4 flex items-center justify-between">
-              <span className="text-lg font-black text-white tracking-wider">{inviteCode}</span>
+            <label className="text-xs font-bold text-stone-500 uppercase tracking-wide block mb-3">Your Invite Code</label>
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 flex items-center justify-between">
+              <span className="text-lg font-bold text-white tracking-wider">{inviteCode}</span>
               <button 
                 onClick={() => navigator.clipboard?.writeText(inviteCode)}
-                className="p-2 bg-zinc-800 rounded-xl active:scale-95"
+                className="p-2 bg-stone-800 rounded-xl active:scale-95"
               >
                 <Copy size={18} className="text-orange-500" />
               </button>
@@ -1773,12 +1773,12 @@ const App: React.FC = () => {
 
           {/* Invite link */}
           <div className="mb-8">
-            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block mb-3">Invite Link</label>
-            <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-4">
-              <p className="text-sm text-zinc-400 truncate mb-3">{inviteLink}</p>
+            <label className="text-xs font-bold text-stone-500 uppercase tracking-wide block mb-3">Invite Link</label>
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4">
+              <p className="text-sm text-stone-400 truncate mb-3">{inviteLink}</p>
               <button 
                 onClick={() => navigator.clipboard?.writeText(inviteLink)}
-                className="w-full bg-orange-500 text-white font-black py-3 rounded-xl text-sm uppercase tracking-tighter active:scale-95 flex items-center justify-center gap-2"
+                className="w-full bg-orange-500 text-white font-bold py-3 rounded-xl text-sm uppercase tracking-tight font-display active:scale-95 flex items-center justify-center gap-2"
               >
                 <Share2 size={18} />
                 Copy Link
@@ -1787,16 +1787,16 @@ const App: React.FC = () => {
           </div>
 
           {/* Stats */}
-          <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-4">
-            <h4 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Referral Stats</h4>
+          <div className="bg-stone-900/50 border border-stone-800 rounded-2xl p-4">
+            <h4 className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-4">Referral Stats</h4>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <span className="text-2xl font-black text-white">3</span>
-                <span className="text-zinc-500 text-xs block">Invited</span>
+                <span className="text-2xl font-bold text-white">3</span>
+                <span className="text-stone-500 text-xs block">Invited</span>
               </div>
               <div>
-                <span className="text-2xl font-black text-orange-500">1,500</span>
-                <span className="text-zinc-500 text-xs block">Earned</span>
+                <span className="text-2xl font-bold text-orange-500">1,500</span>
+                <span className="text-stone-500 text-xs block">Earned</span>
               </div>
             </div>
           </div>
@@ -1851,7 +1851,7 @@ const App: React.FC = () => {
         }
         toast.success('Draft saved');
       } catch (err) {
-        console.error('Failed to save draft:', err);
+        // Draft save failed silently
       }
     };
 
@@ -1906,7 +1906,7 @@ const App: React.FC = () => {
         
         // Delete draft if it exists
         if (currentDraftId) {
-          api.deleteDraft(currentDraftId, currentUser.id).catch(console.error);
+          api.deleteDraft(currentDraftId, currentUser.id).catch(() => {});
         }
         resetPublishState();
         toast.success(hasTitle ? 'Article published' : 'Posted');
@@ -1944,25 +1944,25 @@ const App: React.FC = () => {
         <div className="flex items-center justify-between px-4 pt-4 pb-2">
           <button
             onClick={handleClose}
-            className="p-2 text-zinc-400"
+            className="p-2 text-stone-400"
           >
             <X size={24} />
           </button>
 
           {/* Type toggle */}
-          <div className="flex bg-zinc-900 rounded-xl p-1 gap-0.5">
+          <div className="flex bg-stone-900 rounded-xl p-1 gap-0.5">
             <button
               onClick={() => { setPublishType('Post'); setShowTitleInput(false); }}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all duration-200 ${
-                isPost ? 'bg-orange-500 text-white' : 'text-zinc-500'
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-tight transition-all duration-200 ${
+                isPost ? 'bg-orange-500 text-white' : 'text-stone-500'
               }`}
             >
               Post
             </button>
             <button
               onClick={() => { setPublishType('Question'); setShowTitleInput(false); }}
-              className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight transition-all duration-200 ${
-                isQuestion ? 'bg-blue-500 text-white' : 'text-zinc-500'
+              className={`px-4 py-1.5 rounded-lg text-xs font-bold uppercase tracking-tight transition-all duration-200 ${
+                isQuestion ? 'bg-blue-500 text-white' : 'text-stone-500'
               }`}
             >
               Q&A
@@ -1973,7 +1973,7 @@ const App: React.FC = () => {
           {drafts.length > 0 && (
             <button
               onClick={() => setShowDraftList(!showDraftList)}
-              className="px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-tight text-orange-400 hover:text-orange-300 transition-all"
+              className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-tight text-orange-400 hover:text-orange-300 transition-all"
             >
               Drafts
             </button>
@@ -1983,10 +1983,10 @@ const App: React.FC = () => {
             data-testid="publish-button"
             onClick={handlePublish}
             disabled={!canPublish() || isSubmitting}
-            className={`px-5 py-2 rounded-xl text-sm font-black uppercase tracking-tight transition-all duration-200 ${
+            className={`px-5 py-2 rounded-xl text-sm font-bold uppercase tracking-tight transition-all duration-200 ${
               canPublish()
                 ? `${accentBg} text-white shadow-lg ${accentGlow} active:scale-95`
-                : 'bg-zinc-800 text-zinc-600'
+                : 'bg-stone-800 text-stone-600'
             }`}
           >
             {isSubmitting ? '...' : 'Post'}
@@ -2004,10 +2004,10 @@ const App: React.FC = () => {
         {showDraftList && drafts.length > 0 && (
           <div className="fixed inset-0 z-[200] flex items-center justify-center px-6">
             <div className="absolute inset-0 bg-black/80" onClick={() => setShowDraftList(false)} />
-            <div className="relative bg-black border border-zinc-800 rounded-2xl w-full max-w-sm max-h-[60vh] overflow-hidden">
-              <div className="flex items-center justify-between p-4 border-b border-zinc-800">
+            <div className="relative bg-black border border-stone-800 rounded-2xl w-full max-w-sm max-h-[60vh] overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-stone-800">
                 <span className="text-sm font-bold text-orange-400">Drafts</span>
-                <button onClick={() => setShowDraftList(false)} className="text-zinc-500 hover:text-white">
+                <button onClick={() => setShowDraftList(false)} className="text-stone-500 hover:text-white">
                   <X size={18} />
                 </button>
               </div>
@@ -2016,7 +2016,7 @@ const App: React.FC = () => {
                   <div 
                     key={draft.id}
                     className={`flex items-center justify-between py-3 px-3 rounded-xl mb-1 ${
-                      currentDraftId === draft.id ? 'bg-orange-500/20 border border-orange-500/30' : 'bg-zinc-900 hover:bg-zinc-800'
+                      currentDraftId === draft.id ? 'bg-orange-500/20 border border-orange-500/30' : 'bg-stone-900 hover:bg-stone-800'
                     }`}
                   >
                     <button
@@ -2026,13 +2026,13 @@ const App: React.FC = () => {
                       <div className="text-sm text-white truncate">
                         {draft.title || draft.content.slice(0, 50).replace(/<[^>]*>/g, '') || 'Untitled'}
                       </div>
-                      <div className="text-[10px] text-zinc-500 mt-0.5">
+                      <div className="text-xs text-stone-500 mt-0.5">
                         {new Date(draft.updated_at).toLocaleDateString()}
                       </div>
                     </button>
                     <button
                       onClick={() => handleDeleteDraft(draft.id)}
-                      className="p-2 text-zinc-500 hover:text-red-400 ml-2"
+                      className="p-2 text-stone-500 hover:text-red-400 ml-2"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -2054,8 +2054,8 @@ const App: React.FC = () => {
               onError={(e) => handleAvatarError(e, currentMe.name)}
             />
             <div className="flex-1 min-w-0">
-              <span className="text-sm font-bold text-zinc-300 block">{currentMe.name}</span>
-              <span className="text-[11px] text-zinc-500 font-medium">{getCostDisplay()}</span>
+              <span className="text-sm font-bold text-stone-300 block">{currentMe.name}</span>
+              <span className="text-xs text-stone-500 font-medium">{getCostDisplay()}</span>
             </div>
           </div>
 
@@ -2063,7 +2063,7 @@ const App: React.FC = () => {
           {isPost && !showTitleInput && (
             <button
               onClick={() => setShowTitleInput(true)}
-              className="mb-4 px-3 py-2 text-sm text-zinc-500 hover:text-orange-400 border border-dashed border-zinc-700 hover:border-orange-500/50 rounded-lg transition-colors"
+              className="mb-4 px-3 py-2 text-sm text-stone-500 hover:text-orange-400 border border-dashed border-stone-700 hover:border-orange-500/50 rounded-lg transition-colors"
             >
               + Add title
             </button>
@@ -2096,7 +2096,7 @@ const App: React.FC = () => {
               />
               
               {isPost && (
-                <div className="text-right text-xs text-zinc-600">
+                <div className="text-right text-xs text-stone-600">
                   {publishContent.length}/500
                 </div>
               )}
@@ -2112,9 +2112,9 @@ const App: React.FC = () => {
                   value={publishBounty}
                   onChange={(e) => setPublishBounty(e.target.value)}
                   placeholder="0"
-                  className="w-20 bg-transparent border-none outline-none text-right text-xl font-black text-white"
+                  className="w-20 bg-transparent border-none outline-none text-right text-xl font-bold text-white"
                 />
-                <span className="text-[10px] font-black uppercase text-blue-400">sat</span>
+                <span className="text-xs font-bold uppercase text-blue-400">sat</span>
               </div>
             </div>
           )}
@@ -2185,7 +2185,6 @@ const App: React.FC = () => {
         // Update session's last message preview
         updateSessionLastMessage(Number(sessionId), content);
       } catch (error) {
-          console.error('Failed to send message:', error);
           toast.error('Failed to send message');
       }
     };
@@ -2256,7 +2255,6 @@ const App: React.FC = () => {
       try {
         await api.addReaction(Number(messageId), myId, emoji);
       } catch (error) {
-        console.error('Failed to add reaction:', error);
         toast.error('Failed to add reaction');
         // Revert optimistic update on error
         setChatMessages(prev => prev.map(m => {
@@ -2305,7 +2303,7 @@ const App: React.FC = () => {
       try {
         await api.addReaction(Number(messageId), myId, emoji);
       } catch (error) {
-        console.error('Failed to toggle reaction:', error);
+        // Reaction toggle failed
         // Revert optimistic update on error
         setChatMessages(prev => prev.map(m => {
           if (Number(m.id) === Number(messageId)) {
@@ -2362,7 +2360,6 @@ const App: React.FC = () => {
         const detail = await api.getGroupDetail(Number(selectedChat.id), currentUser.id);
         setGroupDetail(detail);
       } catch (error) {
-        console.error('Failed to load group detail:', error);
         toast.error('Failed to load group info');
       } finally {
         setIsLoadingGroupDetail(false);
@@ -2372,7 +2369,7 @@ const App: React.FC = () => {
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col">
         {/* Header */}
-        <div className="p-4 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => { setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }}><ArrowLeft /></button>
           <button
             className="flex items-center gap-3"
@@ -2380,15 +2377,15 @@ const App: React.FC = () => {
           >
             {isGroup ? (
               <div className="relative w-10 h-10">
-                <img src={getAvatarUrl(selectedChat.participants[0]?.avatar, selectedChat.participants[0]?.name || 'User')} className="w-7 h-7 rounded-full border border-zinc-800 absolute top-0 left-0" onError={(e) => handleAvatarError(e, selectedChat.participants[0]?.name || 'User')} />
-                <img src={getAvatarUrl(selectedChat.participants[1]?.avatar, selectedChat.participants[1]?.name || 'User')} className="w-7 h-7 rounded-full border border-zinc-800 absolute bottom-0 right-0" onError={(e) => handleAvatarError(e, selectedChat.participants[1]?.name || 'User')} />
+                <img src={getAvatarUrl(selectedChat.participants[0]?.avatar, selectedChat.participants[0]?.name || 'User')} className="w-7 h-7 rounded-full border border-stone-800 absolute top-0 left-0" onError={(e) => handleAvatarError(e, selectedChat.participants[0]?.name || 'User')} />
+                <img src={getAvatarUrl(selectedChat.participants[1]?.avatar, selectedChat.participants[1]?.name || 'User')} className="w-7 h-7 rounded-full border border-stone-800 absolute bottom-0 right-0" onError={(e) => handleAvatarError(e, selectedChat.participants[1]?.name || 'User')} />
               </div>
             ) : (
-              <img src={getAvatarUrl(chatPartner?.avatar, chatPartner?.name || 'User')} className="w-10 h-10 rounded-full border border-zinc-800 object-cover" onError={(e) => handleAvatarError(e, chatPartner?.name || 'User')} />
+              <img src={getAvatarUrl(chatPartner?.avatar, chatPartner?.name || 'User')} className="w-10 h-10 rounded-full border border-stone-800 object-cover" onError={(e) => handleAvatarError(e, chatPartner?.name || 'User')} />
             )}
             <div className="flex flex-col items-start">
               <span className="text-sm font-bold">{isGroup ? (selectedChat.name || 'Group Chat') : chatPartner?.name}</span>
-              {isGroup && <span className="text-xs text-zinc-500">{selectedChat.participants.length} members</span>}
+              {isGroup && <span className="text-xs text-stone-500">{selectedChat.participants.length} members</span>}
             </div>
           </button>
         </div>
@@ -2401,7 +2398,7 @@ const App: React.FC = () => {
             </div>
           )}
           {chatMessages.length === 0 && !isLoadingChatMessages && (
-            <div className="text-center text-zinc-600 py-8">
+            <div className="text-center text-stone-600 py-8">
               No messages yet. Say hi! 👋
             </div>
           )}
@@ -2463,7 +2460,7 @@ const App: React.FC = () => {
                     <div className="px-4 py-2.5 text-sm break-words bg-red-900/50 text-red-300 border border-red-500/30 rounded-2xl rounded-br-sm">
                       {msg.content}
                     </div>
-                    <span className="text-[10px] text-red-400 flex items-center gap-1">
+                    <span className="text-xs text-red-400 flex items-center gap-1">
                       <X size={10} /> Not sent
                     </span>
                   </div>
@@ -2481,7 +2478,7 @@ const App: React.FC = () => {
                 {/* WeChat-style centered timestamp */}
                 {showTimestamp && msgTime && (
                   <div className="flex justify-center my-3">
-                    <span className="text-[10px] text-zinc-500 bg-zinc-900/50 px-2 py-0.5 rounded">
+                    <span className="text-xs text-stone-500 bg-stone-900/50 px-2 py-0.5 rounded">
                       {formatChatTime(msgTime)}
                     </span>
                   </div>
@@ -2505,13 +2502,13 @@ const App: React.FC = () => {
                   <div className={`flex flex-col gap-0.5 max-w-[70%] ${isMe ? 'items-end' : 'items-start'}`}>
                     {/* Show sender name in group chats, only on first message in group */}
                     {isGroup && !isMe && isFirstInGroup && (
-                      <span className="text-[11px] text-zinc-500 mb-0.5">{msgSenderName}</span>
+                      <span className="text-xs text-stone-500 mb-0.5">{msgSenderName}</span>
                     )}
                     {/* Reply preview - click to scroll to original */}
                     {msg.replyTo && (
                       <button
                         onClick={() => scrollToMessage(msg.replyTo!.id)}
-                        className="text-[10px] text-zinc-500 bg-zinc-900/50 px-2 py-1 rounded-lg border-l-2 border-orange-500 text-left cursor-pointer hover:bg-zinc-800/60 transition-colors max-w-full"
+                        className="text-xs text-stone-500 bg-stone-900/50 px-2 py-1 rounded-lg border-l-2 border-orange-500 text-left cursor-pointer hover:bg-stone-800/60 transition-colors max-w-full"
                       >
                         <span className="text-orange-400 font-medium">{msg.replyTo.sender_name}</span>
                         <span className="ml-1 line-clamp-1">↩ {msg.replyTo.content}</span>
@@ -2521,7 +2518,7 @@ const App: React.FC = () => {
                       className={`px-3 py-2 text-sm break-words text-left select-none ${
                         isMe
                             ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
-                            : 'bg-zinc-800 text-zinc-100 rounded-2xl rounded-bl-sm'
+                            : 'bg-stone-800 text-stone-100 rounded-2xl rounded-bl-sm'
                       } ${isSelected ? 'ring-2 ring-orange-400' : ''}`}
                       onClick={(e) => handleMessageClick(e, msg.id)}
                       onMouseDown={(e) => handleLongPressStart(msg.id, e)}
@@ -2554,7 +2551,7 @@ const App: React.FC = () => {
                           <button
                             key={emoji}
                             className={`text-xs px-1.5 py-0.5 rounded-full flex items-center gap-0.5 select-none transition-colors ${
-                              hasMyReaction ? 'bg-orange-500/30 border border-orange-500/50' : 'bg-zinc-800 border border-transparent'
+                              hasMyReaction ? 'bg-orange-500/30 border border-orange-500/50' : 'bg-stone-800 border border-transparent'
                             }`}
                             onClick={(e) => handleReactionBadgeClick(e, msg.id, emoji)}
                             onMouseDown={() => handleReactionBadgeLongPressStart(msg.id, emoji)}
@@ -2564,7 +2561,7 @@ const App: React.FC = () => {
                             onTouchEnd={handleReactionBadgeLongPressEnd}
                           >
                             <span>{emoji}</span>
-                            {reactors.length > 1 && <span className="text-zinc-400 min-w-[0.75rem] text-center">{reactors.length}</span>}
+                            {reactors.length > 1 && <span className="text-stone-400 min-w-[0.75rem] text-center">{reactors.length}</span>}
                           </button>
                         );
                       })}
@@ -2573,22 +2570,22 @@ const App: React.FC = () => {
                       {showReactorsFor?.messageId === msg.id && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setShowReactorsFor(null)} />
-                          <div className="absolute bottom-full mb-2 left-0 bg-zinc-900 border border-zinc-700 rounded-xl p-3 shadow-xl z-50 min-w-[160px]">
+                          <div className="absolute bottom-full mb-2 left-0 bg-stone-900 border border-stone-700 rounded-xl p-3 shadow-xl z-50 min-w-[160px]">
                             <div className="text-sm font-bold mb-2 flex items-center gap-2">
                               <span className="text-lg">{showReactorsFor.emoji}</span>
-                              <span className="text-zinc-400">Reactions</span>
+                              <span className="text-stone-400">Reactions</span>
                             </div>
                             <div className="space-y-2 max-h-40 overflow-y-auto">
                               {msg.reactions
                                 .filter(r => r.emoji === showReactorsFor.emoji)
                                 .map((r, idx) => (
                                   <div key={`${r.user_id}-${idx}`} className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-full bg-zinc-700 flex items-center justify-center text-xs font-bold">
+                                    <div className="w-6 h-6 rounded-full bg-stone-700 flex items-center justify-center text-xs font-bold">
                                       {r.user_name?.charAt(0)?.toUpperCase() || '?'}
                                     </div>
-                                    <span className="text-sm text-zinc-300">{r.user_name}</span>
+                                    <span className="text-sm text-stone-300">{r.user_name}</span>
                                     {currentUser && Number(r.user_id) === Number(currentUser.id) && (
-                                      <span className="text-[10px] text-orange-400">(you)</span>
+                                      <span className="text-xs text-orange-400">(you)</span>
                                     )}
                                   </div>
                                 ))
@@ -2606,7 +2603,7 @@ const App: React.FC = () => {
                   <>
                     <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setSelectedMessageId(null); setMenuPosition(null); }} />
                     <div 
-                      className="fixed z-50 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl overflow-hidden"
+                      className="fixed z-50 bg-stone-900 border border-stone-800 rounded-xl shadow-xl overflow-hidden"
                       style={{
                         left: Math.min(Math.max(menuPosition.x, 120), window.innerWidth - 120),
                         top: Math.min(menuPosition.y, window.innerHeight - 280),
@@ -2616,7 +2613,7 @@ const App: React.FC = () => {
                       onClick={(e) => e.stopPropagation()}
                     >
                       {/* Emoji reactions row */}
-                      <div className="px-3 py-2 flex items-center gap-1 border-b border-zinc-800">
+                      <div className="px-3 py-2 flex items-center gap-1 border-b border-stone-800">
                         {defaultReactions.slice(emojiPage * 5, emojiPage * 5 + 5).map(emoji => (
                           <button
                             key={emoji}
@@ -2627,28 +2624,28 @@ const App: React.FC = () => {
                           </button>
                         ))}
                         <button
-                          className="text-zinc-400 hover:text-zinc-200 px-2 text-lg font-bold"
+                          className="text-stone-400 hover:text-stone-200 px-2 text-lg font-bold"
                           onClick={() => setEmojiPage(p => (p + 1) % 2)}
                         >
                           ···
                         </button>
                       </div>
                       {/* Action buttons */}
-                      <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('reply')}>
+                      <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('reply')}>
                         <Reply size={16} className="text-orange-400" /> Reply
                       </button>
-                      <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('forward')}>
+                      <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('forward')}>
                         <Forward size={16} className="text-orange-400" /> Forward
                       </button>
-                      <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('copy')}>
+                      <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('copy')}>
                         <Copy size={16} className="text-orange-400" /> Copy
                       </button>
                       {isMe && canRetreat(msg) && (
-                        <button className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('retreat')}>
+                        <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('retreat')}>
                           <Undo2 size={16} className="text-amber-400" /> Retreat
                         </button>
                       )}
-                      <button className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-zinc-800 flex items-center gap-3" onClick={() => handleMessageAction('delete')}>
+                      <button className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('delete')}>
                         <Trash2 size={16} /> Delete for me
                       </button>
                     </div>
@@ -2662,11 +2659,11 @@ const App: React.FC = () => {
 
         {/* Reply preview bar */}
         {replyingTo && (
-          <div className="px-4 py-2 bg-zinc-900 border-t border-zinc-800 flex items-center gap-3">
-            <div className="flex-1 text-sm text-zinc-400 truncate">
+          <div className="px-4 py-2 bg-stone-900 border-t border-stone-800 flex items-center gap-3">
+            <div className="flex-1 text-sm text-stone-400 truncate">
               <span className="text-orange-400">↩ Replying:</span> {replyingTo.content.slice(0, 50)}{replyingTo.content.length > 50 ? '...' : ''}
             </div>
-            <button onClick={() => setReplyingTo(null)} className="text-zinc-500 hover:text-zinc-300">
+            <button onClick={() => setReplyingTo(null)} className="text-stone-500 hover:text-stone-300">
               <X size={16} />
             </button>
           </div>
@@ -2676,15 +2673,15 @@ const App: React.FC = () => {
         {showAttachmentPicker && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowAttachmentPicker(false)} />
-            <div className="absolute bottom-24 right-16 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl overflow-hidden z-20">
+            <div className="absolute bottom-24 right-16 bg-stone-900 border border-stone-800 rounded-xl shadow-xl overflow-hidden z-20">
               <button 
-                className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3"
+                className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3"
                 onClick={() => handleAttachment('camera')}
               >
                 <Camera size={18} className="text-orange-400" /> Camera
               </button>
               <button 
-                className="w-full px-4 py-3 text-left text-sm text-zinc-200 hover:bg-zinc-800 flex items-center gap-3"
+                className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3"
                 onClick={() => handleAttachment('album')}
               >
                 <Image size={18} className="text-orange-400" /> Album
@@ -2697,7 +2694,7 @@ const App: React.FC = () => {
         {showEmojiPicker && (
           <>
             <div className="fixed inset-0 z-10" onClick={() => setShowEmojiPicker(false)} />
-            <div className="absolute bottom-24 right-4 bg-zinc-900 border border-zinc-800 rounded-xl shadow-xl p-3 z-20">
+            <div className="absolute bottom-24 right-4 bg-stone-900 border border-stone-800 rounded-xl shadow-xl p-3 z-20">
               <div className="grid grid-cols-5 gap-2">
                 {defaultReactions.map(emoji => (
                   <button
@@ -2715,14 +2712,14 @@ const App: React.FC = () => {
 
         {/* Input */}
         {selectedChat && (removedFromSessions.has(Number(selectedChat.id)) || chatSessions.find(s => Number(s.id) === Number(selectedChat.id))?.userHasLeft) ? (
-          <div className="p-4 bg-black border-t border-zinc-900 safe-bottom-nav">
-            <div className="bg-zinc-900 rounded-xl px-4 py-3 text-center text-zinc-500 text-sm">
+          <div className="p-4 bg-black border-t border-stone-900 safe-bottom-nav">
+            <div className="bg-stone-900 rounded-xl px-4 py-3 text-center text-stone-500 text-sm">
               You were removed from this group
             </div>
           </div>
         ) : (
-          <div className="p-4 bg-black border-t border-zinc-900 flex items-center gap-3 safe-bottom-nav">
-            <div className="flex-1 bg-zinc-900 rounded-xl px-4 py-3 flex items-center">
+          <div className="p-4 bg-black border-t border-stone-900 flex items-center gap-3 safe-bottom-nav">
+            <div className="flex-1 bg-stone-900 rounded-xl px-4 py-3 flex items-center">
               <input 
                 value={chatMessageInput}
                 onChange={(e) => setChatMessageInput(e.target.value)}
@@ -2732,7 +2729,7 @@ const App: React.FC = () => {
               />
             </div>
             <button 
-              className="p-2 text-zinc-400 hover:text-orange-400 transition-colors"
+              className="p-2 text-stone-400 hover:text-orange-400 transition-colors"
               onClick={(e) => { e.stopPropagation(); setShowEmojiPicker(prev => !prev); setShowAttachmentPicker(false); }}
             >
               <Smile size={22} />
@@ -2746,7 +2743,7 @@ const App: React.FC = () => {
               </button>
             ) : (
               <button 
-                className="p-2 text-zinc-400 hover:text-orange-400 transition-colors"
+                className="p-2 text-stone-400 hover:text-orange-400 transition-colors"
                 onClick={(e) => { e.stopPropagation(); setShowAttachmentPicker(prev => !prev); setShowEmojiPicker(false); }}
               >
                 <Plus size={22} />
@@ -2853,7 +2850,7 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col">
-        <div className="p-4 bg-black/80 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => { setCurrentView('MAIN'); setInvitePreview(null); setInviteCodeInput(''); }}><ArrowLeft /></button>
           <span className="font-bold">Join Group</span>
         </div>
@@ -2861,18 +2858,18 @@ const App: React.FC = () => {
         <div className="flex-1 p-4 flex flex-col">
           {/* Input */}
           <div className="space-y-3">
-            <label className="text-sm text-zinc-400">Enter invite code</label>
+            <label className="text-sm text-stone-400">Enter invite code</label>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={inviteCodeInput}
                 onChange={(e) => setInviteCodeInput(e.target.value)}
                 placeholder="e.g. abc123xyz"
-                className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3"
+                className="flex-1 bg-stone-900 border border-stone-800 rounded-xl px-4 py-3"
               />
               <button
                 onClick={handlePreview}
-                className="px-4 bg-zinc-800 rounded-xl"
+                className="px-4 bg-stone-800 rounded-xl"
               >
                 Preview
               </button>
@@ -2881,7 +2878,7 @@ const App: React.FC = () => {
 
           {/* Preview */}
           {invitePreview && (
-            <div className="mt-6 bg-zinc-900/50 rounded-2xl p-6 flex flex-col items-center gap-4">
+            <div className="mt-6 bg-stone-900/50 rounded-2xl p-6 flex flex-col items-center gap-4">
               <div className="w-20 h-20 rounded-full bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center">
                 {invitePreview.avatar ? (
                   <img src={invitePreview.avatar} className="w-20 h-20 rounded-full object-cover" />
@@ -2890,9 +2887,9 @@ const App: React.FC = () => {
                 )}
               </div>
               <h2 className="text-xl font-bold">{invitePreview.group_name || 'Unnamed Group'}</h2>
-              <p className="text-zinc-500">{invitePreview.member_count} members</p>
+              <p className="text-stone-500">{invitePreview.member_count} members</p>
               {invitePreview.description && (
-                <p className="text-zinc-400 text-sm text-center">{invitePreview.description}</p>
+                <p className="text-stone-400 text-sm text-center">{invitePreview.description}</p>
               )}
               {invitePreview.requires_approval && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 text-amber-400 text-sm">
@@ -2913,7 +2910,7 @@ const App: React.FC = () => {
           <div className="mt-auto">
             <button
               onClick={() => setCurrentView('SCAN')}
-              className="w-full py-4 bg-zinc-900 rounded-xl flex items-center justify-center gap-2 text-zinc-400"
+              className="w-full py-4 bg-stone-900 rounded-xl flex items-center justify-center gap-2 text-stone-400"
             >
               <ScanLine className="w-5 h-5" />
               <span>Scan QR Code Instead</span>
@@ -3120,7 +3117,7 @@ const App: React.FC = () => {
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col">
         {/* Header */}
-        <div className="p-4 bg-black border-b border-zinc-900 flex items-center gap-4">
+        <div className="p-4 bg-black border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('CHAT_DETAIL')} className="p-1">
             <ArrowLeft className="w-5 h-5" />
           </button>
@@ -3135,9 +3132,9 @@ const App: React.FC = () => {
           <div className="flex-1 overflow-y-auto pb-8">
             {/* Members Section */}
             <div className="p-4">
-              <div className="bg-zinc-900/60 rounded-2xl p-4">
+              <div className="bg-stone-900/60 rounded-2xl p-4">
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-sm font-medium text-zinc-400 uppercase tracking-wider">
+                  <span className="text-sm font-medium text-stone-400 uppercase tracking-wider">
                     Members · {groupDetail.member_count}
                   </span>
                 </div>
@@ -3156,7 +3153,7 @@ const App: React.FC = () => {
                       <div className="relative mb-1">
                         <img
                           src={getAvatarUrl(member.user.avatar, member.user.name)}
-                          className="w-14 h-14 rounded-xl object-cover border-2 border-zinc-800 group-hover:border-orange-500/50 transition-colors"
+                          className="w-14 h-14 rounded-xl object-cover border-2 border-stone-800 group-hover:border-orange-500/50 transition-colors"
                         />
                         {member.role === 'owner' && (
                           <div className="absolute -top-1 -right-1 w-5 h-5 bg-gradient-to-br from-amber-400 to-orange-500 rounded-full flex items-center justify-center">
@@ -3169,7 +3166,7 @@ const App: React.FC = () => {
                           </div>
                         )}
                       </div>
-                      <span className="text-xs text-zinc-500 truncate w-full text-center">
+                      <span className="text-xs text-stone-500 truncate w-full text-center">
                         {member.user.id === currentUser.id ? 'You' : member.user.name.split(' ')[0]}
                       </span>
                     </button>
@@ -3180,10 +3177,10 @@ const App: React.FC = () => {
                       onClick={() => setShowAddMembersModal(true)}
                       className="flex flex-col items-center w-16 group"
                     >
-                      <div className="w-14 h-14 rounded-xl border-2 border-dashed border-zinc-700 group-hover:border-orange-500/50 flex items-center justify-center mb-1 transition-colors">
-                        <Plus className="w-6 h-6 text-zinc-600 group-hover:text-orange-500 transition-colors" />
+                      <div className="w-14 h-14 rounded-xl border-2 border-dashed border-stone-700 group-hover:border-orange-500/50 flex items-center justify-center mb-1 transition-colors">
+                        <Plus className="w-6 h-6 text-stone-600 group-hover:text-orange-500 transition-colors" />
                       </div>
-                      <span className="text-xs text-zinc-600">Add</span>
+                      <span className="text-xs text-stone-600">Add</span>
                     </button>
                   )}
                   {/* Remove button (admin only) */}
@@ -3192,10 +3189,10 @@ const App: React.FC = () => {
                       onClick={() => setShowMemberActions(-1)}
                       className="flex flex-col items-center w-16 group"
                     >
-                      <div className="w-14 h-14 rounded-xl border-2 border-dashed border-zinc-700 group-hover:border-red-500/50 flex items-center justify-center mb-1 transition-colors">
-                        <UserMinus className="w-6 h-6 text-zinc-600 group-hover:text-red-500 transition-colors" />
+                      <div className="w-14 h-14 rounded-xl border-2 border-dashed border-stone-700 group-hover:border-red-500/50 flex items-center justify-center mb-1 transition-colors">
+                        <UserMinus className="w-6 h-6 text-stone-600 group-hover:text-red-500 transition-colors" />
                       </div>
-                      <span className="text-xs text-zinc-600">Remove</span>
+                      <span className="text-xs text-stone-600">Remove</span>
                     </button>
                   )}
                 </div>
@@ -3209,7 +3206,7 @@ const App: React.FC = () => {
 
             {/* Settings Section */}
             <div className="px-4">
-              <div className="bg-zinc-900/60 rounded-2xl overflow-hidden">
+              <div className="bg-stone-900/60 rounded-2xl overflow-hidden">
                 {/* Group Name */}
                 <button
                   onClick={() => {
@@ -3218,16 +3215,16 @@ const App: React.FC = () => {
                       setIsEditingGroup(true);
                     }
                   }}
-                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-stone-800/50 transition-colors"
                 >
-                  <span className="text-zinc-300">Group Name</span>
+                  <span className="text-stone-300">Group Name</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-zinc-500 text-sm max-w-[180px] truncate">{groupDetail.name || 'Unnamed'}</span>
-                    {isAdmin && <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />}
+                    <span className="text-stone-500 text-sm max-w-[180px] truncate">{groupDetail.name || 'Unnamed'}</span>
+                    {isAdmin && <ArrowLeft className="w-4 h-4 text-stone-600 rotate-180" />}
                   </div>
                 </button>
 
-                <div className="h-px bg-zinc-800 mx-4" />
+                <div className="h-px bg-stone-800 mx-4" />
 
                 {/* Announcement */}
                 <button
@@ -3237,23 +3234,23 @@ const App: React.FC = () => {
                       setIsEditingGroup(true);
                     }
                   }}
-                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-stone-800/50 transition-colors"
                 >
-                  <span className="text-zinc-300">Announcement</span>
+                  <span className="text-stone-300">Announcement</span>
                   <div className="flex items-center gap-2">
-                    <span className="text-zinc-500 text-sm max-w-[180px] truncate">{groupDetail.description || 'None'}</span>
-                    <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />
+                    <span className="text-stone-500 text-sm max-w-[180px] truncate">{groupDetail.description || 'None'}</span>
+                    <ArrowLeft className="w-4 h-4 text-stone-600 rotate-180" />
                   </div>
                 </button>
 
-                <div className="h-px bg-zinc-800 mx-4" />
+                <div className="h-px bg-stone-800 mx-4" />
 
                 {/* Invite via Link */}
                 <button
                   onClick={handleCreateInviteLink}
-                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                  className="w-full px-4 py-4 flex items-center justify-between hover:bg-stone-800/50 transition-colors"
                 >
-                  <span className="text-zinc-300">Invite via Link</span>
+                  <span className="text-stone-300">Invite via Link</span>
                   <div className="flex items-center gap-2">
                     <Link className="w-4 h-4 text-orange-500" />
                   </div>
@@ -3262,31 +3259,31 @@ const App: React.FC = () => {
                 {/* Admin Settings */}
                 {isAdmin && (
                   <>
-                    <div className="h-px bg-zinc-800 mx-4" />
+                    <div className="h-px bg-stone-800 mx-4" />
                     <button
                       onClick={() => setSettingsMenu('who_can_send')}
-                      className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                      className="w-full px-4 py-4 flex items-center justify-between hover:bg-stone-800/50 transition-colors"
                     >
-                      <span className="text-zinc-300">Who can send</span>
+                      <span className="text-stone-300">Who can send</span>
                       <div className="flex items-center gap-2">
                         <span className="text-orange-500 text-sm">
                           {groupDetail.who_can_send === 'all' ? 'Everyone' : 'Admins Only'}
                         </span>
-                        <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />
+                        <ArrowLeft className="w-4 h-4 text-stone-600 rotate-180" />
                       </div>
                     </button>
 
-                    <div className="h-px bg-zinc-800 mx-4" />
+                    <div className="h-px bg-stone-800 mx-4" />
                     <button
                       onClick={() => setSettingsMenu('who_can_add')}
-                      className="w-full px-4 py-4 flex items-center justify-between hover:bg-zinc-800/50 transition-colors"
+                      className="w-full px-4 py-4 flex items-center justify-between hover:bg-stone-800/50 transition-colors"
                     >
-                      <span className="text-zinc-300">Who can add members</span>
+                      <span className="text-stone-300">Who can add members</span>
                       <div className="flex items-center gap-2">
                         <span className="text-orange-500 text-sm">
                           {groupDetail.who_can_add === 'all' ? 'Everyone' : 'Admins Only'}
                         </span>
-                        <ArrowLeft className="w-4 h-4 text-zinc-600 rotate-180" />
+                        <ArrowLeft className="w-4 h-4 text-stone-600 rotate-180" />
                       </div>
                     </button>
                   </>
@@ -3296,7 +3293,7 @@ const App: React.FC = () => {
 
             {/* Danger Zone */}
             <div className="px-4 mt-6">
-              <div className="bg-zinc-900/60 rounded-2xl overflow-hidden">
+              <div className="bg-stone-900/60 rounded-2xl overflow-hidden">
                 <button
                   onClick={handleLeaveGroup}
                   className="w-full px-4 py-4 flex items-center justify-center gap-2 hover:bg-red-500/10 transition-colors"
@@ -3306,7 +3303,7 @@ const App: React.FC = () => {
                 </button>
                 {isOwner && (
                   <>
-                    <div className="h-px bg-zinc-800 mx-4" />
+                    <div className="h-px bg-stone-800 mx-4" />
                     <button
                       onClick={handleDeleteGroup}
                       className="w-full px-4 py-4 flex items-center justify-center gap-2 hover:bg-red-500/10 transition-colors"
@@ -3324,10 +3321,10 @@ const App: React.FC = () => {
         {/* Settings Selection Modal */}
         {settingsMenu && (
           <>
-            <div className="fixed inset-0 z-[70] bg-black/60" onClick={() => setSettingsMenu(null)} />
-            <div className="fixed bottom-0 left-0 right-0 z-[70] bg-zinc-900 rounded-t-3xl p-4 space-y-2">
-              <div className="w-12 h-1 bg-zinc-700 rounded-full mx-auto mb-4" />
-              <p className="text-center text-zinc-400 text-sm mb-4">
+            <div className="fixed inset-0 z-[70] overlay-dim-60" onClick={() => setSettingsMenu(null)} />
+            <div className="fixed bottom-0 left-0 right-0 z-[70] bg-stone-900 rounded-t-3xl p-4 space-y-2">
+              <div className="w-12 h-1 bg-stone-700 rounded-full mx-auto mb-4" />
+              <p className="text-center text-stone-400 text-sm mb-4">
                 {settingsMenu === 'who_can_send' ? 'Who can send messages?' : 'Who can add members?'}
               </p>
               <button
@@ -3335,7 +3332,7 @@ const App: React.FC = () => {
                 className={`w-full py-4 rounded-xl text-center font-medium transition-colors ${
                   groupDetail[settingsMenu] === 'all' 
                     ? 'bg-orange-500 text-white' 
-                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                    : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
                 }`}
               >
                 Everyone
@@ -3345,14 +3342,14 @@ const App: React.FC = () => {
                 className={`w-full py-4 rounded-xl text-center font-medium transition-colors ${
                   groupDetail[settingsMenu] === 'admins_only' 
                     ? 'bg-orange-500 text-white' 
-                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                    : 'bg-stone-800 text-stone-300 hover:bg-stone-700'
                 }`}
               >
                 Admins Only
               </button>
               <button
                 onClick={() => setSettingsMenu(null)}
-                className="w-full py-4 text-zinc-500 text-center"
+                className="w-full py-4 text-stone-500 text-center"
               >
                 Cancel
               </button>
@@ -3363,8 +3360,8 @@ const App: React.FC = () => {
         {/* Edit Group Modal */}
         {isEditingGroup && (
           <>
-            <div className="fixed inset-0 z-[70] bg-black/60" onClick={() => setIsEditingGroup(false)} />
-            <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[70] bg-zinc-900 rounded-2xl p-5 space-y-4 max-w-sm mx-auto">
+            <div className="fixed inset-0 z-[70] overlay-dim-60" onClick={() => setIsEditingGroup(false)} />
+            <div className="fixed inset-x-4 top-1/2 -translate-y-1/2 z-[70] bg-stone-900 rounded-2xl p-5 space-y-4 max-w-sm mx-auto">
               <h3 className="font-bold text-lg text-center">Edit Group</h3>
               <div className="space-y-3">
                 <input
@@ -3372,7 +3369,7 @@ const App: React.FC = () => {
                   value={editGroupName}
                   onChange={(e) => setEditGroupName(e.target.value)}
                   placeholder="Group name"
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 focus:border-orange-500 focus:outline-none transition-colors"
+                  className="w-full bg-stone-800 border border-stone-700 rounded-xl px-4 py-3 focus:border-orange-500 focus:outline-none transition-colors"
                   autoFocus
                 />
                 <textarea
@@ -3380,13 +3377,13 @@ const App: React.FC = () => {
                   onChange={(e) => setEditGroupDescription(e.target.value)}
                   placeholder="Announcement (optional)"
                   rows={3}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 resize-none focus:border-orange-500 focus:outline-none transition-colors"
+                  className="w-full bg-stone-800 border border-stone-700 rounded-xl px-4 py-3 resize-none focus:border-orange-500 focus:outline-none transition-colors"
                 />
               </div>
               <div className="flex gap-3 pt-2">
                 <button 
                   onClick={() => setIsEditingGroup(false)} 
-                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-xl transition-colors"
+                  className="flex-1 py-3 bg-stone-800 hover:bg-stone-700 rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
@@ -3404,20 +3401,20 @@ const App: React.FC = () => {
         {/* Add Members Modal */}
         {showAddMembersModal && (
           <>
-            <div className="fixed inset-0 z-[70] bg-black/60" onClick={() => { setShowAddMembersModal(false); setSelectedNewMembers(new Set()); }} />
-            <div className="fixed bottom-0 left-0 right-0 z-[70] bg-zinc-900 rounded-t-3xl max-h-[80vh] flex flex-col">
-              <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+            <div className="fixed inset-0 z-[70] overlay-dim-60" onClick={() => { setShowAddMembersModal(false); setSelectedNewMembers(new Set()); }} />
+            <div className="fixed bottom-0 left-0 right-0 z-[70] bg-stone-900 rounded-t-3xl max-h-[80vh] flex flex-col">
+              <div className="p-4 border-b border-stone-800 flex items-center justify-between">
                 <span className="font-bold text-lg">Add Members</span>
                 <button 
                   onClick={() => { setShowAddMembersModal(false); setSelectedNewMembers(new Set()); }}
-                  className="p-2 hover:bg-zinc-800 rounded-full transition-colors"
+                  className="p-2 hover:bg-stone-800 rounded-full transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
               <div className="p-4">
                 <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-zinc-500" />
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-stone-500" />
                   <input
                     type="text"
                     value={addMemberSearch}
@@ -3431,11 +3428,11 @@ const App: React.FC = () => {
                         const existingIds = new Set(groupDetail.members.map(m => m.user.id));
                         setAddMemberResults(results.filter((u: any) => !existingIds.has(u.id)));
                       } catch (error) {
-                        console.error(error);
+                        // Search failed silently
                       }
                     }}
                     placeholder="Search users..."
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-xl pl-12 pr-4 py-3 focus:border-orange-500 focus:outline-none transition-colors"
+                    className="w-full bg-stone-800 border border-stone-700 rounded-xl pl-12 pr-4 py-3 focus:border-orange-500 focus:outline-none transition-colors"
                   />
                 </div>
               </div>
@@ -3452,19 +3449,19 @@ const App: React.FC = () => {
                       }
                       setSelectedNewMembers(newSet);
                     }}
-                    className={`w-full p-3 rounded-xl flex items-center gap-3 ${selectedNewMembers.has(Number(user.id)) ? 'bg-orange-500/20 border border-orange-500' : 'bg-zinc-800'}`}
+                    className={`w-full p-3 rounded-xl flex items-center gap-3 ${selectedNewMembers.has(Number(user.id)) ? 'bg-orange-500/20 border border-orange-500' : 'bg-stone-800'}`}
                   >
                     <img src={getAvatarUrl(user.avatar, user.name)} className="w-10 h-10 rounded-full" onError={(e) => handleAvatarError(e, user.name)} />
                     <div className="flex-1 text-left">
                       <p className="font-medium">{user.name}</p>
-                      <p className="text-zinc-500 text-sm">@{user.handle}</p>
+                      <p className="text-stone-500 text-sm">@{user.handle}</p>
                     </div>
                     {selectedNewMembers.has(Number(user.id)) && <Check className="w-5 h-5 text-orange-500" />}
                   </button>
                 ))}
               </div>
               {selectedNewMembers.size > 0 && (
-                <div className="p-4 border-t border-zinc-800">
+                <div className="p-4 border-t border-stone-800">
                   <button
                     onClick={handleAddMembers}
                     className="w-full py-3 bg-orange-500 rounded-xl font-bold"
@@ -3480,21 +3477,21 @@ const App: React.FC = () => {
         {/* Remove Member Modal */}
         {showMemberActions === -1 && (
           <div className="fixed inset-0 z-[70] bg-black/80 flex items-end">
-            <div className="w-full bg-zinc-900 rounded-t-3xl max-h-[60vh] flex flex-col">
-              <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
+            <div className="w-full bg-stone-900 rounded-t-3xl max-h-[60vh] flex flex-col">
+              <div className="p-4 border-b border-stone-800 flex items-center justify-between">
                 <span className="font-bold">Remove Member</span>
                 <button onClick={() => setShowMemberActions(null)}>
                   <X className="w-5 h-5" />
                 </button>
               </div>
-              <div className="flex-1 overflow-y-auto divide-y divide-zinc-800">
+              <div className="flex-1 overflow-y-auto divide-y divide-stone-800">
                 {groupDetail.members
                   .filter(m => m.user.id !== currentUser.id && (isOwner || m.role === 'member'))
                   .map((member) => (
                     <button
                       key={member.user.id}
                       onClick={() => handleRemoveMember(member.user.id)}
-                      className="w-full p-4 flex items-center gap-3 hover:bg-zinc-800"
+                      className="w-full p-4 flex items-center gap-3 hover:bg-stone-800"
                     >
                       <img
                         src={getAvatarUrl(member.user.avatar, member.user.name)}
@@ -3502,7 +3499,7 @@ const App: React.FC = () => {
                       />
                       <div className="flex-1 text-left">
                         <p className="font-medium">{member.user.name}</p>
-                        <p className="text-zinc-500 text-sm">@{member.user.handle}</p>
+                        <p className="text-stone-500 text-sm">@{member.user.handle}</p>
                       </div>
                       <UserMinus className="w-5 h-5 text-red-400" />
                     </button>
@@ -3532,27 +3529,27 @@ const App: React.FC = () => {
            <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
            <button><MoreHorizontal /></button>
         </div>
-        <div className="flex flex-col items-center p-6 border-b border-zinc-900">
+        <div className="flex flex-col items-center p-6 border-b border-stone-900">
           <img src={getAvatarUrl(selectedUser.avatar, selectedUser.name)} className="w-24 h-24 rounded-full border-2 border-orange-500 p-1 object-cover mb-4" onError={(e) => handleAvatarError(e, selectedUser.name)} />
-          <h2 className="text-2xl font-black italic tracking-tighter uppercase mb-1">{selectedUser.name}</h2>
-          <span className="text-zinc-500 text-xs font-medium mb-4">{selectedUser.handle}</span>
+          <h2 className="text-2xl font-bold tracking-tight font-display uppercase mb-1">{selectedUser.name}</h2>
+          <span className="text-stone-500 text-xs font-medium mb-4">{selectedUser.handle}</span>
           
           <div className="flex gap-4 mt-4 w-full">
             <button 
               onClick={handleFollowToggle}
-              className={`flex-1 font-black py-3 rounded-xl text-sm uppercase italic tracking-tighter ${
-                isFollowingProfile 
-                  ? 'bg-zinc-800 text-zinc-300 border border-zinc-700' 
+              className={`flex-1 font-bold py-3 rounded-xl text-sm uppercase tracking-tight font-display ${
+                isFollowingProfile
+                  ? 'bg-stone-800 text-stone-300 border border-stone-700'
                   : 'bg-white text-black'
               }`}
             >
               {isFollowingProfile ? 'Following ✓' : 'Follow'}
             </button>
             <button 
-              className={`flex-1 font-black py-3 rounded-xl text-sm uppercase italic tracking-tighter border ${
-                canMessage 
-                  ? 'bg-orange-500 text-white border-orange-500' 
-                  : 'bg-zinc-900 text-zinc-500 border-zinc-800'
+              className={`flex-1 font-bold py-3 rounded-xl text-sm uppercase tracking-tight font-display border ${
+                canMessage
+                  ? 'bg-orange-500 text-white border-orange-500'
+                  : 'bg-stone-900 text-stone-500 border-stone-800'
               }`}
               onClick={handleStartChat}
               disabled={!canMessage}
@@ -3563,7 +3560,7 @@ const App: React.FC = () => {
         </div>
         
         <div className="p-4">
-          <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-4">Activity</h3>
+          <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-4">Activity</h3>
           {posts.filter(p => String(p.author.id) === String(selectedUser.id)).map(p => (
             <PostCard key={p.id} post={p} />
           ))}
@@ -3592,11 +3589,28 @@ const App: React.FC = () => {
 
   const renderSettings = () => (
     <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-zinc-900 flex items-center gap-4">
-        <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-        <h2 className="text-lg font-bold uppercase tracking-wide">Settings</h2>
+      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
+        <button onClick={() => setCurrentView('MAIN')} aria-label="Go back"><ArrowLeft /></button>
+        <h2 className="text-lg font-bold uppercase tracking-wide font-display">Settings</h2>
       </div>
       <div className="p-4 space-y-3">
+        {/* Theme Toggle */}
+        <button
+          onClick={toggleTheme}
+          className="w-full flex items-center justify-between p-4 bg-stone-900/50 border border-stone-800 rounded-2xl active:bg-stone-900 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            {isDark ? <Moon size={20} className="text-orange-500" /> : <Sun size={20} className="text-orange-500" />}
+            <div className="text-left">
+              <span className="text-sm font-bold text-stone-200 block">Appearance</span>
+              <span className="text-xs text-stone-500">{isDark ? 'Dark mode' : 'Light mode'}</span>
+            </div>
+          </div>
+          <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${isDark ? 'bg-orange-500' : 'bg-stone-600'}`}>
+            <div className={`w-5 h-5 rounded-full shadow transition-transform duration-200 ${isDark ? 'translate-x-5' : 'translate-x-0'}`} style={{ backgroundColor: '#fff' }} />
+          </div>
+        </button>
+
         {[
           { label: 'Account', sublabel: 'Manage your account details' },
           { label: 'Privacy', sublabel: 'Control who can see your content' },
@@ -3606,13 +3620,13 @@ const App: React.FC = () => {
         ].map((item, idx) => (
           <button
             key={idx}
-            className="w-full flex items-center justify-between p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl active:bg-zinc-900"
+            className="w-full flex items-center justify-between p-4 bg-stone-900/50 border border-stone-800 rounded-2xl active:bg-stone-900 transition-colors"
           >
             <div className="text-left">
-              <span className="text-sm font-bold text-zinc-200 block">{item.label}</span>
-              <span className="text-[10px] text-zinc-500">{item.sublabel}</span>
+              <span className="text-sm font-bold text-stone-200 block">{item.label}</span>
+              <span className="text-xs text-stone-500">{item.sublabel}</span>
             </div>
-            <ArrowLeft className="rotate-180 text-zinc-600" size={16} />
+            <ArrowLeft className="rotate-180 text-stone-600" size={16} />
           </button>
         ))}
       </div>
