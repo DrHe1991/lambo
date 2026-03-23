@@ -364,50 +364,57 @@ const App: React.FC = () => {
     }
   };
 
+  // Execute unlike action
+  const executeUnlike = async (post: Post) => {
+    if (!currentUser) return;
+    try {
+      await toggleLikePost(Number(post.id), currentUser.id, true);
+      setLikedPosts(prev => { const s = new Set(prev); s.delete(String(post.id)); return s; });
+      if (selectedPost && String(selectedPost.id) === String(post.id)) {
+        setSelectedPost({
+          ...selectedPost,
+          isLiked: false,
+          likeStatus: null,
+          likes: Math.max(0, selectedPost.likes - 1),
+        });
+      }
+      toast.success('Unliked! 90% refunded');
+      fetchBalance(currentUser.id);
+    } catch (error) {
+      const msg = (error as Error).message || 'Unlike failed';
+      toast.warning(msg);
+    }
+  };
+
   // Handle like action (toggle)
   const handleLikeToggle = async (post: Post) => {
     if (!currentUser) return;
     const isLiked = likedPosts.has(String(post.id)) || post.isLiked;
     
-    // If trying to unlike a settled like, show error
+    // Settled likes cannot be unliked (PostCard handles UI feedback)
     if (isLiked && post.likeStatus === 'settled') {
-      toast.error('Cannot unlike - like has been settled after 1h');
       return;
     }
     
-    // If trying to unlike a pending like, confirm first (90% refund)
+    // If trying to unlike a pending like, show toast with confirm button
     if (isLiked && post.likeStatus === 'pending') {
-      const confirmed = window.confirm('Unlike this post? You will get a 90% refund (10% platform fee).');
-      if (!confirmed) return;
+      toast.confirm('Unlike? 90% refund (10% fee)', () => executeUnlike(post), 'Unlike');
+      return;
     }
     
+    // Like action
     try {
-      await toggleLikePost(Number(post.id), currentUser.id, isLiked);
-      if (isLiked) {
-        setLikedPosts(prev => { const s = new Set(prev); s.delete(String(post.id)); return s; });
-        // Update selectedPost if viewing this post
-        if (selectedPost && String(selectedPost.id) === String(post.id)) {
-          setSelectedPost({
-            ...selectedPost,
-            isLiked: false,
-            likeStatus: null,
-            likes: Math.max(0, selectedPost.likes - 1),
-          });
-        }
-        toast.success('Unliked! 90% refunded');
-      } else {
-        setLikedPosts(prev => new Set([...prev, String(post.id)]));
-        // Update selectedPost if viewing this post
-        if (selectedPost && String(selectedPost.id) === String(post.id)) {
-          setSelectedPost({
-            ...selectedPost,
-            isLiked: true,
-            likeStatus: 'pending',
-            likes: selectedPost.likes + 1,
-          });
-        }
-        toast.success('Liked! Locked for 1h');
+      await toggleLikePost(Number(post.id), currentUser.id, false);
+      setLikedPosts(prev => new Set([...prev, String(post.id)]));
+      if (selectedPost && String(selectedPost.id) === String(post.id)) {
+        setSelectedPost({
+          ...selectedPost,
+          isLiked: true,
+          likeStatus: 'pending',
+          likes: selectedPost.likes + 1,
+        });
       }
+      toast.success('Liked! Locked for 1h');
       fetchBalance(currentUser.id);
     } catch (error) {
       const msg = (error as Error).message || 'Like failed';
@@ -1092,7 +1099,10 @@ const App: React.FC = () => {
 
       <div data-testid="balance-card" className="bg-stone-900 border border-stone-800 p-4 rounded-2xl mb-4">
         <div className="flex items-center justify-between mb-3">
-          <div>
+          <button
+            className="text-left active:opacity-70 transition-opacity"
+            onClick={() => { if (currentUser) fetchLedger(currentUser.id); setCurrentView('TRANSACTIONS'); }}
+          >
             <span className="text-stone-500 text-xs font-bold uppercase block mb-1">Balance</span>
             <div className="flex items-baseline gap-1">
               <span data-testid="balance-amount" className="text-2xl font-bold text-stone-100">{availableBalance.toLocaleString()}</span>
@@ -1103,11 +1113,14 @@ const App: React.FC = () => {
                 </span>
               )}
             </div>
-          </div>
-          <div className="text-right">
+          </button>
+          <button
+            className="text-right active:opacity-70 transition-opacity"
+            onClick={() => setCurrentView('EXCHANGE')}
+          >
             <span className="text-stone-500 text-xs font-bold uppercase block mb-1">USDT</span>
             <span className="text-xl font-bold text-stone-100">${(stableBalance / 1_000_000).toFixed(2)}</span>
-          </div>
+          </button>
         </div>
         <div className="flex gap-2">
           <button

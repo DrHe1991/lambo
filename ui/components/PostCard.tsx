@@ -19,13 +19,14 @@ function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | nu
     return 'text-stone-400 hover:text-pink-400';
   }
   if (likeStatus === 'pending') {
-    return 'text-red-500';
+    return 'text-rose-500';
   }
   return 'text-orange-500';
 }
 
 export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, isLiked, likeCost }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
+  const [isShaking, setIsShaking] = React.useState(false);
   const contentText = post.content.trim();
   const articlePreview = contentText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   const shouldClampContent = post.type !== 'Article' && (
@@ -133,9 +134,17 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           <button
             data-testid={`like-button-${post.id}`}
             className={`flex items-center gap-1.5 transition-colors ${getHeartColor(isLiked || false, post.likeStatus)}`}
-            onClick={(e) => { e.stopPropagation(); onLike?.(post); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (isLiked && post.likeStatus === 'settled') {
+                setIsShaking(true);
+                setTimeout(() => setIsShaking(false), 400);
+                return;
+              }
+              onLike?.(post);
+            }}
           >
-            <Heart size={18} className={`${isLiked ? 'fill-current animate-heart-pop' : ''}`} />
+            <Heart size={18} className={`${isLiked ? 'fill-current' : ''} ${isLiked && !isShaking ? 'animate-heart-pop' : ''} ${isShaking ? 'animate-shake' : ''}`} />
             <span className="text-xs font-medium">{post.likes}</span>
             {!isLiked && likeCost && (
               <span className="text-xs text-stone-500 ml-1">({likeCost} sat)</span>
