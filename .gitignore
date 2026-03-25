@@ -103,6 +103,13 @@ simulator/results/
 api/tests/simulation_reports/
 
 # ----------------------------------------
+# Playwright
+# ----------------------------------------
+ui/playwright-report/
+ui/test-results/
+playwright/.cache/
+
+# ----------------------------------------
 # Misc
 # ----------------------------------------
 *.hprof

@@ -16,10 +16,10 @@
 /* ─── Light mode ─── */
 /* Flip the stone palette so dark surfaces become light, muted text stays legible */
 [data-theme="light"] {
-  /* Inverted stone scale — refined ivory neutrals */
-  --color-stone-50:  #1d1713;  /* darkest — replaces lightest */
-  --color-stone-100: #2f241d;
-  --color-stone-200: #4d3d31;
+  /* Inverted stone scale — warm brown neutrals */
+  --color-stone-50:  #3a2c22;  /* darkest — warm brown primary text */
+  --color-stone-100: #4a3828;
+  --color-stone-200: #5d4a3a;
   --color-stone-300: #6b5b4d;
   --color-stone-400: #8f7e70;
   --color-stone-500: #b1a091;
@@ -31,8 +31,8 @@
 
   /* Swap black → tinted ivory for page backgrounds */
   --color-black: #faf6f0;
-  /* Swap white → warm near-black for primary text */
-  --color-white: #1d1713;
+  /* Swap white → warm brown for primary text */
+  --color-white: #3a2c22;
 
   /* Semantic surfaces */
   --bg-base: #f3eee7;
@@ -51,7 +51,7 @@
 }
 
 [data-theme="light"] body {
-  color: #1d1713;
+  color: #3a2c22;
   background-image:
     radial-gradient(circle at top, rgba(255, 253, 249, 0.82), rgba(255, 253, 249, 0) 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0) 220px);
@@ -121,7 +121,7 @@
 /* bg-white stays truly white (QR codes, CTA buttons with text-black) */
 [data-theme="light"] .bg-white {
   background-color: #ffffff;
-  --color-black: #1c1917;
+  --color-black: #3a2c22;
 }
 
 body {
@@ -147,8 +147,13 @@ body {
 }
 
 /* Display font for headings and brand elements */
-h1, h2, h3, .font-display {
+h1, h2, .font-display {
   font-family: 'Space Grotesk', sans-serif;
+}
+
+/* Body font override for article titles in feed */
+.font-body {
+  font-family: 'DM Sans', sans-serif;
 }
 
 /* Tabular numbers for financial data */
