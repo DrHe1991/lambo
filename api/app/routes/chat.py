@@ -2,7 +2,7 @@ import secrets
 from datetime import datetime as dt, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy import select, desc, func, and_, case
+from sqlalchemy import select, desc, func, and_, or_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -190,11 +190,33 @@ async def get_sessions(
     db: AsyncSession = Depends(get_db),
 ):
     """Get all chat sessions for a user (including left groups for history)."""
-    # Get all sessions where user is/was a member
+    # Hide sessions with no messages from non-creators
+    has_messages = (
+        select(Message.id)
+        .where(
+            and_(
+                Message.session_id == ChatSession.id,
+                Message.message_type.in_(['text', 'image']),
+                Message.status == 'sent',
+            )
+        )
+        .correlate(ChatSession)
+        .exists()
+    )
+    is_creator = or_(
+        ChatSession.initiated_by == user_id,
+        ChatSession.owner_id == user_id,
+    )
+
     result = await db.execute(
         select(ChatSession)
         .join(ChatMember)
-        .where(ChatMember.user_id == user_id)
+        .where(
+            and_(
+                ChatMember.user_id == user_id,
+                or_(is_creator, has_messages),
+            )
+        )
         .order_by(desc(ChatSession.updated_at))
         .limit(limit)
         .offset(offset)
@@ -266,13 +288,13 @@ async def get_session(
         last_msg = last_msg_result.scalar_one_or_none()
         unread_count = 0  # No unread for users who left
     else:
-        # Get last message (only text messages visible to this user)
+        # Get last message (text + image messages visible to this user)
         last_msg_result = await db.execute(
             select(Message)
             .where(
                 and_(
                     Message.session_id == session_id,
-                    Message.message_type == 'text',
+                    Message.message_type.in_(['text', 'image']),
                     Message.status == 'sent',
                     (Message.visible_to == None) | (Message.visible_to == user_id)
                 )
@@ -282,14 +304,14 @@ async def get_session(
         )
         last_msg = last_msg_result.scalar_one_or_none()
 
-        # Get unread count (only count messages visible to this user, exclude system msgs and own messages)
+        # Get unread count (text + image messages visible to this user, exclude system msgs and own)
         user_membership = next((m for m in session.members if m.user_id == user_id and m.left_at is None), None)
         unread_count = 0
         visibility_filter = and_(
             Message.session_id == session_id,
-            Message.message_type == 'text',
+            Message.message_type.in_(['text', 'image']),
             Message.status == 'sent',
-            Message.sender_id != user_id,  # Exclude own messages from unread count
+            Message.sender_id != user_id,
             (Message.visible_to == None) | (Message.visible_to == user_id)
         )
         if user_membership and user_membership.last_read_message_id:
@@ -326,7 +348,7 @@ async def get_session(
             )
             for m in members
         ],
-        last_message=last_msg.content if last_msg else None,
+        last_message=(last_msg.content or ('Photo' if last_msg.message_type == 'image' else '')) if last_msg else None,
         last_message_at=last_msg.created_at if last_msg else None,
         unread_count=unread_count,
         who_can_send=session.who_can_send,
