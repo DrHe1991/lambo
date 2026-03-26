@@ -1,11 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
 import CharacterCount from '@tiptap/extension-character-count';
-import { Bold, Italic, Underline as UnderlineIcon, Link as LinkIcon, Heading1, Heading2, List, ListOrdered, Quote, Undo, Redo, X } from 'lucide-react';
+import TiptapImage from '@tiptap/extension-image';
+import { Bold, Italic, Underline as UnderlineIcon, Link as LinkIcon, Heading1, Heading2, List, ListOrdered, Quote, Undo, Redo, X, Image as ImageIcon } from 'lucide-react';
 
 interface ArticleEditorProps {
   title: string;
@@ -15,6 +16,7 @@ interface ArticleEditorProps {
   placeholder?: string;
   editorKey?: number;
   onRemoveTitle?: () => void;
+  onImageUpload?: (file: File) => Promise<string | null>;
 }
 
 export const ArticleEditor: React.FC<ArticleEditorProps> = ({
@@ -25,7 +27,10 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
   placeholder = 'Write your article...',
   editorKey = 0,
   onRemoveTitle,
+  onImageUpload,
 }) => {
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -39,6 +44,9 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
         HTMLAttributes: { class: 'text-orange-400 underline cursor-pointer' },
       }),
       Underline,
+      TiptapImage.configure({
+        HTMLAttributes: { class: 'rounded-xl max-w-full h-auto my-3' },
+      }),
       Placeholder.configure({
         placeholder,
         emptyEditorClass: 'is-editor-empty',
@@ -96,6 +104,18 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
         .run();
     } else {
       editor.chain().focus().extendMarkRange('link').setLink({ href: sanitizedUrl }).run();
+    }
+  };
+
+  const handleImageInsert = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editor || !onImageUpload) return;
+    const url = await onImageUpload(file);
+    if (url) {
+      editor.chain().focus().setImage({ src: url }).run();
+    }
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
     }
   };
 
@@ -233,6 +253,23 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           <LinkIcon size={16} />
         </ToolbarButton>
 
+        {onImageUpload && (
+          <ToolbarButton
+            onClick={() => imageInputRef.current?.click()}
+            title="Insert Image"
+          >
+            <ImageIcon size={16} />
+          </ToolbarButton>
+        )}
+
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={handleImageInsert}
+        />
+
         <div className="flex-1" />
         
         <ToolbarButton
@@ -268,6 +305,7 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
             [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:my-2 [&_ul]:text-stone-300
             [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:my-2 [&_ol]:text-stone-300
             [&_li]:my-1 [&_li]:text-stone-300 [&_li_p]:my-0
+            [&_img]:rounded-xl [&_img]:max-w-full [&_img]:h-auto [&_img]:my-3
             [&_.is-editor-empty:first-child::before]:text-stone-600 [&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:h-0 [&_.is-editor-empty:first-child::before]:pointer-events-none
           "
         />

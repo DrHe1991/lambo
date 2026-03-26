@@ -20,6 +20,8 @@ import { ExchangeView } from './components/ExchangeView';
 import { ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest, ApiDraft } from './api/client';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
 import { useTheme } from './hooks/useTheme';
+import { compressImage } from './utils/imageCompressor';
+import ImageLightbox from './components/ImageLightbox';
 
 // Views
 type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW' | 'EXCHANGE';
@@ -110,6 +112,9 @@ const App: React.FC = () => {
   const [publishBounty, setPublishBounty] = useState('');
   const [publishPreview, setPublishPreview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [publishImages, setPublishImages] = useState<string[]>([]);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const publishImageInputRef = useRef<HTMLInputElement>(null);
   const [drafts, setDrafts] = useState<ApiDraft[]>([]);
   const [currentDraftId, setCurrentDraftId] = useState<number | null>(null);
   const [showDraftList, setShowDraftList] = useState(false);
@@ -135,7 +140,7 @@ const App: React.FC = () => {
 
   // Chat detail state
   type ChatMessageReaction = { emoji: string; user_id: number; user_name: string };
-  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; senderName?: string; senderAvatar?: string | null; content: string; messageType: 'text' | 'system'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; senderName?: string; senderAvatar?: string | null; content: string; mediaUrl?: string | null; messageType: 'text' | 'image' | 'system'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
   const [removedFromSessions, setRemovedFromSessions] = useState<Set<number>>(new Set());
@@ -144,6 +149,9 @@ const App: React.FC = () => {
   const [emojiPage, setEmojiPage] = useState(0);
   const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [isUploadingChatImage, setIsUploadingChatImage] = useState(false);
+  const chatImageInputRef = useRef<HTMLInputElement>(null);
+  const [chatLightboxSrc, setChatLightboxSrc] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{id: string | number; content: string} | null>(null);
   const [showReactorsFor, setShowReactorsFor] = useState<{messageId: string | number; emoji: string} | null>(null);
   const longPressTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -246,7 +254,8 @@ const App: React.FC = () => {
           senderId: message.sender_id,
           senderName: message.sender?.name,
           senderAvatar: message.sender?.avatar,
-          content: message.content, 
+          content: message.content,
+          mediaUrl: message.media_url,
           messageType: message.message_type,
           status: message.status,
           replyTo: message.reply_to ? { id: message.reply_to.id, content: message.reply_to.content, sender_name: message.reply_to.sender_name } : null,
@@ -570,7 +579,8 @@ const App: React.FC = () => {
           senderId: m.sender_id,
           senderName: m.sender?.name,
           senderAvatar: m.sender?.avatar,
-          content: m.content, 
+          content: m.content,
+          mediaUrl: m.media_url,
           messageType: m.message_type,
           status: m.status,
           createdAt: m.created_at,
@@ -1842,6 +1852,28 @@ const App: React.FC = () => {
       setShowTitleInput(false);
       setShowDraftList(false);
       setPublishPreview(false);
+      setPublishImages([]);
+    };
+
+    const handlePostImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files?.length) return;
+      setIsUploadingImage(true);
+      try {
+        for (const file of Array.from(files)) {
+          if (publishImages.length >= 9) break;
+          const compressed = await compressImage(file);
+          const result = await api.uploadMedia(compressed, 'post');
+          setPublishImages(prev => [...prev, result.url]);
+        }
+      } catch {
+        toast.error('Failed to upload image');
+      } finally {
+        setIsUploadingImage(false);
+        if (publishImageInputRef.current) {
+          publishImageInputRef.current.value = '';
+        }
+      }
     };
 
     const saveDraft = async () => {
@@ -1900,7 +1932,7 @@ const App: React.FC = () => {
     };
 
     const handlePublish = async () => {
-      if (!publishContent.trim() || !currentUser) return;
+      if ((!publishContent.trim() && !publishImages.length) || !currentUser) return;
       
       const hasTitle = showTitleInput && publishTitle.trim();
       
@@ -1910,11 +1942,12 @@ const App: React.FC = () => {
         const postType = isQuestion ? 'question' : (hasTitle ? 'article' : 'note');
         
         await api.createPost(currentUser.id, {
-          content: publishContent,
+          content: publishContent || ' ',
           post_type: postType,
           title: hasTitle ? publishTitle : undefined,
-          content_format: hasTitle ? 'html' : 'plain',
+          content_format: hasTitle ? 'markdown' : 'plain',
           bounty,
+          media_urls: publishImages.length ? publishImages : undefined,
         });
         
         // Delete draft if it exists
@@ -1929,7 +1962,14 @@ const App: React.FC = () => {
           fetchLedger(currentUser.id);
         }
       } catch (err) {
-        const msg = (err as Error).message || 'Failed to publish';
+        let msg = 'Failed to publish';
+        if (err instanceof Error) {
+          msg = err.message;
+        } else if (typeof err === 'string') {
+          msg = err;
+        } else if (err && typeof err === 'object' && 'detail' in err) {
+          msg = String((err as { detail: unknown }).detail);
+        }
         if (msg.includes('Insufficient balance')) {
           toast.warning(msg);
         } else {
@@ -2093,6 +2133,16 @@ const App: React.FC = () => {
                 setShowTitleInput(false);
                 setPublishTitle('');
               }}
+              onImageUpload={async (file) => {
+                try {
+                  const compressed = await compressImage(file);
+                  const result = await api.uploadMedia(compressed, 'post');
+                  return result.url;
+                } catch {
+                  toast.error('Failed to upload image');
+                  return null;
+                }
+              }}
             />
           ) : (
             <>
@@ -2115,6 +2165,52 @@ const App: React.FC = () => {
               )}
             </>
           )}
+
+          {/* Image attachments preview */}
+          {publishImages.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {publishImages.map((url, i) => (
+                <div key={url} className="relative w-20 h-20 rounded-lg overflow-hidden bg-stone-800">
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                  <button
+                    onClick={() => setPublishImages(prev => prev.filter((_, idx) => idx !== i))}
+                    className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/70 rounded-full flex items-center justify-center"
+                  >
+                    <X size={12} className="text-white" />
+                  </button>
+                </div>
+              ))}
+              {isUploadingImage && (
+                <div className="w-20 h-20 rounded-lg bg-stone-800 flex items-center justify-center">
+                  <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Image picker button */}
+          {!showTitleInput && publishImages.length < 9 && (
+            <button
+              onClick={() => publishImageInputRef.current?.click()}
+              disabled={isUploadingImage}
+              className={`mt-3 flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+                isUploadingImage
+                  ? 'text-stone-600 cursor-not-allowed'
+                  : 'text-stone-500 hover:text-orange-400 border border-dashed border-stone-700 hover:border-orange-500/50'
+              }`}
+            >
+              <Image size={16} />
+              {isUploadingImage ? 'Uploading...' : 'Add photo'}
+            </button>
+          )}
+          <input
+            ref={publishImageInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif"
+            multiple
+            className="hidden"
+            onChange={handlePostImageSelect}
+          />
 
           {isQuestion && (
             <div className={`mt-4 flex items-center justify-between p-4 bg-blue-500/10 border ${accentBorder} rounded-2xl`}>
@@ -2361,7 +2457,50 @@ const App: React.FC = () => {
 
     const handleAttachment = (type: 'camera' | 'album') => {
       setShowAttachmentPicker(false);
-      toast.info(`${type === 'camera' ? 'Camera' : 'Album'} feature coming soon`);
+      if (type === 'camera') {
+        toast.info('Camera requires native app — use Album on web');
+        return;
+      }
+      chatImageInputRef.current?.click();
+    };
+
+    const handleChatImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file || !selectedChat || !currentUser) return;
+      setIsUploadingChatImage(true);
+      try {
+        const compressed = await compressImage(file);
+        const result = await api.uploadMedia(compressed, 'chat');
+        const responses = await api.sendMessage(
+          Number(selectedChat.id),
+          currentUser.id,
+          '',
+          undefined,
+          result.url,
+        );
+        if (responses.length > 0) {
+          const msg = responses[0];
+          setChatMessages(prev => [...prev, {
+            id: msg.id,
+            senderId: msg.sender_id,
+            senderName: msg.sender?.name,
+            senderAvatar: msg.sender?.avatar,
+            content: msg.content,
+            mediaUrl: msg.media_url,
+            messageType: msg.message_type,
+            status: msg.status,
+            replyTo: null,
+          }]);
+        }
+        fetchSessions(currentUser.id);
+      } catch {
+        toast.error('Failed to send image');
+      } finally {
+        setIsUploadingChatImage(false);
+        if (chatImageInputRef.current) {
+          chatImageInputRef.current.value = '';
+        }
+      }
     };
 
     // Handler to open group info page
@@ -2528,10 +2667,12 @@ const App: React.FC = () => {
                       </button>
                     )}
                     <button
-                      className={`px-3 py-2 text-sm break-words text-left select-none ${
-                        isMe
-                            ? 'bg-orange-600 text-white rounded-2xl rounded-br-sm'
-                            : 'bg-stone-800 text-stone-100 rounded-2xl rounded-bl-sm'
+                      className={`text-sm break-words text-left select-none ${
+                        msg.mediaUrl
+                          ? 'rounded-2xl overflow-hidden' + (isMe ? ' rounded-br-sm' : ' rounded-bl-sm')
+                          : (isMe
+                              ? 'px-3 py-2 bg-orange-600 text-white rounded-2xl rounded-br-sm'
+                              : 'px-3 py-2 bg-stone-800 text-stone-100 rounded-2xl rounded-bl-sm')
                       } ${isSelected ? 'ring-2 ring-orange-400' : ''}`}
                       onClick={(e) => handleMessageClick(e, msg.id)}
                       onMouseDown={(e) => handleLongPressStart(msg.id, e)}
@@ -2547,7 +2688,20 @@ const App: React.FC = () => {
                         setEmojiPage(0);
                       }}
                     >
-                      {msg.content}
+                      {msg.mediaUrl ? (
+                        <img
+                          src={msg.mediaUrl}
+                          alt=""
+                          className="max-w-full max-h-60 object-cover rounded-2xl"
+                          loading="lazy"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setChatLightboxSrc(msg.mediaUrl!);
+                          }}
+                        />
+                      ) : (
+                        msg.content
+                      )}
                     </button>
                     {/* Reactions display */}
                     {msg.reactions && msg.reactions.length > 0 && (
@@ -2703,6 +2857,15 @@ const App: React.FC = () => {
           </>
         )}
 
+        {/* Hidden file input for chat images */}
+        <input
+          ref={chatImageInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          className="hidden"
+          onChange={handleChatImageSelect}
+        />
+
         {/* Emoji picker */}
         {showEmojiPicker && (
           <>
@@ -2721,6 +2884,14 @@ const App: React.FC = () => {
               </div>
             </div>
           </>
+        )}
+
+        {/* Upload indicator */}
+        {isUploadingChatImage && (
+          <div className="px-4 py-2 bg-stone-900 border-t border-stone-800 flex items-center gap-2">
+            <div className="w-4 h-4 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-stone-400">Uploading image...</span>
+          </div>
         )}
 
         {/* Input */}
@@ -2763,6 +2934,10 @@ const App: React.FC = () => {
               </button>
             )}
           </div>
+        )}
+
+        {chatLightboxSrc && (
+          <ImageLightbox src={chatLightboxSrc} onClose={() => setChatLightboxSrc(null)} />
         )}
       </div>
     );

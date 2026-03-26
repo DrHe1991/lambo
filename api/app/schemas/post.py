@@ -15,6 +15,7 @@ class PostCreate(PostBase):
     title: str | None = Field(None, max_length=200)
     content_format: str = Field(default='plain', pattern=r'^(plain|markdown)$')
     bounty: int | None = Field(None, ge=0)
+    media_urls: list[str] = Field(default_factory=list, max_length=9)
 
 
 class PostUpdate(BaseModel):
@@ -35,6 +36,7 @@ class PostResponse(BaseModel):
     comments_count: int
     bounty: int | None
     cost_paid: int = 0
+    media_urls: list[str] = []
     is_ai: bool
     created_at: datetime
     is_liked: bool = False

@@ -75,6 +75,7 @@ def build_post_response(
         comments_count=post.comments_count,
         bounty=post.bounty,
         cost_paid=post.cost_paid,
+        media_urls=post.media_urls or [],
         is_ai=post.is_ai,
         created_at=post.created_at,
         is_liked=is_liked,
@@ -189,6 +190,7 @@ async def create_post(
         content_format=content_format,
         post_type=post_data.post_type,
         bounty=post_data.bounty,
+        media_urls=post_data.media_urls,
         cost_paid=0,  # Free in minimal system
     )
     db.add(post)

@@ -2,6 +2,7 @@ import React from 'react';
 import { Post } from '../types';
 import { Heart, MessageSquare, ShieldAlert, Cpu, TrendingUp } from 'lucide-react';
 import { Badge } from './ui/Badge';
+import ImageGrid from './ImageGrid';
 
 interface PostCardProps {
   post: Post;
@@ -91,7 +92,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
       )}
 
       {post.type === 'Article' && post.title && (
-        <h3 className="text-lg font-bold text-white mb-1.5">{post.title}</h3>
+        <h3 className="text-lg font-bold text-white mb-1.5 font-body">{post.title}</h3>
       )}
 
       {post.type === 'Article' ? (
@@ -127,6 +128,12 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
             </button>
           )}
         </>
+      )}
+
+      {post.mediaUrls && post.mediaUrls.length > 0 && (
+        <div className="mb-2" onClick={(e) => e.stopPropagation()}>
+          <ImageGrid urls={post.mediaUrls} />
+        </div>
       )}
 
       <div className="flex items-center justify-between pt-1.5 border-t border-stone-800/50">

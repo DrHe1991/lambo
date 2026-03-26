@@ -4,13 +4,15 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.routes import posts, users, chat, drafts, pay, settlement
+from app.routes import posts, users, chat, drafts, pay, settlement, media
+from app.services.media import media_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup resources."""
     await init_db()
+    media_service.create_buckets()
     yield
 
 
@@ -37,6 +39,7 @@ app.include_router(chat.router, prefix='/api/chat', tags=['chat'])
 app.include_router(drafts.router, prefix='/api/drafts', tags=['drafts'])
 app.include_router(pay.router, prefix='/api/pay', tags=['pay'])
 app.include_router(settlement.router, prefix='/api/settlement', tags=['settlement'])
+app.include_router(media.router, prefix='/api/media', tags=['media'])
 
 
 @app.get('/health')

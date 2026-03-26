@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Text, UniqueConstraint, Float, Boolean
+from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Text, UniqueConstraint, Float, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -55,6 +55,9 @@ class Post(Base):
 
     # How much the author paid to publish (0 = free post)
     cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
+
+    # Attached media URLs (images)
+    media_urls: Mapped[list] = mapped_column(JSON, default=list)
 
     # AI-generated content flag
     is_ai: Mapped[bool] = mapped_column(default=False)

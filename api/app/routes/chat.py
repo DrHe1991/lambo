@@ -427,12 +427,18 @@ async def send_message(
                 sender_name=reply_sender.name if reply_sender else 'Unknown',
             )
 
+    # Require either content or media
+    if not message_data.content and not message_data.media_url:
+        raise HTTPException(status_code=400, detail='Message must have content or media')
+
     # Create user message
+    msg_type = 'image' if message_data.media_url else 'text'
     message = Message(
         session_id=session_id,
         sender_id=sender_id,
-        content=message_data.content,
-        message_type='text',
+        content=message_data.content or '',
+        media_url=message_data.media_url,
+        message_type=msg_type,
         status=msg_status,
         reply_to_id=message_data.reply_to_id,
     )
@@ -457,7 +463,8 @@ async def send_message(
             trust_score=sender.trust_score,
         ),
         content=message.content,
-        message_type='text',
+        media_url=message.media_url,
+        message_type=message.message_type,
         status=message.status,
         reply_to=reply_info,
         created_at=message.created_at,
@@ -578,8 +585,8 @@ async def get_messages(
     senders_result = await db.execute(select(User).where(User.id.in_(sender_ids)))
     senders = {u.id: u for u in senders_result.scalars().all()}
 
-    # Mark as read (update last_read_message_id) - only count 'sent' text messages
-    sent_messages = [m for m in messages if m.status == 'sent' and m.message_type == 'text']
+    # Mark as read (update last_read_message_id) - count sent text/image messages
+    sent_messages = [m for m in messages if m.status == 'sent' and m.message_type in ('text', 'image')]
     if sent_messages:
         latest_id = max(m.id for m in sent_messages)
         if not membership.last_read_message_id or latest_id > membership.last_read_message_id:
@@ -637,6 +644,7 @@ async def get_messages(
                 trust_score=senders[m.sender_id].trust_score,
             ),
             content=m.content,
+            media_url=m.media_url,
             message_type=m.message_type,
             status=m.status,
             reply_to=replies_by_id.get(m.reply_to_id) if m.reply_to_id else None,

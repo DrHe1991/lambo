@@ -29,6 +29,7 @@ export interface Post {
   type: 'Note' | 'Article' | 'Question';
   bounty?: number;
   status?: string;
+  mediaUrls?: string[];
   isLiked?: boolean;
   likeStatus?: 'pending' | 'settled' | null;
   lockedUntil?: string | null;
@@ -118,6 +119,7 @@ export function apiPostToPost(apiPost: {
   bounty: number | null;
   is_ai: boolean;
   created_at: string;
+  media_urls?: string[];
   is_liked: boolean;
   like_status?: 'pending' | 'settled' | null;
   locked_until?: string | null;
@@ -147,6 +149,7 @@ export function apiPostToPost(apiPost: {
     bounty: apiPost.bounty || undefined,
     isAI: apiPost.is_ai,
     status: apiPost.status,
+    mediaUrls: apiPost.media_urls || [],
     isLiked: apiPost.is_liked,
     likeStatus: apiPost.like_status,
     lockedUntil: apiPost.locked_until,

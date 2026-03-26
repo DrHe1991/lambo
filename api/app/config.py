@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     pay_service_url: str = 'http://pay:8000'
     pay_app_id: int = 1
 
+    # S3-compatible Object Storage (MinIO in dev, R2/S3 in prod)
+    s3_endpoint: str = 'http://localhost:9000'
+    s3_access_key: str = 'bitlink'
+    s3_secret_key: str = 'bitlink_dev_password'
+    s3_bucket_posts: str = 'posts'
+    s3_bucket_chat: str = 'chat'
+    s3_public_url: str = 'http://localhost:9000'
+
     class Config:
         env_file = '.env'
         extra = 'ignore'

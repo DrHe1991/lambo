@@ -97,8 +97,9 @@ class Message(Base):
         ForeignKey('users.id', ondelete='CASCADE'), nullable=True
     )
     content: Mapped[str] = mapped_column(Text)
+    media_url: Mapped[str | None] = mapped_column(String(500), default=None)
 
-    # Message type: 'text' (normal) or 'system' (system notification, user-specific)
+    # Message type: 'text', 'image', or 'system'
     message_type: Mapped[str] = mapped_column(String(20), default='text')
 
     # Status: 'sent' (delivered) or 'pending' (waiting for recipient to reply/follow)

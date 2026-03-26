@@ -13,9 +13,9 @@ export const ArticleRenderer: React.FC<ArticleRendererProps> = ({
   const sanitizedContent = DOMPurify.sanitize(content, {
     ALLOWED_TAGS: [
       'h1', 'h2', 'h3', 'p', 'br', 'strong', 'em', 'u', 'a',
-      'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'hr',
+      'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'hr', 'img',
     ],
-    ALLOWED_ATTR: ['href', 'target', 'rel', 'class'],
+    ALLOWED_ATTR: ['href', 'target', 'rel', 'class', 'src', 'alt', 'width', 'height'],
   });
 
   return (
@@ -36,6 +36,7 @@ export const ArticleRenderer: React.FC<ArticleRendererProps> = ({
         prose-code:bg-stone-800 prose-code:text-orange-300 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm
         prose-pre:bg-stone-900 prose-pre:rounded-xl prose-pre:overflow-x-auto
         prose-hr:border-stone-800
+        prose-img:rounded-xl prose-img:max-w-full prose-img:h-auto prose-img:my-4
         ${className}`}
       dangerouslySetInnerHTML={{ __html: sanitizedContent }}
     />

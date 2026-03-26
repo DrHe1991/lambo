@@ -148,7 +148,8 @@ class JoinRequestAction(BaseModel):
 
 class MessageCreate(BaseModel):
     """Schema for creating a message."""
-    content: str = Field(..., min_length=1, max_length=5000)
+    content: str = Field(default='', max_length=5000)
+    media_url: str | None = None
     reply_to_id: int | None = None
 
 
@@ -174,8 +175,9 @@ class MessageResponse(BaseModel):
     sender_id: int
     sender: UserBrief
     content: str
-    message_type: str = 'text'  # 'text' or 'system'
-    status: str = 'sent'  # 'sent' or 'pending'
+    media_url: str | None = None
+    message_type: str = 'text'
+    status: str = 'sent'
     reply_to: ReplyInfo | None = None
     reactions: list[ReactionInfo] = []
     created_at: datetime

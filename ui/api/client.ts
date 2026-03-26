@@ -34,7 +34,17 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(error.detail || `HTTP ${response.status}`);
+    let message = `HTTP ${response.status}`;
+    if (error.detail) {
+      if (typeof error.detail === 'string') {
+        message = error.detail;
+      } else if (Array.isArray(error.detail)) {
+        message = error.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join(', ');
+      } else {
+        message = JSON.stringify(error.detail);
+      }
+    }
+    throw new Error(message);
   }
 
   return response.json();
@@ -95,6 +105,7 @@ export interface ApiPost {
   comments_count: number;
   bounty: number | null;
   cost_paid: number;
+  media_urls: string[];
   is_ai: boolean;
   created_at: string;
   is_liked: boolean;
@@ -216,11 +227,18 @@ export interface ApiMessage {
   sender_id: number;
   sender: ApiUser;
   content: string;
-  message_type: 'text' | 'system';
+  media_url: string | null;
+  message_type: 'text' | 'image' | 'system';
   status: 'sent' | 'pending';
   reply_to: ApiReplyInfo | null;
   reactions: ApiReaction[];
   created_at: string;
+}
+
+export interface MediaUploadResponse {
+  url: string;
+  thumbnail_url: string;
+  media_type: string;
 }
 
 // Reward, Challenge, and Boost types removed in minimal system
@@ -414,6 +432,7 @@ export const api = {
     title?: string;
     content_format?: string;
     bounty?: number;
+    media_urls?: string[];
   }) =>
     apiRequest<ApiPost>('/api/posts', { method: 'POST', body: data, params: { author_id: authorId } }),
 
@@ -526,10 +545,10 @@ export const api = {
       params: { user_id: userId, before_id: beforeId },
     }),
 
-  sendMessage: (sessionId: number, senderId: number, content: string, replyToId?: number) =>
+  sendMessage: (sessionId: number, senderId: number, content: string, replyToId?: number, mediaUrl?: string) =>
     apiRequest<ApiMessage[]>(`/api/chat/sessions/${sessionId}/messages`, {
       method: 'POST',
-      body: { content, reply_to_id: replyToId || null },
+      body: { content, reply_to_id: replyToId || null, media_url: mediaUrl || null },
       params: { sender_id: senderId },
     }),
 
@@ -730,4 +749,19 @@ export const api = {
 
   getUserBalances: (userId: number) =>
     apiRequest<UserBalances>('/api/pay/user-balance', { params: { user_id: userId } }),
+
+  // Media
+  uploadMedia: async (file: Blob, purpose: 'post' | 'chat'): Promise<MediaUploadResponse> => {
+    const formData = new FormData();
+    formData.append('file', file, 'image.webp');
+    const response = await fetch(`${API_BASE}/api/media/upload?purpose=${purpose}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
 };
