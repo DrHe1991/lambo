@@ -1,6 +1,12 @@
 # BitLink Production Caddyfile
 # Requires DOMAIN env var (e.g. DOMAIN=bitlink.example.com)
 
+# Homepage — landing page at root domain
+{$DOMAIN} {
+	root * /srv/homepage
+	file_server
+}
+
 # API — reverse proxy with WebSocket support
 api.{$DOMAIN} {
 	reverse_proxy api:8000
