@@ -26,9 +26,11 @@ import ImageLightbox from './components/ImageLightbox';
 // Views
 type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW' | 'EXCHANGE';
 
+import { fixUrl, fixHtmlUrls } from './utils/urlFixer';
+
 // Avatar fallback - must match apiUserToUser in types.ts so every view shows the same face
 const getAvatarUrl = (avatar: string | null | undefined, name: string): string => {
-  if (avatar) return avatar;
+  if (avatar) return fixUrl(avatar);
   return `https://i.pravatar.cc/150?u=${encodeURIComponent(name)}`;
 };
 
@@ -255,7 +257,7 @@ const App: React.FC = () => {
           senderName: message.sender?.name,
           senderAvatar: message.sender?.avatar,
           content: message.content,
-          mediaUrl: message.media_url,
+          mediaUrl: message.media_url ? fixUrl(message.media_url) : undefined,
           messageType: message.message_type,
           status: message.status,
           replyTo: message.reply_to ? { id: message.reply_to.id, content: message.reply_to.content, sender_name: message.reply_to.sender_name } : null,
@@ -580,7 +582,7 @@ const App: React.FC = () => {
           senderName: m.sender?.name,
           senderAvatar: m.sender?.avatar,
           content: m.content,
-          mediaUrl: m.media_url,
+          mediaUrl: m.media_url ? fixUrl(m.media_url) : undefined,
           messageType: m.message_type,
           status: m.status,
           createdAt: m.created_at,
@@ -2489,7 +2491,7 @@ const App: React.FC = () => {
             senderName: msg.sender?.name,
             senderAvatar: msg.sender?.avatar,
             content: msg.content,
-            mediaUrl: msg.media_url,
+            mediaUrl: msg.media_url ? fixUrl(msg.media_url) : undefined,
             messageType: msg.message_type,
             status: msg.status,
             replyTo: null,

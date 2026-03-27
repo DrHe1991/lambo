@@ -1,3 +1,5 @@
+import { fixUrl } from './utils/urlFixer';
+
 export type Tab = 'Feed' | 'Following' | 'Chat' | 'Profile' | 'Search';
 
 export interface User {
@@ -149,7 +151,7 @@ export function apiPostToPost(apiPost: {
     bounty: apiPost.bounty || undefined,
     isAI: apiPost.is_ai,
     status: apiPost.status,
-    mediaUrls: apiPost.media_urls || [],
+    mediaUrls: (apiPost.media_urls || []).map(fixUrl),
     isLiked: apiPost.is_liked,
     likeStatus: apiPost.like_status,
     lockedUntil: apiPost.locked_until,

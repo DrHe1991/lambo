@@ -1,5 +1,6 @@
 import React from 'react';
 import DOMPurify from 'dompurify';
+import { fixHtmlUrls } from '../utils/urlFixer';
 
 interface ArticleRendererProps {
   content: string;
@@ -10,7 +11,7 @@ export const ArticleRenderer: React.FC<ArticleRendererProps> = ({
   content,
   className = '',
 }) => {
-  const sanitizedContent = DOMPurify.sanitize(content, {
+  const sanitizedContent = DOMPurify.sanitize(fixHtmlUrls(content), {
     ALLOWED_TAGS: [
       'h1', 'h2', 'h3', 'p', 'br', 'strong', 'em', 'u', 'a',
       'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'hr', 'img',
