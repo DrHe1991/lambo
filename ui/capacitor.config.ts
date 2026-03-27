@@ -1,14 +1,16 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
+const isProd = process.env.NODE_ENV === 'production';
+
 const config: CapacitorConfig = {
   appId: 'com.bitlink.app',
   appName: 'BitLink',
   webDir: 'dist',
   android: {
-    allowMixedContent: true,
+    allowMixedContent: !isProd,
   },
   server: {
-    androidScheme: 'http',
+    androidScheme: isProd ? 'https' : 'http',
   },
 };
 

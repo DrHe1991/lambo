@@ -19,6 +19,7 @@ dist-ssr/
 # ----------------------------------------
 .env
 .env.local
+.env.prod
 .env.*.local
 
 # ----------------------------------------
@@ -37,6 +38,7 @@ x-agent/media/
 ui/android/.gradle/
 ui/android/build/
 ui/android/app/build/
+ui/android/app/bitlink.keystore
 ui/android/local.properties
 ui/android/capacitor-cordova-android-plugins/
 ui/android/app/src/main/assets/public/

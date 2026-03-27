@@ -1,0 +1,95 @@
+name: Build APK
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './ui/package-lock.json'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build UI for production
+        working-directory: ./ui
+        run: |
+          npm ci
+          VITE_API_URL=https://api.${{ secrets.DOMAIN }} npm run build
+
+      - name: Sync Capacitor
+        working-directory: ./ui
+        run: npx cap sync android
+
+      - name: Determine build type
+        id: build_type
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "type=release" >> $GITHUB_OUTPUT
+          else
+            echo "type=${{ inputs.build_type }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Decode keystore
+        if: steps.build_type.outputs.type == 'release'
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ui/android/app/bitlink.keystore
+
+      - name: Build debug APK
+        if: steps.build_type.outputs.type == 'debug'
+        working-directory: ./ui/android
+        run: ./gradlew assembleDebug
+
+      - name: Build release APK
+        if: steps.build_type.outputs.type == 'release'
+        working-directory: ./ui/android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew assembleRelease
+
+      - name: Get APK path
+        id: apk
+        run: |
+          if [[ "${{ steps.build_type.outputs.type }}" == "release" ]]; then
+            echo "path=$(find ui/android/app/build -name '*release*.apk' | head -1)" >> $GITHUB_OUTPUT
+          else
+            echo "path=$(find ui/android/app/build -name '*debug*.apk' | head -1)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bitlink-${{ steps.build_type.outputs.type }}
+          path: ${{ steps.apk.outputs.path }}
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.path }}
+          generate_release_notes: true
