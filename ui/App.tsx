@@ -2042,7 +2042,7 @@ const App: React.FC = () => {
                 : 'bg-stone-800 text-stone-600'
             }`}
           >
-            {isSubmitting ? '...' : 'Post'}
+            {isSubmitting ? '...' : (isQuestion ? 'Ask' : 'Post')}
           </button>
         </div>
 
@@ -2097,8 +2097,8 @@ const App: React.FC = () => {
         )}
 
         {/* Editor */}
-        <div className="flex-1 px-4 pt-4 overflow-auto">
-          <div className="flex items-start gap-3 mb-4">
+        <div className="flex-1 px-4 pt-4 overflow-auto flex flex-col min-h-0">
+          <div className="flex items-start gap-3 mb-3">
             <img
               src={getAvatarUrl(currentMe.avatar, currentMe.name)}
               className={`w-10 h-10 rounded-full border-2 ${
@@ -2112,16 +2112,15 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Add title toggle for Post type */}
           {isPost && !showTitleInput && (
             <button
               onClick={() => setShowTitleInput(true)}
-              className="mb-4 px-3 py-2 text-sm text-stone-500 hover:text-orange-400 border border-dashed border-stone-700 hover:border-orange-500/50 rounded-lg transition-colors"
+              className="mb-3 self-start px-3 py-1.5 text-xs text-stone-600 hover:text-orange-400 border border-dashed border-stone-800 hover:border-orange-500/40 rounded-md transition-colors"
             >
-              + Add title
+              + Write an article instead
             </button>
           )}
-          
+
           {showTitleInput ? (
             <ArticleEditor
               title={publishTitle}
@@ -2145,30 +2144,22 @@ const App: React.FC = () => {
               }}
             />
           ) : (
-            <>
-              <textarea
-                data-testid="post-content"
-                autoFocus
-                value={publishContent}
-                onChange={(e) => setPublishContent(e.target.value)}
-                maxLength={isQuestion ? 2000 : 500}
-                className={`w-full bg-transparent border-none outline-none text-lg leading-relaxed resize-none min-h-[200px] ${
-                  isQuestion ? 'placeholder:text-blue-400/30' : 'placeholder:text-orange-500/30'
-                }`}
-                placeholder={isQuestion ? 'What do you need to know?' : "What's the signal?"}
-              />
-              
-              {isPost && (
-                <div className="text-right text-xs text-stone-600">
-                  {publishContent.length}/500
-                </div>
-              )}
-            </>
+            <textarea
+              data-testid="post-content"
+              autoFocus
+              value={publishContent}
+              onChange={(e) => setPublishContent(e.target.value)}
+              maxLength={isQuestion ? 2000 : 500}
+              className={`w-full flex-1 bg-transparent border-none outline-none text-lg leading-relaxed resize-none ${
+                isQuestion ? 'placeholder:text-blue-400/30' : 'placeholder:text-orange-500/30'
+              }`}
+              placeholder={isQuestion ? 'What do you need to know?' : "What's the signal?"}
+            />
           )}
 
           {/* Image attachments preview */}
-          {publishImages.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
+          {!showTitleInput && publishImages.length > 0 && (
+            <div className="py-3 flex flex-wrap gap-2">
               {publishImages.map((url, i) => (
                 <div key={url} className="relative w-20 h-20 rounded-lg overflow-hidden bg-stone-800">
                   <img src={url} alt="" className="w-full h-full object-cover" />
@@ -2187,50 +2178,62 @@ const App: React.FC = () => {
               )}
             </div>
           )}
-
-          {/* Image picker button */}
-          {!showTitleInput && publishImages.length < 9 && (
-            <button
-              onClick={() => publishImageInputRef.current?.click()}
-              disabled={isUploadingImage}
-              className={`mt-3 flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
-                isUploadingImage
-                  ? 'text-stone-600 cursor-not-allowed'
-                  : 'text-stone-500 hover:text-orange-400 border border-dashed border-stone-700 hover:border-orange-500/50'
-              }`}
-            >
-              <Image size={16} />
-              {isUploadingImage ? 'Uploading...' : 'Add photo'}
-            </button>
-          )}
-          <input
-            ref={publishImageInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/gif"
-            multiple
-            className="hidden"
-            onChange={handlePostImageSelect}
-          />
-
-          {isQuestion && (
-            <div className={`mt-4 flex items-center justify-between p-4 bg-blue-500/10 border ${accentBorder} rounded-2xl`}>
-              <span className="text-sm font-bold text-blue-400">Bounty (optional)</span>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={publishBounty}
-                  onChange={(e) => setPublishBounty(e.target.value)}
-                  placeholder="0"
-                  className="w-20 bg-transparent border-none outline-none text-right text-xl font-bold text-white"
-                />
-                <span className="text-xs font-bold uppercase text-blue-400">sat</span>
-              </div>
-            </div>
-          )}
-
         </div>
 
-        <div className="px-4 pb-8" />
+        {/* Bottom toolbar */}
+        {!showTitleInput && (
+          <div className="px-4 pt-3 pb-8 border-t border-stone-800/50">
+            <div className="flex items-center gap-2 flex-wrap">
+              {publishImages.length < 9 && (
+                <button
+                  onClick={() => publishImageInputRef.current?.click()}
+                  disabled={isUploadingImage}
+                  className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+                    isUploadingImage
+                      ? 'text-stone-600 cursor-not-allowed border border-dashed border-stone-800'
+                      : `text-stone-500 border border-dashed border-stone-700 ${
+                          isQuestion ? 'hover:text-blue-400 hover:border-blue-500/50' : 'hover:text-orange-400 hover:border-orange-500/50'
+                        }`
+                  }`}
+                >
+                  <Image size={16} />
+                  {isUploadingImage ? 'Uploading...' : 'Add photo'}
+                </button>
+              )}
+
+              <div className="flex-1" />
+
+              <span className="text-xs text-stone-600">
+                {publishContent.length}/{isQuestion ? 2000 : 500}
+              </span>
+            </div>
+
+            {isQuestion && (
+              <div className={`mt-3 flex items-center justify-between p-4 bg-blue-500/10 border ${accentBorder} rounded-2xl`}>
+                <span className="text-sm font-bold text-blue-400">Bounty (optional)</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={publishBounty}
+                    onChange={(e) => setPublishBounty(e.target.value)}
+                    placeholder="0"
+                    className="w-20 bg-transparent border-none outline-none text-right text-xl font-bold text-white"
+                  />
+                  <span className="text-xs font-bold uppercase text-blue-400">sat</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <input
+          ref={publishImageInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/gif"
+          multiple
+          className="hidden"
+          onChange={handlePostImageSelect}
+        />
       </div>
     );
   };
