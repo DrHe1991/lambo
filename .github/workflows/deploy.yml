@@ -37,7 +37,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ~/bitlink
+            cd ~/lambo
             git pull origin main
 
       - name: Copy UI build to VPS
@@ -47,7 +47,7 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           source: 'ui/dist/'
-          target: '~/bitlink/'
+          target: '~/lambo/'
           overwrite: true
 
       - name: Restart services
@@ -57,14 +57,14 @@ jobs:
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           script: |
-            cd ~/bitlink
+            cd ~/lambo
             docker compose -f docker-compose.prod.yml --env-file .env.prod build api pay
             docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 
             # Run migrations
-            docker compose -f docker-compose.prod.yml exec -T api alembic upgrade head
-            docker compose -f docker-compose.prod.yml exec -T pay alembic upgrade head
+            docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api alembic upgrade head
+            docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T pay alembic upgrade head
 
             # Verify health
             sleep 5
-            curl -sf http://localhost:8000/health || echo "API health check failed"
+            docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T api curl -sf http://localhost:8000/health || echo "API health check failed"
