@@ -699,9 +699,11 @@ const App: React.FC = () => {
               fetchComments(Number(p.id), currentUser?.id);
             }}
             onUserClick={(id) => {
-              const user = feedPostsConverted.find(p => p.author.id === id)?.author || currentMe;
-              setSelectedUser(user);
-              setCurrentView('USER_PROFILE');
+              const user = feedPostsConverted.find(p => String(p.author.id) === String(id))?.author;
+              if (user) {
+                setSelectedUser(user);
+                setCurrentView('USER_PROFILE');
+              }
             }}
             onChallenge={handleChallenge}
             onLike={handleLikeRequest}
@@ -736,9 +738,11 @@ const App: React.FC = () => {
             fetchComments(Number(p.id), currentUser?.id);
           }}
           onUserClick={(id) => {
-            const user = feedPostsConverted.find(p => p.author.id === id)?.author || currentMe;
-            setSelectedUser(user);
-            setCurrentView('USER_PROFILE');
+            const user = feedPostsConverted.find(p => String(p.author.id) === String(id))?.author;
+            if (user) {
+              setSelectedUser(user);
+              setCurrentView('USER_PROFILE');
+            }
           }}
           onChallenge={handleChallenge}
           onLike={handleLikeRequest}
