@@ -141,6 +141,10 @@ const App: React.FC = () => {
   const commentInputRef = useRef<HTMLInputElement>(null);
   const [inlineCommentPost, setInlineCommentPost] = useState<Post | null>(null);
   const [inlineCommentDraft, setInlineCommentDraft] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const pullStartY = useRef(0);
+  const isPulling = useRef(false);
 
 
   // Chat detail state
@@ -515,6 +519,46 @@ const App: React.FC = () => {
 
   // Boost handlers removed in minimal system
 
+  const PULL_THRESHOLD = 60;
+
+  const handleRefresh = async () => {
+    if (!currentUser || isRefreshing) return;
+    setIsRefreshing(true);
+    try {
+      await fetchFeed(currentUser.id);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const scrollEl = e.currentTarget;
+    if (scrollEl.scrollTop <= 0) {
+      pullStartY.current = e.touches[0].clientY;
+      isPulling.current = true;
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isPulling.current) return;
+    const dy = e.touches[0].clientY - pullStartY.current;
+    if (dy > 0 && e.currentTarget.scrollTop <= 0) {
+      setPullDistance(Math.min(dy * 0.5, 100));
+    } else {
+      isPulling.current = false;
+      setPullDistance(0);
+    }
+  };
+
+  const handleTouchEnd = () => {
+    if (!isPulling.current) { setPullDistance(0); return; }
+    if (pullDistance >= PULL_THRESHOLD) {
+      handleRefresh();
+    }
+    isPulling.current = false;
+    setPullDistance(0);
+  };
+
   // Handle Google Sign-In (placeholder for Phase 2)
   const handleLogin = async () => {
     // In Phase 2, this will trigger actual Google OAuth
@@ -757,8 +801,29 @@ const App: React.FC = () => {
   };
 
   // Sub-Views
+  const pullIndicator = (
+    <div
+      className="flex justify-center items-center overflow-hidden transition-all duration-200"
+      style={{ height: isRefreshing ? 40 : pullDistance > 10 ? pullDistance : 0 }}
+    >
+      {isRefreshing ? (
+        <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+      ) : pullDistance >= PULL_THRESHOLD ? (
+        <span className="text-xs text-stone-400">Release to refresh</span>
+      ) : pullDistance > 10 ? (
+        <span className="text-xs text-stone-500">Pull down to refresh</span>
+      ) : null}
+    </div>
+  );
+
   const renderFeed = () => (
-    <div className="">
+    <div
+      className="h-full overflow-y-auto"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {pullIndicator}
       <div className="px-4 py-3">
         {feedPostsConverted.map(post => (
           <PostCard 
@@ -783,7 +848,7 @@ const App: React.FC = () => {
           />
         ))}
 
-        {feedLoading && (
+        {feedLoading && !isRefreshing && (
           <div className="flex justify-center py-6">
             <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
           </div>
@@ -797,7 +862,13 @@ const App: React.FC = () => {
   );
 
   const renderFollowing = () => (
-    <div className="">
+    <div
+      className="h-full overflow-y-auto"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {pullIndicator}
       <div className="px-4 py-3">
       {feedPostsConverted.map(post => (
         <PostCard 
@@ -821,7 +892,7 @@ const App: React.FC = () => {
           isLiked={likedPosts.has(String(post.id)) || post.isLiked}
         />
       ))}
-      {feedLoading && (
+      {feedLoading && !isRefreshing && (
         <div className="flex justify-center py-6">
           <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
         </div>
@@ -2018,7 +2089,7 @@ const App: React.FC = () => {
         const bounty = isQuestion && publishBounty ? parseInt(publishBounty) : undefined;
         const postType = isQuestion ? 'question' : (hasTitle ? 'article' : 'note');
         
-        await api.createPost(currentUser.id, {
+        const newPost = await api.createPost(currentUser.id, {
           content: publishContent || ' ',
           post_type: postType,
           title: hasTitle ? publishTitle : undefined,
@@ -2033,7 +2104,13 @@ const App: React.FC = () => {
         }
         resetPublishState();
         toast.success(hasTitle ? 'Article published' : 'Posted');
-        fetchPosts({ user_id: currentUser.id });
+        setActiveTab('Feed');
+        setCurrentView('MAIN');
+        usePostStore.setState((state) => ({
+          feedPosts: [newPost, ...state.feedPosts],
+          posts: [newPost, ...state.posts],
+        }));
+        fetchFeed(currentUser.id);
         if (currentUser) {
           fetchBalance(currentUser.id);
           fetchLedger(currentUser.id);
