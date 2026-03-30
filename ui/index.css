@@ -124,15 +124,28 @@
   --color-black: #3a2c22;
 }
 
+:root {
+  --keyboard-height: 0px;
+}
+
 body {
   font-family: 'DM Sans', sans-serif;
   background-color: var(--bg-base);
   color: #fafaf9;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
+  overscroll-behavior: none;
   font-kerning: normal;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Allow text selection in content areas */
+p, article, .selectable, textarea, input {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* Overlay backdrops — always dark regardless of theme */

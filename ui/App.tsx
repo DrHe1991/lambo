@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { App as CapApp } from '@capacitor/app';
+import { StatusBar, Style } from '@capacitor/status-bar';
+import { Keyboard } from '@capacitor/keyboard';
 import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
@@ -185,6 +188,75 @@ const App: React.FC = () => {
   const [isLoadingJoinRequests, setIsLoadingJoinRequests] = useState(false);
   const [invitableUsers, setInvitableUsers] = useState<User[]>([]);
   const [isLoadingInvitableUsers, setIsLoadingInvitableUsers] = useState(false);
+
+  // Android platform setup: status bar, keyboard, overscroll
+  useEffect(() => {
+    StatusBar.setBackgroundColor({ color: '#000000' }).catch(() => {});
+    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+    StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+    Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
+    Keyboard.setScroll({ isDisabled: true }).catch(() => {});
+    Keyboard.addListener('keyboardWillShow', (info) => {
+      document.documentElement.style.setProperty('--keyboard-height', `${info.keyboardHeight}px`);
+    }).catch(() => {});
+    Keyboard.addListener('keyboardWillHide', () => {
+      document.documentElement.style.setProperty('--keyboard-height', '0px');
+    }).catch(() => {});
+  }, []);
+
+  // Android back button / gesture handler
+  useEffect(() => {
+    const listener = CapApp.addListener('backButton', () => {
+      // Dismiss modals and overlays first
+      if (chatLightboxSrc) { setChatLightboxSrc(null); return; }
+      if (showLikeModal) { setShowLikeModal(false); return; }
+      if (showEmojiPicker) { setShowEmojiPicker(false); return; }
+      if (showChatActions) { setShowChatActions(false); return; }
+      if (selectedMessageId) { setSelectedMessageId(null); setMenuPosition(null); return; }
+      if (showReactorsFor) { setShowReactorsFor(null); return; }
+      if (showAttachmentPicker) { setShowAttachmentPicker(false); return; }
+      if (showDraftList) { setShowDraftList(false); return; }
+      if (showAddMembersModal) { setShowAddMembersModal(false); return; }
+      if (showInviteLinks) { setShowInviteLinks(false); return; }
+      if (showMemberActions !== null) { setShowMemberActions(null); return; }
+      if (inlineCommentPost) { setInlineCommentPost(null); return; }
+      if (publishPreview) { setPublishPreview(false); return; }
+
+      // Close publisher
+      if (isPublishing) { setIsPublishing(false); return; }
+
+      // Navigate back through view hierarchy
+      if (currentView === 'GROUP_INFO') { setCurrentView('CHAT_DETAIL'); return; }
+      if (currentView === 'FOLLOWERS_LIST' || currentView === 'FOLLOWING_LIST') { setCurrentView('USER_PROFILE'); return; }
+      if (currentView !== 'MAIN') {
+        setCurrentView('MAIN');
+        if (currentView === 'POST_DETAIL' || currentView === 'QA_DETAIL') {
+          usePostStore.getState().clearCurrentPost();
+        }
+        if (currentView === 'SEARCH') {
+          setFriendSearch('');
+          setFriendSearchResults([]);
+        }
+        if (currentView === 'JOIN_GROUP') {
+          setInvitePreview(null);
+          setInviteCodeInput('');
+        }
+        if (currentView === 'CHAT_DETAIL') {
+          setSelectedMessageId(null);
+          setReplyingTo(null);
+        }
+        return;
+      }
+
+      // At MAIN view, minimize the app
+      CapApp.minimizeApp();
+    });
+
+    return () => { listener.then(l => l.remove()); };
+  }, [currentView, isPublishing, chatLightboxSrc, showLikeModal, showEmojiPicker,
+      showChatActions, selectedMessageId, showReactorsFor, showAttachmentPicker,
+      showDraftList, showAddMembersModal, showInviteLinks, showMemberActions,
+      inlineCommentPost, publishPreview]);
 
   // Scroll to a specific message and briefly highlight it
   const scrollToMessage = (msgId: number) => {

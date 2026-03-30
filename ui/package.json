@@ -15,8 +15,11 @@
   },
   "dependencies": {
     "@capacitor/android": "^8.0.2",
+    "@capacitor/app": "^8.1.0",
     "@capacitor/cli": "^8.0.2",
     "@capacitor/core": "^8.0.2",
+    "@capacitor/keyboard": "^8.0.2",
+    "@capacitor/status-bar": "^8.0.2",
     "@tiptap/extension-character-count": "^3.20.1",
     "@tiptap/extension-image": "^3.20.5",
     "@tiptap/extension-link": "^3.20.1",
