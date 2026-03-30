@@ -191,9 +191,8 @@ const App: React.FC = () => {
 
   // Android platform setup: status bar, keyboard, overscroll
   useEffect(() => {
-    StatusBar.setBackgroundColor({ color: '#000000' }).catch(() => {});
     StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
-    StatusBar.setOverlaysWebView({ overlay: false }).catch(() => {});
+    StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
     Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
     Keyboard.setScroll({ isDisabled: true }).catch(() => {});
     Keyboard.addListener('keyboardWillShow', (info) => {
@@ -3913,7 +3912,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen pb-24 relative select-none">
+    <div className="min-h-dvh pb-24 relative select-none app-shell">
       {renderHeader()}
       <main className="max-w-md mx-auto">
         {renderContent()}

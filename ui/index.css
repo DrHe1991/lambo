@@ -187,9 +187,19 @@ h1, h2, .font-display {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Bottom nav needs extra breathing room above iOS safe area. */
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Bottom nav needs extra breathing room above safe area. */
 .safe-bottom-nav {
   padding-bottom: calc(env(safe-area-inset-bottom) + 0.5rem);
+}
+
+/* Full-height container respecting system bars */
+.app-shell {
+  min-height: 100dvh;
+  padding-top: env(safe-area-inset-top);
 }
 
 /* Fade-in-up for feed items and list entries */
