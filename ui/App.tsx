@@ -145,6 +145,7 @@ const App: React.FC = () => {
   const [pullDistance, setPullDistance] = useState(0);
   const pullStartY = useRef(0);
   const isPulling = useRef(false);
+  const mainContentRef = useRef<HTMLElement>(null);
 
 
   // Chat detail state
@@ -195,7 +196,7 @@ const App: React.FC = () => {
 
   // Android platform setup: status bar, keyboard, overscroll
   useEffect(() => {
-    StatusBar.setStyle({ style: Style.Dark }).catch(() => {});
+    StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light }).catch(() => {});
     StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
     Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
     Keyboard.setScroll({ isDisabled: true }).catch(() => {});
@@ -205,7 +206,7 @@ const App: React.FC = () => {
     Keyboard.addListener('keyboardWillHide', () => {
       document.documentElement.style.setProperty('--keyboard-height', '0px');
     }).catch(() => {});
-  }, []);
+  }, [isDark]);
 
   // Android back button / gesture handler
   useEffect(() => {
@@ -532,8 +533,9 @@ const App: React.FC = () => {
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    const scrollEl = e.currentTarget;
-    if (scrollEl.scrollTop <= 0) {
+    if (activeTab !== 'Feed' && activeTab !== 'Following') return;
+    const scrollEl = mainContentRef.current;
+    if (scrollEl && scrollEl.scrollTop <= 0) {
       pullStartY.current = e.touches[0].clientY;
       isPulling.current = true;
     }
@@ -541,8 +543,9 @@ const App: React.FC = () => {
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!isPulling.current) return;
+    const scrollEl = mainContentRef.current;
     const dy = e.touches[0].clientY - pullStartY.current;
-    if (dy > 0 && e.currentTarget.scrollTop <= 0) {
+    if (dy > 0 && scrollEl && scrollEl.scrollTop <= 0) {
       setPullDistance(Math.min(dy * 0.5, 100));
     } else {
       isPulling.current = false;
@@ -744,7 +747,7 @@ const App: React.FC = () => {
   const renderHeader = () => {
     if (currentView !== 'MAIN') return null;
     return (
-      <header className="sticky top-0 z-40 bg-black/90 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+      <header className="flex-shrink-0 z-40 bg-black/90 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
         <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">
           <span className="text-orange-500">Bit</span>Link
         </span>
@@ -766,7 +769,7 @@ const App: React.FC = () => {
   const renderBottomNav = () => {
     if (currentView !== 'MAIN' || isPublishing) return null;
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-black/90 backdrop-blur-lg border-t border-stone-800 safe-bottom-nav bottom-nav">
+      <nav className="flex-shrink-0 z-50 bg-black/90 backdrop-blur-lg border-t border-stone-800 safe-bottom-nav bottom-nav">
         <div className="max-w-md mx-auto px-4 py-2 grid grid-cols-5 items-center">
           <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-stone-500'}`}>
             <Home size={22} />
@@ -817,12 +820,7 @@ const App: React.FC = () => {
   );
 
   const renderFeed = () => (
-    <div
-      className="h-full overflow-y-auto"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div>
       {pullIndicator}
       <div className="px-4 py-3">
         {feedPostsConverted.map(post => (
@@ -862,12 +860,7 @@ const App: React.FC = () => {
   );
 
   const renderFollowing = () => (
-    <div
-      className="h-full overflow-y-auto"
-      onTouchStart={handleTouchStart}
-      onTouchMove={handleTouchMove}
-      onTouchEnd={handleTouchEnd}
-    >
+    <div>
       {pullIndicator}
       <div className="px-4 py-3">
       {feedPostsConverted.map(post => (
@@ -1230,7 +1223,7 @@ const App: React.FC = () => {
     };
 
     return (
-    <div className="p-4 pb-28">
+    <div className="p-4 pb-4">
       <div className="flex flex-col items-center mb-8">
         <div className="relative w-28 h-28 mb-4">
            <img src={getAvatarUrl(currentMe.avatar, currentMe.name)} className="w-full h-full rounded-full border-4 border-orange-500 object-cover" onError={(e) => handleAvatarError(e, currentMe.name)} />
@@ -1255,15 +1248,15 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <div data-testid="balance-card" className="bg-stone-900 border border-stone-800 p-4 rounded-2xl mb-4">
-        <div className="flex items-center justify-between mb-3">
+      <div data-testid="balance-card" className="bg-stone-900 border border-stone-800 p-5 rounded-2xl mb-4">
+        <div className="flex items-center justify-between mb-5">
           <button
             className="text-left active:opacity-70 transition-opacity"
             onClick={() => { if (currentUser) fetchLedger(currentUser.id); setCurrentView('TRANSACTIONS'); }}
           >
-            <span className="text-stone-500 text-xs font-bold uppercase block mb-1">Balance</span>
-            <div className="flex items-baseline gap-1">
-              <span data-testid="balance-amount" className="text-2xl font-bold text-stone-100">{availableBalance.toLocaleString()}</span>
+            <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">Balance</span>
+            <div className="flex items-baseline gap-1.5">
+              <span data-testid="balance-amount" className="text-[28px] font-bold text-stone-100 leading-none">{availableBalance.toLocaleString()}</span>
               <span className="text-orange-500 text-sm font-bold">sat</span>
               {change24h !== 0 && (
                 <span className={`text-xs font-bold ml-2 ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
@@ -1276,31 +1269,37 @@ const App: React.FC = () => {
             className="text-right active:opacity-70 transition-opacity"
             onClick={() => setCurrentView('EXCHANGE')}
           >
-            <span className="text-stone-500 text-xs font-bold uppercase block mb-1">USDT</span>
-            <span className="text-xl font-bold text-stone-100">${(stableBalance / 1_000_000).toFixed(2)}</span>
+            <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">USDT</span>
+            <span className="text-[22px] font-bold text-stone-100 leading-none">${(stableBalance / 1_000_000).toFixed(2)}</span>
           </button>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center justify-around pt-3 border-t border-stone-800/60">
           <button
             onClick={() => setCurrentView('DEPOSIT')}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold rounded-xl transition-colors"
+            className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <Download size={14} />
-            <span>Deposit</span>
+            <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+              <Download size={18} className="text-orange-500" />
+            </div>
+            <span className="text-[11px] font-semibold text-stone-400">Deposit</span>
           </button>
           <button
             onClick={() => setCurrentView('EXCHANGE')}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-stone-800 hover:bg-stone-700 text-orange-400 text-xs font-semibold rounded-xl border border-orange-500/30 transition-colors"
+            className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <RefreshCw size={14} />
-            <span>Exchange</span>
+            <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+              <RefreshCw size={18} className="text-orange-500" />
+            </div>
+            <span className="text-[11px] font-semibold text-stone-400">Exchange</span>
           </button>
           <button
             onClick={() => setCurrentView('WITHDRAW')}
-            className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-100 text-xs font-semibold rounded-xl border border-stone-700 transition-colors"
+            className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <Upload size={14} />
-            <span>Withdraw</span>
+            <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+              <Upload size={18} className="text-orange-500" />
+            </div>
+            <span className="text-[11px] font-semibold text-stone-400">Withdraw</span>
           </button>
         </div>
       </div>
@@ -2922,56 +2921,56 @@ const App: React.FC = () => {
                   )}
                 </div>
 
-                {/* Message action menu - positioned below message */}
+                {/* Message action menu - bottom sheet style */}
                 {isSelected && menuPosition && (
                   <>
-                    <div className="fixed inset-0 z-40" onClick={(e) => { e.stopPropagation(); setSelectedMessageId(null); setMenuPosition(null); }} />
-                    <div 
-                      className="fixed z-50 bg-stone-900 border border-stone-800 rounded-xl shadow-xl overflow-hidden"
-                      style={{
-                        left: Math.min(Math.max(menuPosition.x, 120), window.innerWidth - 120),
-                        top: Math.min(menuPosition.y, window.innerHeight - 280),
-                        transform: 'translateX(-50%)',
-                        minWidth: '200px',
-                      }}
+                    <div className="fixed inset-0 z-40 bg-black/40" onClick={(e) => { e.stopPropagation(); setSelectedMessageId(null); setMenuPosition(null); }} />
+                    <div
+                      className="fixed z-50 bottom-0 left-0 right-0 bg-stone-900 rounded-t-2xl shadow-2xl overflow-hidden safe-bottom-nav"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      {/* Drag handle */}
+                      <div className="flex justify-center pt-2.5 pb-1">
+                        <div className="w-9 h-1 rounded-full bg-stone-700" />
+                      </div>
                       {/* Emoji reactions row */}
-                      <div className="px-3 py-2 flex items-center gap-1 border-b border-stone-800">
+                      <div className="px-4 py-2.5 flex items-center justify-around border-b border-stone-800/60">
                         {defaultReactions.slice(emojiPage * 5, emojiPage * 5 + 5).map(emoji => (
                           <button
                             key={emoji}
-                            className="text-xl hover:scale-125 transition-transform active:scale-90 p-1"
+                            className="text-2xl active:scale-90 transition-transform p-1.5"
                             onClick={() => handleReaction(emoji)}
                           >
                             {emoji}
                           </button>
                         ))}
                         <button
-                          className="text-stone-400 hover:text-stone-200 px-2 text-lg font-bold"
+                          className="text-stone-500 active:text-stone-300 p-1.5 text-lg font-bold"
                           onClick={() => setEmojiPage(p => (p + 1) % 2)}
                         >
                           ···
                         </button>
                       </div>
                       {/* Action buttons */}
-                      <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('reply')}>
-                        <Reply size={16} className="text-orange-400" /> Reply
-                      </button>
-                      <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('forward')}>
-                        <Forward size={16} className="text-orange-400" /> Forward
-                      </button>
-                      <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('copy')}>
-                        <Copy size={16} className="text-orange-400" /> Copy
-                      </button>
-                      {isMe && canRetreat(msg) && (
-                        <button className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('retreat')}>
-                          <Undo2 size={16} className="text-amber-400" /> Retreat
+                      <div className="py-1">
+                        <button className="w-full px-5 py-3 text-left text-[13px] font-medium text-stone-200 active:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('reply')}>
+                          <Reply size={18} className="text-orange-500" /> Reply
                         </button>
-                      )}
-                      <button className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('delete')}>
-                        <Trash2 size={16} /> Delete for me
-                      </button>
+                        <button className="w-full px-5 py-3 text-left text-[13px] font-medium text-stone-200 active:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('forward')}>
+                          <Forward size={18} className="text-orange-500" /> Forward
+                        </button>
+                        <button className="w-full px-5 py-3 text-left text-[13px] font-medium text-stone-200 active:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('copy')}>
+                          <Copy size={18} className="text-orange-500" /> Copy
+                        </button>
+                        {isMe && canRetreat(msg) && (
+                          <button className="w-full px-5 py-3 text-left text-[13px] font-medium text-stone-200 active:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('retreat')}>
+                            <Undo2 size={18} className="text-amber-400" /> Retreat
+                          </button>
+                        )}
+                        <button className="w-full px-5 py-3 text-left text-[13px] font-medium text-red-400 active:bg-stone-800 flex items-center gap-3" onClick={() => handleMessageAction('delete')}>
+                          <Trash2 size={18} /> Delete for me
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}
@@ -3989,9 +3988,15 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-dvh pb-24 relative select-none app-shell">
+    <div className="h-dvh flex flex-col overflow-hidden select-none app-shell">
       {renderHeader()}
-      <main className="max-w-md mx-auto">
+      <main
+        ref={mainContentRef}
+        className="flex-1 overflow-y-auto max-w-md mx-auto w-full"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         {renderContent()}
       </main>
       
