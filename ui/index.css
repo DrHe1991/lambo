@@ -211,6 +211,12 @@ h1, h2, .font-display {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
+/* Auto-hide header on scroll — controlled via --header-top CSS variable */
+.auto-hide-header {
+  top: var(--header-top, 0px);
+  transition: top 0.3s ease;
+}
+
 /* Fade-in-up for feed items and list entries */
 @keyframes fade-in-up {
   from {

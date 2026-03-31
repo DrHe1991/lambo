@@ -15,17 +15,17 @@ export const Header: React.FC<HeaderProps> = ({
   className = '',
 }) => {
   return (
-    <div className={`p-4 sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl border-b border-stone-800 flex items-center gap-4 ${className}`}>
+    <div className={`sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav ${className}`}>
       {onBack && (
         <button
           onClick={onBack}
-          className="p-1 -ml-1 text-stone-400 hover:text-white transition-colors"
+          className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"
           aria-label="Go back"
         >
-          <ArrowLeft className="w-5 h-5" />
+          <ArrowLeft size={20} />
         </button>
       )}
-      <h1 className="font-bold text-white flex-1">{title}</h1>
+      <span className="text-[19px] text-white select-none font-display font-bold tracking-tight flex-1">{title}</span>
       {rightContent && <div className="flex items-center gap-2">{rightContent}</div>}
     </div>
   );

@@ -146,6 +146,8 @@ const App: React.FC = () => {
   const pullStartY = useRef(0);
   const isPulling = useRef(false);
   const mainContentRef = useRef<HTMLElement>(null);
+  const [headerHidden, setHeaderHidden] = useState(false);
+  const lastScrollY = useRef(0);
 
 
   // Chat detail state
@@ -211,6 +213,26 @@ const App: React.FC = () => {
       document.documentElement.style.setProperty('--keyboard-height', '0px');
     }).catch(() => {});
   }, [isDark]);
+
+  // Auto-hide header: reset when tab or view changes
+  useEffect(() => {
+    setHeaderHidden(false);
+    lastScrollY.current = 0;
+  }, [activeTab, currentView]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--header-top', headerHidden ? '-3.5rem' : '0px');
+  }, [headerHidden]);
+
+  const handleContentScroll = useCallback((e: React.UIEvent<HTMLElement>) => {
+    const st = e.currentTarget.scrollTop;
+    if (st > lastScrollY.current + 8 && st > 50) {
+      setHeaderHidden(true);
+    } else if (st < lastScrollY.current - 8) {
+      setHeaderHidden(false);
+    }
+    lastScrollY.current = st;
+  }, []);
 
   // Android back button / gesture handler
   useEffect(() => {
@@ -750,22 +772,50 @@ const App: React.FC = () => {
   // Layout Helpers
   const renderHeader = () => {
     if (currentView !== 'MAIN') return null;
+
+    const logo = (
+      <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">
+        <span className="text-orange-500">Bit</span>Link
+      </span>
+    );
+
+    const searchBtn = (
+      <button className="p-2.5 rounded-full hover:bg-stone-800/60 transition-colors" onClick={() => setCurrentView('SEARCH')}>
+        <Search className="text-stone-300" size={20} />
+      </button>
+    );
+
+    const bellBtn = (
+      <button className="p-2.5 rounded-full hover:bg-stone-800/60 transition-colors relative">
+        <Bell className="text-stone-300" size={20} />
+      </button>
+    );
+
+    const addBtn = (
+      <button className="p-2.5 rounded-full hover:bg-stone-800/60 transition-colors" onClick={() => setShowChatActions(prev => !prev)}>
+        <Plus className="text-stone-300" size={20} />
+      </button>
+    );
+
+    const title = (text: string) => (
+      <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">{text}</span>
+    );
+
+    let left: React.ReactNode = logo;
+    let right: React.ReactNode = <>{searchBtn}{bellBtn}</>;
+
+    if (activeTab === 'Chat') {
+      left = title('Messages');
+      right = <>{searchBtn}{addBtn}</>;
+    } else if (activeTab === 'Profile') {
+      left = title('Profile');
+      right = <>{bellBtn}</>;
+    }
+
     return (
-      <header className="flex-shrink-0 z-40 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
-        <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">
-          <span className="text-orange-500">Bit</span>Link
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            className="p-2.5 rounded-full hover:bg-stone-800/60 transition-colors"
-            onClick={() => setCurrentView('SEARCH')}
-          >
-            <Search className="text-stone-300" size={20} />
-          </button>
-          <button className="p-2.5 rounded-full hover:bg-stone-800/60 transition-colors relative">
-            <Bell className="text-stone-300" size={20} />
-          </button>
-        </div>
+      <header className="sticky z-40 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav auto-hide-header">
+        {left}
+        <div className="flex items-center gap-1">{right}</div>
       </header>
     );
   };
@@ -911,39 +961,27 @@ const App: React.FC = () => {
     ];
 
     return (
-      <div className="p-4">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-bold tracking-wide uppercase text-stone-100">Messages</h2>
-          <div className="relative">
-            <button
-              className="p-2 bg-stone-900 border border-stone-800 rounded-full"
-              onClick={() => setShowChatActions(prev => !prev)}
-              aria-label="Open chat quick actions"
-            >
-              <Plus size={20} className="text-orange-500" />
-            </button>
-            {showChatActions && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setShowChatActions(false)} />
-                <div className="absolute right-0 top-12 w-44 bg-stone-950 border border-stone-800 rounded-xl shadow-xl overflow-hidden z-20">
-                  {chatQuickActions.map(action => (
-                    <button
-                      key={action.id}
-                      className="w-full px-3 py-2.5 text-left text-sm text-stone-200 hover:bg-stone-900 flex items-center gap-2"
-                      onClick={() => {
-                        setShowChatActions(false);
-                        setCurrentView(action.view);
-                      }}
-                    >
-                      {action.icon}
-                      <span>{action.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+      <div className="p-4 relative">
+        {showChatActions && (
+          <>
+            <div className="fixed inset-0 z-10" onClick={() => setShowChatActions(false)} />
+            <div className="absolute right-4 top-0 w-44 bg-stone-950 border border-stone-800 rounded-xl shadow-xl overflow-hidden z-20">
+              {chatQuickActions.map(action => (
+                <button
+                  key={action.id}
+                  className="w-full px-3 py-2.5 text-left text-sm text-stone-200 hover:bg-stone-900 flex items-center gap-2"
+                  onClick={() => {
+                    setShowChatActions(false);
+                    setCurrentView(action.view);
+                  }}
+                >
+                  {action.icon}
+                  <span>{action.label}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         {chatSessions.map(chat => {
           // For DMs, show the OTHER participant (not current user)
           const otherParticipants = chat.participants.filter(p => String(p.id) !== String(currentMe.id));
@@ -986,9 +1024,9 @@ const App: React.FC = () => {
 
   const renderUserListPage = (title: 'Followers' | 'Following', users: User[]) => (
     <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-        <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-        <h2 className="text-lg font-bold uppercase tracking-wide">{title}</h2>
+      <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+        <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+        <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">{title}</span>
       </div>
       <div className="p-4">
         <div className="space-y-3">
@@ -1042,9 +1080,9 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-lg font-bold uppercase tracking-wide">My QR Code</h2>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+          <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">My QR Code</span>
         </div>
         <div className="flex flex-col items-center justify-center p-8 pt-16">
           {/* QR Code placeholder - in real app would generate actual QR */}
@@ -1124,9 +1162,9 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-lg font-bold uppercase tracking-wide">New Group</h2>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+          <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">New Group</span>
         </div>
         <div className="p-4">
           <label className="text-xs font-bold text-stone-500 uppercase tracking-wide block mb-2">Group Name</label>
@@ -1197,9 +1235,9 @@ const App: React.FC = () => {
 
   const renderScan = () => (
     <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-        <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-        <h2 className="text-lg font-bold uppercase tracking-wide">Scan</h2>
+      <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+        <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+        <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">Scan</span>
       </div>
       <div className="p-4 flex flex-col items-center">
         <p className="text-sm text-stone-400 mb-6 text-center">Scan friend QR code to add instantly</p>
@@ -1348,9 +1386,9 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="p-4 border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => { setCurrentView('MAIN'); setFriendSearch(''); setFriendSearchResults([]); }}><ArrowLeft /></button>
-          <div className="flex-1 bg-stone-900 border border-stone-800 rounded-xl px-4 py-2 flex items-center gap-3">
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+          <button onClick={() => { setCurrentView('MAIN'); setFriendSearch(''); setFriendSearchResults([]); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <div className="flex-1 bg-stone-900 border border-stone-800 rounded-xl px-3 py-1.5 flex items-center gap-3">
             <Search size={18} className="text-stone-500" />
             <input 
               autoFocus
@@ -1626,10 +1664,9 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center justify-between">
-          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
-          <div className="w-6" />
-          <button><MoreHorizontal /></button>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <button className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><MoreHorizontal size={20} /></button>
         </div>
         <div className="p-4 pb-28">
           {isArticle ? (
@@ -1728,10 +1765,9 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center justify-between">
-          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
-          <div className="w-6" />
-          <button><MoreHorizontal /></button>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <button className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><MoreHorizontal size={20} /></button>
         </div>
         <div className="p-4 bg-orange-500/5 border-b border-orange-500/10 mb-4">
            <div className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-3 uppercase tracking-tight">Question</div>
@@ -1878,10 +1914,11 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        {/* Header */}
-        <div className="p-4 sticky top-0 z-10 bg-black/85 backdrop-blur-md border-b border-stone-800/50 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')} className="p-1 -ml-1 active:opacity-60" aria-label="Go back"><ArrowLeft size={22} /></button>
-          <h2 className="text-lg font-bold uppercase tracking-wider font-display">Transactions</h2>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors active:opacity-60"><ArrowLeft size={20} /></button>
+            <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">Transactions</span>
+          </div>
         </div>
 
         <div className="p-4 space-y-6">
@@ -1944,9 +1981,9 @@ const App: React.FC = () => {
     
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-xl font-bold tracking-tight font-display uppercase">Invite Friends</h2>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+          <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">Invite Friends</span>
         </div>
         
         <div className="p-4">
@@ -2710,9 +2747,8 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col sub-view">
-        {/* Header */}
-        <div className="p-4 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => { setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }}><ArrowLeft /></button>
+        <div className="bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+          <button onClick={() => { setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
           <button
             className="flex items-center gap-3"
             onClick={isGroup ? handleOpenGroupInfo : handleOpenProfile}
@@ -3228,9 +3264,9 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col sub-view">
-        <div className="p-4 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => { setCurrentView('MAIN'); setInvitePreview(null); setInviteCodeInput(''); }}><ArrowLeft /></button>
-          <span className="font-bold">Join Group</span>
+        <div className="bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+          <button onClick={() => { setCurrentView('MAIN'); setInvitePreview(null); setInviteCodeInput(''); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">Join Group</span>
         </div>
 
         <div className="flex-1 p-4 flex flex-col">
@@ -3495,11 +3531,9 @@ const App: React.FC = () => {
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col sub-view">
         {/* Header */}
-        <div className="p-4 bg-black border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => setCurrentView('CHAT_DETAIL')} className="p-1">
-            <ArrowLeft className="w-5 h-5" />
-          </button>
-          <span className="font-bold text-lg flex-1">Group Settings</span>
+        <div className="bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
+          <button onClick={() => setCurrentView('CHAT_DETAIL')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">Group Settings</span>
         </div>
 
         {isLoadingGroupDetail ? (
@@ -3903,9 +3937,9 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md z-10 flex items-center justify-between">
-           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-           <button><MoreHorizontal /></button>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+           <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+           <button className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><MoreHorizontal size={20} /></button>
         </div>
         <div className="flex flex-col items-center p-6 border-b border-stone-900">
           <img src={getAvatarUrl(selectedUser.avatar, selectedUser.name)} className="w-24 h-24 rounded-full border-2 border-orange-500 p-1 object-cover mb-4" onError={(e) => handleAvatarError(e, selectedUser.name)} />
@@ -3976,10 +4010,11 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view flex flex-col">
-        {/* Header */}
-        <div className="p-4 sticky top-0 z-10 bg-black/85 backdrop-blur-md border-b border-stone-800/50 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')} className="p-1 -ml-1 active:opacity-60" aria-label="Go back"><ArrowLeft size={22} /></button>
-          <h2 className="text-lg font-bold uppercase tracking-wider font-display">Settings</h2>
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setCurrentView('MAIN')} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors active:opacity-60"><ArrowLeft size={20} /></button>
+            <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">Settings</span>
+          </div>
         </div>
 
         {/* Content */}
@@ -4048,15 +4083,18 @@ const App: React.FC = () => {
 
   return (
     <div className="h-dvh flex flex-col overflow-hidden select-none app-shell">
-      {renderHeader()}
       <main
         ref={mainContentRef}
-        className="flex-1 overflow-y-auto max-w-md mx-auto w-full"
+        className="flex-1 overflow-y-auto"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
+        onScroll={handleContentScroll}
       >
-        {renderContent()}
+        {renderHeader()}
+        <div className="max-w-md mx-auto w-full">
+          {renderContent()}
+        </div>
       </main>
       
       {/* Sub-Views Logic */}
