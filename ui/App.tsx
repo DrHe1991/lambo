@@ -225,6 +225,7 @@ const App: React.FC = () => {
   }, [headerHidden]);
 
   const handleContentScroll = useCallback((e: React.UIEvent<HTMLElement>) => {
+    if (activeTab === 'Profile') return;
     const st = e.currentTarget.scrollTop;
     if (st > lastScrollY.current + 8 && st > 50) {
       setHeaderHidden(true);
@@ -232,7 +233,7 @@ const App: React.FC = () => {
       setHeaderHidden(false);
     }
     lastScrollY.current = st;
-  }, []);
+  }, [activeTab]);
 
   // Android back button / gesture handler
   useEffect(() => {
@@ -2216,14 +2217,14 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className={`fixed inset-0 z-[100] bg-black flex flex-col`}>
+      <div className={`fixed inset-0 z-[100] bg-black flex flex-col sub-view`}>
         {/* Header */}
-        <div className="flex items-center justify-between px-4 pt-4 pb-2">
+        <div className="bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
           <button
             onClick={handleClose}
-            className="p-2 text-stone-400"
+            className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"
           >
-            <X size={24} />
+            <X size={20} />
           </button>
 
           {/* Type toggle */}
@@ -2246,28 +2247,29 @@ const App: React.FC = () => {
             </button>
           </div>
 
-          {/* Drafts button */}
-          {drafts.length > 0 && (
-            <button
-              onClick={() => setShowDraftList(!showDraftList)}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-tight text-orange-400 hover:text-orange-300 transition-all"
-            >
-              Drafts
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {drafts.length > 0 && (
+              <button
+                onClick={() => setShowDraftList(!showDraftList)}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-tight text-orange-400 hover:text-orange-300 transition-all"
+              >
+                Drafts
+              </button>
+            )}
 
-          <button
-            data-testid="publish-button"
-            onClick={handlePublish}
-            disabled={!canPublish() || isSubmitting}
-            className={`px-5 py-2 rounded-xl text-sm font-bold uppercase tracking-tight transition-all duration-200 ${
-              canPublish()
-                ? `${accentBg} text-white shadow-lg ${accentGlow} active:scale-95`
+            <button
+              data-testid="publish-button"
+              onClick={handlePublish}
+              disabled={!canPublish() || isSubmitting}
+              className={`px-5 py-2 rounded-xl text-sm font-bold uppercase tracking-tight transition-all duration-200 ${
+                canPublish()
+                  ? `${accentBg} text-white shadow-lg ${accentGlow} active:scale-95`
                 : 'bg-stone-800 text-stone-600'
             }`}
           >
             {isSubmitting ? '...' : (isQuestion ? 'Ask' : 'Post')}
           </button>
+          </div>
         </div>
 
         {/* Accent line */}
