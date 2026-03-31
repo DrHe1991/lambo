@@ -15,7 +15,7 @@ export const Header: React.FC<HeaderProps> = ({
   className = '',
 }) => {
   return (
-    <div className={`p-4 sticky top-0 z-10 bg-black/90 backdrop-blur-xl border-b border-stone-800 flex items-center gap-4 ${className}`}>
+    <div className={`p-4 sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl border-b border-stone-800 flex items-center gap-4 ${className}`}>
       {onBack && (
         <button
           onClick={onBack}

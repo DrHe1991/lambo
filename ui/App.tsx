@@ -6,7 +6,7 @@ import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionT
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
 import { api, ApiComment, ApiMessage } from './api/client';
-import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload, RefreshCw, Sun, Moon } from 'lucide-react';
+import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload, RefreshCw, Sun, Moon, Globe, Info, Lock as LockIcon, ArrowDownLeft, ArrowUpRight, Sparkles, Banknote, TrendingUp, TrendingDown } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 // TrustBadge removed - trust system simplified
 import { LoginPage } from './components/LoginPage';
@@ -747,7 +747,7 @@ const App: React.FC = () => {
   const renderHeader = () => {
     if (currentView !== 'MAIN') return null;
     return (
-      <header className="flex-shrink-0 z-40 bg-black/90 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+      <header className="flex-shrink-0 z-40 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
         <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">
           <span className="text-orange-500">Bit</span>Link
         </span>
@@ -769,7 +769,7 @@ const App: React.FC = () => {
   const renderBottomNav = () => {
     if (currentView !== 'MAIN' || isPublishing) return null;
     return (
-      <nav className="flex-shrink-0 z-50 bg-black/90 backdrop-blur-lg border-t border-stone-800 safe-bottom-nav bottom-nav">
+      <nav className="flex-shrink-0 z-50 bg-stone-950/95 backdrop-blur-lg border-t border-stone-800 safe-bottom-nav bottom-nav">
         <div className="max-w-md mx-auto px-4 py-2 grid grid-cols-5 items-center">
           <button data-testid="nav-feed" onClick={() => { setActiveTab('Feed'); setShowChatActions(false); }} className={`flex flex-col items-center justify-center gap-1 ${activeTab === 'Feed' ? 'text-orange-500' : 'text-stone-500'}`}>
             <Home size={22} />
@@ -1248,37 +1248,37 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <div data-testid="balance-card" className="bg-stone-900 border border-stone-800 p-5 rounded-2xl mb-4">
-        <div className="flex items-center justify-between mb-5">
+      <div data-testid="balance-card" className="bg-stone-900 border border-stone-800 p-5 rounded-2xl mb-3 post-card">
+        <div className="flex items-start justify-between mb-1">
           <button
             className="text-left active:opacity-70 transition-opacity"
             onClick={() => { if (currentUser) fetchLedger(currentUser.id); setCurrentView('TRANSACTIONS'); }}
           >
             <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">Balance</span>
-            <div className="flex items-baseline gap-1.5">
-              <span data-testid="balance-amount" className="text-[28px] font-bold text-stone-100 leading-none">{availableBalance.toLocaleString()}</span>
-              <span className="text-orange-500 text-sm font-bold">sat</span>
-              {change24h !== 0 && (
-                <span className={`text-xs font-bold ml-2 ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                  {change24h > 0 ? '+' : ''}{change24h.toLocaleString()}
-                </span>
-              )}
+            <div className="flex items-baseline gap-1">
+              <span data-testid="balance-amount" className="text-2xl font-bold text-stone-100 leading-none">{availableBalance.toLocaleString()}</span>
+              <span className="text-orange-500 text-xs font-bold">sat</span>
             </div>
+            {change24h !== 0 && (
+              <span className={`text-[11px] font-bold mt-1 block ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                {change24h > 0 ? '+' : ''}{change24h.toLocaleString()} today
+              </span>
+            )}
           </button>
           <button
             className="text-right active:opacity-70 transition-opacity"
             onClick={() => setCurrentView('EXCHANGE')}
           >
             <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">USDT</span>
-            <span className="text-[22px] font-bold text-stone-100 leading-none">${(stableBalance / 1_000_000).toFixed(2)}</span>
+            <span className="text-lg font-bold text-stone-100 leading-none">${(stableBalance / 1_000_000).toFixed(2)}</span>
           </button>
         </div>
-        <div className="flex items-center justify-around pt-3 border-t border-stone-800/60">
+        <div className="flex items-center justify-around pt-4 mt-3 border-t border-stone-800/60">
           <button
             onClick={() => setCurrentView('DEPOSIT')}
             className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
               <Download size={18} className="text-orange-500" />
             </div>
             <span className="text-[11px] font-semibold text-stone-400">Deposit</span>
@@ -1287,7 +1287,7 @@ const App: React.FC = () => {
             onClick={() => setCurrentView('EXCHANGE')}
             className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
               <RefreshCw size={18} className="text-orange-500" />
             </div>
             <span className="text-[11px] font-semibold text-stone-400">Exchange</span>
@@ -1296,7 +1296,7 @@ const App: React.FC = () => {
             onClick={() => setCurrentView('WITHDRAW')}
             className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
-            <div className="w-10 h-10 rounded-full bg-orange-500/15 flex items-center justify-center">
+            <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
               <Upload size={18} className="text-orange-500" />
             </div>
             <span className="text-[11px] font-semibold text-stone-400">Withdraw</span>
@@ -1309,10 +1309,10 @@ const App: React.FC = () => {
           { icon: <Zap size={20} />, label: 'Transactions', action: () => { if (currentUser) fetchLedger(currentUser.id); setCurrentView('TRANSACTIONS'); } },
           { icon: <SlidersHorizontal size={20} />, label: 'Settings', action: () => setCurrentView('SETTINGS') }
         ].map((item, idx) => (
-          <button 
-            key={idx} 
+          <button
+            key={idx}
             onClick={item.action}
-            className="w-full flex items-center justify-between p-4 bg-stone-950/50 border border-stone-900 rounded-2xl active:bg-stone-900"
+            className="w-full flex items-center justify-between p-4 bg-stone-900 border border-stone-800 rounded-2xl active:bg-stone-800 post-card"
           >
             <div className="flex items-center gap-4">
               <span className="text-orange-500">{item.icon}</span>
@@ -1843,62 +1843,92 @@ const App: React.FC = () => {
   const renderTransactions = () => {
     const actionLabel = (t: string) => {
       const map: Record<string, string> = {
-        free_post: 'Free Post',
-        reward_post: 'Post Reward',
-        reward_comment: 'Comment Reward',
-        spend_post: 'Post',
-        spend_question: 'Question',
-        spend_answer: 'Answer',
-        spend_comment: 'Comment',
-        spend_reply: 'Reply',
-        spend_like: 'Like',
-        spend_comment_like: 'Comment Like',
-        spend_boost: 'Boost',
-        fine: 'Fine',
-        challenge_fee: 'Challenge Fee',
-        challenge_refund: 'Challenge Refund',
-        challenge_reward: 'Challenge Reward',
-        deposit: 'Deposit',
-        withdraw: 'Withdraw',
-        exchange_buy_sat: 'USDT → sat',
-        exchange_sell_sat: 'sat → USDT',
+        free_post: 'Free Post', reward_post: 'Post Reward', reward_comment: 'Comment Reward',
+        spend_post: 'Post', spend_question: 'Question', spend_answer: 'Answer',
+        spend_comment: 'Comment', spend_reply: 'Reply', spend_like: 'Like',
+        spend_comment_like: 'Comment Like', spend_boost: 'Boost', fine: 'Fine',
+        challenge_fee: 'Challenge Fee', challenge_refund: 'Challenge Refund',
+        challenge_reward: 'Challenge Reward', deposit: 'Deposit', withdraw: 'Withdrawal',
+        exchange_buy_sat: 'USDT \u2192 sat', exchange_sell_sat: 'sat \u2192 USDT',
         exchange_bonus: 'Exchange Bonus',
       };
       return map[t] || t;
     };
 
+    // Group by date
+    const grouped = ledgerEntries.reduce<Record<string, typeof ledgerEntries>>((acc, tx) => {
+      const d = new Date(tx.created_at);
+      const today = new Date();
+      const yesterday = new Date();
+      yesterday.setDate(today.getDate() - 1);
+      let label: string;
+      if (d.toDateString() === today.toDateString()) label = 'Today';
+      else if (d.toDateString() === yesterday.toDateString()) label = 'Yesterday';
+      else label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined });
+      (acc[label] ||= []).push(tx);
+      return acc;
+    }, {});
+
+    const totalIn = ledgerEntries.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+    const totalOut = ledgerEntries.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-        <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-          <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
-          <h2 className="text-xl font-bold tracking-tight font-display uppercase">Transactions</h2>
+        {/* Header */}
+        <div className="p-4 sticky top-0 z-10 bg-black/85 backdrop-blur-md border-b border-stone-800/50 flex items-center gap-4">
+          <button onClick={() => setCurrentView('MAIN')} className="p-1 -ml-1 active:opacity-60" aria-label="Go back"><ArrowLeft size={22} /></button>
+          <h2 className="text-lg font-bold uppercase tracking-wider font-display">Transactions</h2>
         </div>
-        
-        <div className="p-4">
-          <div className="bg-stone-900 border border-stone-800 p-4 rounded-2xl mb-6">
-            <span className="text-stone-500 text-xs font-bold uppercase block mb-1">Balance</span>
-            <span className="text-2xl font-bold text-stone-100">{availableBalance.toLocaleString()} <span className="text-orange-500 text-sm">sat</span></span>
+
+        <div className="p-4 space-y-6">
+          {/* Balance */}
+          <div className="pt-2 pb-1">
+            <span className="text-[11px] font-bold text-stone-600 uppercase tracking-widest">Balance</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="text-4xl font-bold text-stone-100 tabular-nums font-display">{availableBalance.toLocaleString()}</span>
+              <span className="text-sm font-bold text-orange-500">sat</span>
+            </div>
+            <div className="flex items-center gap-4 mt-3 text-xs tabular-nums">
+              <span className="text-stone-500"><span className="text-orange-500 font-semibold">+{totalIn.toLocaleString()}</span> earned</span>
+              <span className="text-stone-600">&#183;</span>
+              <span className="text-stone-500"><span className="text-stone-400 font-semibold">{totalOut.toLocaleString()}</span> spent</span>
+            </div>
           </div>
 
-          <div className="space-y-3">
-            {ledgerEntries.length === 0 && (
-              <p className="text-stone-600 text-center py-8">No transactions yet</p>
-            )}
-            {ledgerEntries.map(tx => (
-              <div key={tx.id} className="bg-stone-900/50 border border-stone-800 rounded-xl p-4">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-bold text-stone-200">{tx.note || actionLabel(tx.action_type)}</span>
-                  <span className={`text-sm font-bold ${tx.amount > 0 ? 'text-green-500' : 'text-red-400'}`}>
-                    {tx.amount > 0 ? '+' : ''}{tx.amount} sat
-                  </span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs text-stone-600">{new Date(tx.created_at).toLocaleString()}</span>
-                  <span className="text-xs text-stone-600">{tx.balance_after.toLocaleString()} sat</span>
+          {/* Transactions */}
+          {ledgerEntries.length === 0 ? (
+            <div className="text-center py-20">
+              <p className="text-stone-600 text-sm">No transactions yet</p>
+            </div>
+          ) : (
+            Object.entries(grouped).map(([dateLabel, txs]) => (
+              <div key={dateLabel}>
+                <h3 className="text-[11px] font-bold text-stone-600 uppercase tracking-widest mb-2 px-1">{dateLabel}</h3>
+                <div className="bg-stone-900/40 rounded-2xl overflow-hidden">
+                  {txs.map((tx, idx) => {
+                    const isPositive = tx.amount > 0;
+                    const label = tx.note || actionLabel(tx.action_type);
+                    return (
+                      <div
+                        key={tx.id}
+                        className={`flex items-center justify-between px-4 py-3.5 ${idx < txs.length - 1 ? 'border-b border-stone-800/30' : ''}`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[13px] font-medium text-stone-300 block truncate">{label}</span>
+                          <span className="text-[11px] text-stone-600 mt-0.5 block">
+                            {new Date(tx.created_at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <span className={`text-[13px] font-semibold tabular-nums shrink-0 ml-4 ${isPositive ? 'text-orange-500' : 'text-stone-500'}`}>
+                          {isPositive ? '+' : '\u2212'}{Math.abs(tx.amount).toLocaleString()}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            ))}
-          </div>
+            ))
+          )}
         </div>
       </div>
     );
@@ -3931,51 +3961,76 @@ const App: React.FC = () => {
     return renderUserListPage('Following', followingUsers);
   };
 
-  const renderSettings = () => (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
-      <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
-        <button onClick={() => setCurrentView('MAIN')} aria-label="Go back"><ArrowLeft /></button>
-        <h2 className="text-lg font-bold uppercase tracking-wide font-display">Settings</h2>
-      </div>
-      <div className="p-4 space-y-3">
-        {/* Theme Toggle */}
-        <button
-          onClick={toggleTheme}
-          className="w-full flex items-center justify-between p-4 bg-stone-900/50 border border-stone-800 rounded-2xl active:bg-stone-900 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            {isDark ? <Moon size={20} className="text-orange-500" /> : <Sun size={20} className="text-orange-500" />}
-            <div className="text-left">
-              <span className="text-sm font-bold text-stone-200 block">Appearance</span>
-              <span className="text-xs text-stone-500">{isDark ? 'Dark mode' : 'Light mode'}</span>
-            </div>
-          </div>
-          <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${isDark ? 'bg-orange-500' : 'bg-stone-600'}`}>
-            <div className={`w-5 h-5 rounded-full shadow transition-transform duration-200 ${isDark ? 'translate-x-5' : 'translate-x-0'}`} style={{ backgroundColor: '#fff' }} />
-          </div>
-        </button>
+  const renderSettings = () => {
+    const settingItems = [
+      { icon: <UserIcon size={18} />, label: 'Account', sublabel: 'Manage your account details' },
+      { icon: <LockIcon size={18} />, label: 'Privacy', sublabel: 'Control who can see your content' },
+      { icon: <Bell size={18} />, label: 'Notifications', sublabel: 'Push and in-app notifications' },
+      { icon: <Globe size={18} />, label: 'Language', sublabel: 'English' },
+      { icon: <Info size={18} />, label: 'About', sublabel: 'Version 0.1.0' },
+    ];
 
-        {[
-          { label: 'Account', sublabel: 'Manage your account details' },
-          { label: 'Privacy', sublabel: 'Control who can see your content' },
-          { label: 'Notifications', sublabel: 'Push and in-app notifications' },
-          { label: 'Language', sublabel: 'English' },
-          { label: 'About', sublabel: 'Version 0.1.0' },
-        ].map((item, idx) => (
-          <button
-            key={idx}
-            className="w-full flex items-center justify-between p-4 bg-stone-900/50 border border-stone-800 rounded-2xl active:bg-stone-900 transition-colors"
-          >
-            <div className="text-left">
-              <span className="text-sm font-bold text-stone-200 block">{item.label}</span>
-              <span className="text-xs text-stone-500">{item.sublabel}</span>
+    return (
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto flex flex-col">
+        {/* Header */}
+        <div className="p-4 sticky top-0 z-10 bg-black/85 backdrop-blur-md border-b border-stone-800/50 flex items-center gap-4">
+          <button onClick={() => setCurrentView('MAIN')} className="p-1 -ml-1 active:opacity-60" aria-label="Go back"><ArrowLeft size={22} /></button>
+          <h2 className="text-lg font-bold uppercase tracking-wider font-display">Settings</h2>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 p-4 space-y-6">
+          {/* Appearance section */}
+          <div>
+            <h3 className="text-[11px] font-bold text-stone-500 uppercase tracking-widest mb-2 px-1">Appearance</h3>
+            <button
+              onClick={toggleTheme}
+              className="w-full flex items-center gap-3 p-4 bg-stone-900/60 rounded-2xl active:bg-stone-800 transition-colors"
+            >
+              <div className="w-9 h-9 rounded-xl bg-orange-500/15 flex items-center justify-center shrink-0">
+                {isDark ? <Moon size={18} className="text-orange-500" /> : <Sun size={18} className="text-orange-500" />}
+              </div>
+              <div className="text-left flex-1">
+                <span className="text-sm font-semibold text-stone-200 block">{isDark ? 'Dark mode' : 'Light mode'}</span>
+                <span className="text-xs text-stone-500">Tap to switch</span>
+              </div>
+              <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${isDark ? 'bg-orange-500' : 'bg-stone-600'}`}>
+                <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${isDark ? 'translate-x-5' : 'translate-x-0'}`} />
+              </div>
+            </button>
+          </div>
+
+          {/* General section */}
+          <div>
+            <h3 className="text-[11px] font-bold text-stone-500 uppercase tracking-widest mb-2 px-1">General</h3>
+            <div className="bg-stone-900/60 rounded-2xl overflow-hidden">
+              {settingItems.map((item, idx) => (
+                <button
+                  key={idx}
+                  className={`w-full flex items-center gap-3 p-4 active:bg-stone-800 transition-colors ${idx < settingItems.length - 1 ? 'border-b border-stone-800/40' : ''}`}
+                >
+                  <div className="w-9 h-9 rounded-xl bg-stone-800/80 flex items-center justify-center text-stone-400 shrink-0">
+                    {item.icon}
+                  </div>
+                  <div className="text-left flex-1">
+                    <span className="text-sm font-semibold text-stone-200 block">{item.label}</span>
+                    <span className="text-xs text-stone-500">{item.sublabel}</span>
+                  </div>
+                  <ArrowLeft className="rotate-180 text-stone-600" size={16} />
+                </button>
+              ))}
             </div>
-            <ArrowLeft className="rotate-180 text-stone-600" size={16} />
-          </button>
-        ))}
+          </div>
+        </div>
+
+        {/* Footer — fills dead space with brand */}
+        <div className="p-6 pb-8 text-center space-y-1">
+          <p className="text-sm font-display font-bold text-stone-600 tracking-wide">BitLink</p>
+          <p className="text-[11px] text-stone-700">Where liking = investing</p>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderContent = () => {
     switch (activeTab) {
