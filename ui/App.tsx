@@ -553,7 +553,8 @@ const App: React.FC = () => {
     if (!currentUser || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      await fetchFeed(currentUser.id);
+      const minWait = new Promise(r => setTimeout(r, 5000));
+      await Promise.all([fetchFeed(currentUser.id), minWait]);
     } finally {
       setIsRefreshing(false);
     }
@@ -814,7 +815,7 @@ const App: React.FC = () => {
     }
 
     return (
-      <header className="sticky z-40 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav auto-hide-header">
+      <header className={`sticky z-40 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav auto-hide-header${isRefreshing ? ' loading' : ''}`}>
         {left}
         <div className="flex items-center gap-1">{right}</div>
       </header>
@@ -859,20 +860,18 @@ const App: React.FC = () => {
   };
 
   // Sub-Views
-  const pullIndicator = (
+  const pullIndicator = !isRefreshing && pullDistance > 10 ? (
     <div
       className="flex justify-center items-center overflow-hidden transition-all duration-200"
-      style={{ height: isRefreshing ? 40 : pullDistance > 10 ? pullDistance : 0 }}
+      style={{ height: pullDistance }}
     >
-      {isRefreshing ? (
-        <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
-      ) : pullDistance >= PULL_THRESHOLD ? (
+      {pullDistance >= PULL_THRESHOLD ? (
         <span className="text-xs text-stone-400">Release to refresh</span>
-      ) : pullDistance > 10 ? (
+      ) : (
         <span className="text-xs text-stone-500">Pull down to refresh</span>
-      ) : null}
+      )}
     </div>
-  );
+  ) : null;
 
   const renderFeed = () => (
     <div>
@@ -2219,7 +2218,7 @@ const App: React.FC = () => {
     return (
       <div className={`fixed inset-0 z-[100] bg-black flex flex-col sub-view`}>
         {/* Header */}
-        <div className="bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+        <div className={`bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav ${isQuestion ? 'accent-blue' : 'accent-orange'}`}>
           <button
             onClick={handleClose}
             className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"
@@ -2251,7 +2250,7 @@ const App: React.FC = () => {
             {drafts.length > 0 && (
               <button
                 onClick={() => setShowDraftList(!showDraftList)}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-tight text-orange-400 hover:text-orange-300 transition-all"
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-tight transition-all ${isQuestion ? 'text-blue-400 hover:text-blue-300' : 'text-orange-400 hover:text-orange-300'}`}
               >
                 Drafts
               </button>
@@ -2272,12 +2271,6 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Accent line */}
-        <div className={`h-0.5 ${
-          isQuestion
-            ? 'bg-gradient-to-r from-blue-500/50 via-blue-500 to-blue-500/50'
-            : 'bg-gradient-to-r from-orange-500/50 via-orange-500 to-orange-500/50'
-        }`} />
 
         {/* Draft list modal */}
         {showDraftList && drafts.length > 0 && (
@@ -2285,7 +2278,7 @@ const App: React.FC = () => {
             <div className="absolute inset-0 bg-black/80" onClick={() => setShowDraftList(false)} />
             <div className="relative bg-black border border-stone-800 rounded-2xl w-full max-w-sm max-h-[60vh] overflow-hidden">
               <div className="flex items-center justify-between p-4 border-b border-stone-800">
-                <span className="text-sm font-bold text-orange-400">Drafts</span>
+                <span className={`text-sm font-bold ${isQuestion ? 'text-blue-400' : 'text-orange-400'}`}>Drafts</span>
                 <button onClick={() => setShowDraftList(false)} className="text-stone-500 hover:text-white">
                   <X size={18} />
                 </button>
@@ -2295,7 +2288,9 @@ const App: React.FC = () => {
                   <div 
                     key={draft.id}
                     className={`flex items-center justify-between py-3 px-3 rounded-xl mb-1 ${
-                      currentDraftId === draft.id ? 'bg-orange-500/20 border border-orange-500/30' : 'bg-stone-900 hover:bg-stone-800'
+                      currentDraftId === draft.id
+                        ? (isQuestion ? 'bg-blue-500/20 border border-blue-500/30' : 'bg-orange-500/20 border border-orange-500/30')
+                        : 'bg-stone-900 hover:bg-stone-800'
                     }`}
                   >
                     <button
@@ -2327,9 +2322,7 @@ const App: React.FC = () => {
           <div className="flex items-start gap-3 mb-3">
             <img
               src={getAvatarUrl(currentMe.avatar, currentMe.name)}
-              className={`w-10 h-10 rounded-full border-2 ${
-                isQuestion ? 'border-blue-500/50' : 'border-orange-500/50'
-              } object-cover flex-shrink-0`}
+              className="w-10 h-10 rounded-full border border-stone-700 object-cover flex-shrink-0"
               onError={(e) => handleAvatarError(e, currentMe.name)}
             />
             <div className="flex-1 min-w-0">
@@ -2341,7 +2334,7 @@ const App: React.FC = () => {
           {isPost && !showTitleInput && (
             <button
               onClick={() => setShowTitleInput(true)}
-              className="mb-3 self-start px-3 py-1.5 text-xs text-stone-600 hover:text-orange-400 border border-dashed border-stone-800 hover:border-orange-500/40 rounded-md transition-colors"
+              className="mb-3 self-start px-3 py-1.5 text-xs text-stone-600 hover:text-stone-300 border border-dashed border-stone-800 hover:border-stone-600 rounded-md transition-colors"
             >
               + Write an article instead
             </button>
@@ -2399,7 +2392,7 @@ const App: React.FC = () => {
               ))}
               {isUploadingImage && (
                 <div className="w-20 h-20 rounded-lg bg-stone-800 flex items-center justify-center">
-                  <div className="w-5 h-5 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                  <div className={`w-5 h-5 border-2 border-t-transparent rounded-full animate-spin ${isQuestion ? 'border-blue-500' : 'border-orange-500'}`} />
                 </div>
               )}
             </div>
