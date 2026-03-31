@@ -119,7 +119,7 @@ export const ExchangeView: React.FC<ExchangeViewProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
       <div className="min-h-screen">
         <Header title="Exchange" onBack={onBack} />
 

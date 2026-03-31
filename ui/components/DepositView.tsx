@@ -93,7 +93,7 @@ export const DepositView: React.FC<DepositViewProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
       <Header
         title="Deposit"
         onBack={onBack}

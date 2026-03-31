@@ -196,8 +196,12 @@ const App: React.FC = () => {
 
   // Android platform setup: status bar, keyboard, overscroll
   useEffect(() => {
+    const themeColor = isDark ? '#000000' : '#fffdf9';
     StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light }).catch(() => {});
     StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
+    StatusBar.setBackgroundColor({ color: themeColor }).catch(() => {});
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', themeColor);
     Keyboard.setAccessoryBarVisible({ isVisible: false }).catch(() => {});
     Keyboard.setScroll({ isDisabled: true }).catch(() => {});
     Keyboard.addListener('keyboardWillShow', (info) => {
@@ -981,7 +985,7 @@ const App: React.FC = () => {
   };
 
   const renderUserListPage = (title: 'Followers' | 'Following', users: User[]) => (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
       <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <h2 className="text-lg font-bold uppercase tracking-wide">{title}</h2>
@@ -1037,7 +1041,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-lg font-bold uppercase tracking-wide">My QR Code</h2>
@@ -1119,7 +1123,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-lg font-bold uppercase tracking-wide">New Group</h2>
@@ -1192,7 +1196,7 @@ const App: React.FC = () => {
   };
 
   const renderScan = () => (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
       <div className="p-4 sticky top-0 bg-black/85 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
         <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
         <h2 className="text-lg font-bold uppercase tracking-wide">Scan</h2>
@@ -1343,7 +1347,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="p-4 border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => { setCurrentView('MAIN'); setFriendSearch(''); setFriendSearchResults([]); }}><ArrowLeft /></button>
           <div className="flex-1 bg-stone-900 border border-stone-800 rounded-xl px-4 py-2 flex items-center gap-3">
@@ -1621,7 +1625,7 @@ const App: React.FC = () => {
     const isArticle = selectedPost.type === 'Article';
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center justify-between">
           <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
           <div className="w-6" />
@@ -1723,7 +1727,7 @@ const App: React.FC = () => {
     const answerReplies = apiComments.filter(c => c.parent_id);
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center justify-between">
           <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }}><ArrowLeft /></button>
           <div className="w-6" />
@@ -1873,7 +1877,7 @@ const App: React.FC = () => {
     const totalOut = ledgerEntries.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         {/* Header */}
         <div className="p-4 sticky top-0 z-10 bg-black/85 backdrop-blur-md border-b border-stone-800/50 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')} className="p-1 -ml-1 active:opacity-60" aria-label="Go back"><ArrowLeft size={22} /></button>
@@ -1939,7 +1943,7 @@ const App: React.FC = () => {
     const inviteLink = `https://bitlink.app/invite/${inviteCode}`;
     
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
           <h2 className="text-xl font-bold tracking-tight font-display uppercase">Invite Friends</h2>
@@ -2705,7 +2709,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col sub-view">
         {/* Header */}
         <div className="p-4 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => { setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }}><ArrowLeft /></button>
@@ -3223,7 +3227,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col sub-view">
         <div className="p-4 bg-black/80 backdrop-blur-md border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => { setCurrentView('MAIN'); setInvitePreview(null); setInviteCodeInput(''); }}><ArrowLeft /></button>
           <span className="font-bold">Join Group</span>
@@ -3489,7 +3493,7 @@ const App: React.FC = () => {
     };
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black flex flex-col">
+      <div className="fixed inset-0 z-[60] bg-black flex flex-col sub-view">
         {/* Header */}
         <div className="p-4 bg-black border-b border-stone-900 flex items-center gap-4">
           <button onClick={() => setCurrentView('CHAT_DETAIL')} className="p-1">
@@ -3898,7 +3902,7 @@ const App: React.FC = () => {
     const canMessage = true;
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="p-4 sticky top-0 bg-black/80 backdrop-blur-md z-10 flex items-center justify-between">
            <button onClick={() => setCurrentView('MAIN')}><ArrowLeft /></button>
            <button><MoreHorizontal /></button>
@@ -3971,7 +3975,7 @@ const App: React.FC = () => {
     ];
 
     return (
-      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto flex flex-col">
+      <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view flex flex-col">
         {/* Header */}
         <div className="p-4 sticky top-0 z-10 bg-black/85 backdrop-blur-md border-b border-stone-800/50 flex items-center gap-4">
           <button onClick={() => setCurrentView('MAIN')} className="p-1 -ml-1 active:opacity-60" aria-label="Go back"><ArrowLeft size={22} /></button>

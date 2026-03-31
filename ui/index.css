@@ -117,6 +117,9 @@
   backdrop-filter: saturate(120%) blur(8px);
   -webkit-backdrop-filter: saturate(120%) blur(8px);
 }
+[data-theme="light"] .app-shell {
+  background-color: rgba(255, 253, 250, 0.96);
+}
 
 /* bg-white stays truly white (QR codes, CTA buttons with text-black) */
 [data-theme="light"] .bg-white {
@@ -200,6 +203,12 @@ h1, h2, .font-display {
 .app-shell {
   min-height: 100dvh;
   padding-top: env(safe-area-inset-top);
+}
+
+/* Sub-views that overlay the entire screen */
+.sub-view {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 /* Fade-in-up for feed items and list entries */

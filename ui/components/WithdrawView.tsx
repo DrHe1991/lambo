@@ -207,7 +207,7 @@ export const WithdrawView: React.FC<WithdrawViewProps> = ({ onBack }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
       <Header
         title="Withdraw"
         onBack={onBack}
