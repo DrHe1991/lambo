@@ -22,7 +22,9 @@ COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
 build_ui() {
   echo "→ Building UI..."
   cd "$PROJECT_DIR/ui"
-  VITE_API_URL="https://api.$DOMAIN" npm run build
+  VITE_API_URL="https://api.$DOMAIN" \
+  VITE_GOOGLE_CLIENT_ID="99467099885-njmme06oms9n65j4pe9d33cp6f8rvok1.apps.googleusercontent.com" \
+  npm run build
   echo "→ Uploading UI to server..."
   cd "$PROJECT_DIR"
   scp -i "$SSH_KEY" -r ui/dist "$VPS_USER@$VPS_HOST:$REMOTE_DIR/ui/"

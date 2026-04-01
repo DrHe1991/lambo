@@ -2266,7 +2266,7 @@ const App: React.FC = () => {
                 : 'bg-stone-800 text-stone-600'
             }`}
           >
-            {isSubmitting ? '...' : (isQuestion ? 'Ask' : 'Post')}
+            {isSubmitting ? '...' : 'Post'}
           </button>
           </div>
         </div>

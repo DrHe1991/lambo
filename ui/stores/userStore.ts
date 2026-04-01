@@ -9,6 +9,7 @@ interface UserState {
   availableBalance: number;
   change24h: number;
   ledgerEntries: ApiLedgerEntry[];
+  needsOnboarding: boolean;
 
   // Actions
   setCurrentUser: (user: ApiUser | null) => void;
@@ -19,6 +20,23 @@ interface UserState {
   fetchBalance: (userId: number) => Promise<void>;
   fetchLedger: (userId: number) => Promise<void>;
   loadFromStorage: () => Promise<void>;
+
+  // Auth actions
+  loginWithGoogle: (idToken: string) => Promise<void>;
+  loginWithWallet: (address: string, chain: string, signature: string, nonce: string) => Promise<void>;
+  refreshAccessToken: () => Promise<boolean>;
+}
+
+function storeTokens(accessToken: string, refreshToken: string) {
+  localStorage.setItem('bitlink_access_token', accessToken);
+  localStorage.setItem('bitlink_refresh_token', refreshToken);
+}
+
+function clearTokens() {
+  localStorage.removeItem('bitlink_access_token');
+  localStorage.removeItem('bitlink_refresh_token');
+  localStorage.removeItem('bitlink_user_id');
+  localStorage.removeItem('bitlink_logged_in');
 }
 
 export const useUserStore = create<UserState>((set, get) => ({
@@ -29,6 +47,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   availableBalance: 0,
   change24h: 0,
   ledgerEntries: [],
+  needsOnboarding: false,
 
   setCurrentUser: (user) => set({ currentUser: user, isLoggedIn: !!user }),
 
@@ -88,14 +107,26 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   logout: () => {
-    localStorage.removeItem('bitlink_user_id');
-    localStorage.removeItem('bitlink_logged_in');
+    const refreshToken = localStorage.getItem('bitlink_refresh_token');
+    if (refreshToken) {
+      api.authLogout(refreshToken).catch(() => {});
+    }
+    import('@capacitor/core')
+      .then(({ Capacitor }) => {
+        if (!Capacitor.isNativePlatform()) return;
+        return import('@capawesome/capacitor-google-sign-in')
+          .then(({ GoogleSignIn }) => GoogleSignIn.signOut())
+          .catch(() => {});
+      })
+      .catch(() => {});
+    clearTokens();
     set({
       currentUser: null,
       isLoggedIn: false,
       availableBalance: 0,
       change24h: 0,
       ledgerEntries: [],
+      needsOnboarding: false,
     });
   },
 
@@ -125,10 +156,38 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   loadFromStorage: async () => {
+    get().fetchUsers();
+
+    // Try JWT-based auth first
+    const accessToken = localStorage.getItem('bitlink_access_token');
+    const refreshToken = localStorage.getItem('bitlink_refresh_token');
+
+    if (accessToken || refreshToken) {
+      set({ isLoading: true });
+      try {
+        // If access token exists, try /me. If it fails, the client auto-refreshes.
+        const user = await api.getMe();
+        const bal = await api.getBalance(user.id);
+        localStorage.setItem('bitlink_user_id', String(user.id));
+        localStorage.setItem('bitlink_logged_in', 'true');
+        set({
+          currentUser: user,
+          isLoggedIn: true,
+          availableBalance: bal.available_balance,
+          change24h: bal.change_24h,
+          isLoading: false,
+        });
+        return;
+      } catch {
+        // Token invalid and refresh failed — clear and fall through
+        clearTokens();
+        set({ isLoading: false });
+      }
+    }
+
+    // Legacy: load from user_id in localStorage (dev mode)
     const userId = localStorage.getItem('bitlink_user_id');
     const loggedIn = localStorage.getItem('bitlink_logged_in');
-
-    get().fetchUsers();
 
     if (userId && loggedIn === 'true') {
       set({ isLoading: true });
@@ -147,10 +206,77 @@ export const useUserStore = create<UserState>((set, get) => ({
         });
       } catch (error) {
         console.error('Failed to load user:', error);
-        localStorage.removeItem('bitlink_user_id');
-        localStorage.removeItem('bitlink_logged_in');
+        clearTokens();
         set({ isLoading: false });
       }
+    }
+  },
+
+  // Auth actions
+  loginWithGoogle: async (idToken: string) => {
+    set({ isLoading: true });
+    try {
+      const result = await api.googleLogin(idToken);
+      storeTokens(result.access_token, result.refresh_token);
+
+      const user = await api.getMe();
+      const bal = await api.getBalance(user.id);
+      localStorage.setItem('bitlink_user_id', String(user.id));
+      localStorage.setItem('bitlink_logged_in', 'true');
+
+      set({
+        currentUser: user,
+        isLoggedIn: true,
+        availableBalance: bal.available_balance,
+        change24h: bal.change_24h,
+        needsOnboarding: result.needs_onboarding,
+        isLoading: false,
+      });
+    } catch (error) {
+      console.error('Google login failed:', error);
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  loginWithWallet: async (address: string, chain: string, signature: string, nonce: string) => {
+    set({ isLoading: true });
+    try {
+      const result = await api.web3Login({ address, chain, signature, nonce });
+      storeTokens(result.access_token, result.refresh_token);
+
+      const user = await api.getMe();
+      const bal = await api.getBalance(user.id);
+      localStorage.setItem('bitlink_user_id', String(user.id));
+      localStorage.setItem('bitlink_logged_in', 'true');
+
+      set({
+        currentUser: user,
+        isLoggedIn: true,
+        availableBalance: bal.available_balance,
+        change24h: bal.change_24h,
+        needsOnboarding: result.needs_onboarding,
+        isLoading: false,
+      });
+    } catch (error) {
+      console.error('Wallet login failed:', error);
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  refreshAccessToken: async () => {
+    const refreshToken = localStorage.getItem('bitlink_refresh_token');
+    if (!refreshToken) return false;
+
+    try {
+      const result = await api.refreshTokens(refreshToken);
+      storeTokens(result.access_token, result.refresh_token);
+      return true;
+    } catch {
+      clearTokens();
+      set({ currentUser: null, isLoggedIn: false });
+      return false;
     }
   },
 }));

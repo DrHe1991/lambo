@@ -14,8 +14,11 @@ class Settings(BaseSettings):
     env: str = 'development'
     debug: bool = False
 
-    # Auth (for later phases)
+    # Auth
     secret_key: str = 'dev-secret-key-change-in-production'
+    jwt_algorithm: str = 'HS256'
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 30
     google_client_id: str = ''
     google_client_secret: str = ''
 

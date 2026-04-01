@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import engine, async_session
 from app.models.user import User
+from app.models.auth import UserAuthProvider  # noqa: F401 — needed for relationship resolution
 from app.models.ledger import Ledger, ActionType, RefType
 
 
@@ -54,6 +55,8 @@ async def wipe_all(db: AsyncSession):
         'chat_members',
         'chat_sessions',
         'follows',
+        'refresh_tokens',
+        'user_auth_providers',
         'users',
     ]
     for table in tables:

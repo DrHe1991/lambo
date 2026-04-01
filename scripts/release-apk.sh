@@ -38,7 +38,9 @@ echo ""
 
 echo "[1/5] Building UI with production API..."
 cd "$PROJECT_DIR/ui"
-VITE_API_URL="https://api.$DOMAIN" npm run build --silent
+VITE_API_URL="https://api.$DOMAIN" \
+VITE_GOOGLE_CLIENT_ID="99467099885-njmme06oms9n65j4pe9d33cp6f8rvok1.apps.googleusercontent.com" \
+npm run build --silent
 
 echo "[2/5] Syncing Capacitor..."
 npx cap sync android 2>/dev/null

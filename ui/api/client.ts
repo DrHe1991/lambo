@@ -4,10 +4,35 @@ interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   params?: Record<string, string | number | undefined>;
+  skipAuth?: boolean;
+}
+
+// Single in-flight refresh promise to prevent concurrent refresh races
+let refreshPromise: Promise<void> | null = null;
+
+async function tryRefreshToken(): Promise<boolean> {
+  const refreshToken = localStorage.getItem('bitlink_refresh_token');
+  if (!refreshToken) return false;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!response.ok) return false;
+
+    const data = await response.json();
+    localStorage.setItem('bitlink_access_token', data.access_token);
+    localStorage.setItem('bitlink_refresh_token', data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function apiRequest<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, params } = options;
+  const { method = 'GET', body, params, skipAuth } = options;
 
   let url = `${API_BASE}${endpoint}`;
 
@@ -24,13 +49,47 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
     }
   }
 
-  const response = await fetch(url, {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+
+  if (!skipAuth) {
+    const token = localStorage.getItem('bitlink_access_token');
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  }
+
+  let response = await fetch(url, {
     method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   });
+
+  // Auto-refresh on 401
+  if (response.status === 401 && !skipAuth) {
+    if (!refreshPromise) {
+      refreshPromise = tryRefreshToken().then((ok) => {
+        refreshPromise = null;
+        if (!ok) throw new Error('Token refresh failed');
+      });
+    }
+    try {
+      await refreshPromise;
+      // Retry with new token
+      const newToken = localStorage.getItem('bitlink_access_token');
+      if (newToken) {
+        headers['Authorization'] = `Bearer ${newToken}`;
+      }
+      response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch {
+      // Refresh failed — let the 401 fall through
+    }
+  }
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
@@ -764,4 +823,37 @@ export const api = {
     }
     return response.json();
   },
+
+  // Auth
+  googleLogin: (idToken: string) =>
+    apiRequest<{ access_token: string; refresh_token: string; needs_onboarding: boolean }>(
+      '/api/auth/google', { method: 'POST', body: { id_token: idToken }, skipAuth: true }
+    ),
+
+  getWeb3Nonce: (address: string, chain: string) =>
+    apiRequest<{ nonce: string; message: string }>(
+      '/api/auth/web3/nonce', { method: 'POST', body: { address, chain }, skipAuth: true }
+    ),
+
+  web3Login: (data: { address: string; chain: string; signature: string; nonce: string }) =>
+    apiRequest<{ access_token: string; refresh_token: string; needs_onboarding: boolean }>(
+      '/api/auth/web3/verify', { method: 'POST', body: data, skipAuth: true }
+    ),
+
+  refreshTokens: (refreshToken: string) =>
+    apiRequest<{ access_token: string; refresh_token: string }>(
+      '/api/auth/refresh', { method: 'POST', body: { refresh_token: refreshToken }, skipAuth: true }
+    ),
+
+  authLogout: (refreshToken: string) =>
+    apiRequest<void>('/api/auth/logout', { method: 'POST', body: { refresh_token: refreshToken } }),
+
+  getMe: () =>
+    apiRequest<ApiUser>('/api/auth/me'),
+
+  linkGoogle: (idToken: string) =>
+    apiRequest<{ status: string }>('/api/auth/link/google', { method: 'POST', body: { id_token: idToken } }),
+
+  linkWeb3: (data: { address: string; chain: string; signature: string; nonce: string }) =>
+    apiRequest<{ status: string }>('/api/auth/link/web3', { method: 'POST', body: data }),
 };

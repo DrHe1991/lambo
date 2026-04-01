@@ -16,6 +16,10 @@ class User(Base):
     avatar: Mapped[str | None] = mapped_column(String(500))
     bio: Mapped[str | None] = mapped_column(String(300))
 
+    # Auth
+    email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True, default=None)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Trust sub-scores (S8: no hard cap for creator/curator)
     creator_score: Mapped[int] = mapped_column(Integer, default=150)
     curator_score: Mapped[int] = mapped_column(Integer, default=150)
@@ -70,6 +74,11 @@ class User(Base):
     # Drafts
     drafts: Mapped[list['Draft']] = relationship(
         'Draft', back_populates='author', cascade='all, delete-orphan'
+    )
+
+    # Auth providers
+    auth_providers: Mapped[list['UserAuthProvider']] = relationship(
+        'UserAuthProvider', back_populates='user', cascade='all, delete-orphan'
     )
 
 

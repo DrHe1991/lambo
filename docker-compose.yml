@@ -73,6 +73,7 @@ services:
       S3_ACCESS_KEY: bitlink
       S3_SECRET_KEY: bitlink_dev_password
       S3_PUBLIC_URL: http://localhost:9000
+      GOOGLE_CLIENT_ID: '99467099885-5fp7or3gdkdq60hob8fkojjhu9h36uvo.apps.googleusercontent.com'
     volumes:
       - ./api:/app
     depends_on:
@@ -97,6 +98,7 @@ services:
       - '3003:3003'
     environment:
       VITE_API_URL: http://localhost:8003
+      VITE_GOOGLE_CLIENT_ID: '99467099885-5fp7or3gdkdq60hob8fkojjhu9h36uvo.apps.googleusercontent.com'
     volumes:
       - ./ui:/app
       - /app/node_modules

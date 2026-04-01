@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.routes import posts, users, chat, drafts, pay, settlement, media
+from app.routes import posts, users, chat, drafts, pay, settlement, media, auth
 from app.services.media import media_service
 
 
@@ -33,6 +33,7 @@ app.add_middleware(
 )
 
 # Routes - Minimal system (rewards and challenges removed)
+app.include_router(auth.router, prefix='/api/auth', tags=['auth'])
 app.include_router(users.router, prefix='/api/users', tags=['users'])
 app.include_router(posts.router, prefix='/api/posts', tags=['posts'])
 app.include_router(chat.router, prefix='/api/chat', tags=['chat'])
