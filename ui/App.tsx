@@ -21,6 +21,7 @@ import { WithdrawView } from './components/WithdrawView';
 import { ExchangeView } from './components/ExchangeView';
 // Trust theme removed - trust system simplified
 import { ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest, ApiDraft } from './api/client';
+import { QRCodeSVG } from 'qrcode.react';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
 import { useTheme } from './hooks/useTheme';
 import { compressImage } from './utils/imageCompressor';
@@ -101,11 +102,15 @@ const App: React.FC = () => {
   const posts: Post[] = apiPosts.map(apiPostToPost);
   const feedPostsConverted: Post[] = apiFeedPosts.map(apiPostToPost);
   const chatSessions: ChatSession[] = apiSessions.map(apiSessionToSession);
-  const currentMe: User = currentUser ? apiUserToUser(currentUser) : MOCK_ME;
+  const currentMe: User | null = currentUser ? apiUserToUser(currentUser) : null;
 
   // Local UI state
   const [activeTab, setActiveTab] = useState<Tab>('Feed');
+  const [followingIds, setFollowingIds] = useState<Set<number>>(new Set());
   const [currentView, setCurrentView] = useState<View>('MAIN');
+  const [followersList, setFollowersList] = useState<User[]>([]);
+  const [followingList, setFollowingList] = useState<User[]>([]);
+  const [isLoadingUserList, setIsLoadingUserList] = useState(false);
   const [selectedPost, setSelectedPost] = useState<Post | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const [selectedChat, setSelectedChat] = useState<ChatSession | null>(null);
@@ -405,17 +410,17 @@ const App: React.FC = () => {
   const handleMemberRemoved = useCallback((event: { session_id: number; user_id?: number }) => {
     // Refresh sessions to update member lists
     if (currentUser) {
-      loadChatSessions(currentUser.id);
+      fetchSessions(currentUser.id);
     }
-  }, [currentUser]);
+  }, [currentUser, fetchSessions]);
 
   // Handle new members added to group
   const handleMembersAdded = useCallback((event: { session_id: number; count: number }) => {
     // Refresh sessions to update member lists
     if (currentUser) {
-      loadChatSessions(currentUser.id);
+      fetchSessions(currentUser.id);
     }
-  }, [currentUser]);
+  }, [currentUser, fetchSessions]);
 
   // Handle when current user is removed from a group
   const handleYouWereRemoved = useCallback((event: { session_id: number }) => {
@@ -427,9 +432,9 @@ const App: React.FC = () => {
     }
     // Refresh sessions list
     if (currentUser) {
-      loadChatSessions(currentUser.id);
+      fetchSessions(currentUser.id);
     }
-  }, [selectedChat, currentUser]);
+  }, [selectedChat, currentUser, fetchSessions]);
 
   // Connect to WebSocket for real-time chat
   useChatWebSocket({
@@ -553,7 +558,7 @@ const App: React.FC = () => {
     if (!currentUser || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const minWait = new Promise(r => setTimeout(r, 5000));
+      const minWait = new Promise(r => setTimeout(r, 500));
       await Promise.all([fetchFeed(currentUser.id), minWait]);
     } finally {
       setIsRefreshing(false);
@@ -630,6 +635,15 @@ const App: React.FC = () => {
       fetchUserCosts(currentUser.id);
     }
   }, [isLoggedIn, currentUser?.id]);
+
+  // Fetch following IDs when Following tab is active
+  useEffect(() => {
+    if (activeTab === 'Following' && currentUser) {
+      api.getFollowing(currentUser.id).then((users) => {
+        setFollowingIds(new Set(users.map((u) => u.id)));
+      }).catch(() => {});
+    }
+  }, [activeTab, currentUser?.id]);
 
   // Fetch crypto balance when logged in
   useEffect(() => {
@@ -770,6 +784,9 @@ const App: React.FC = () => {
   if (!isLoggedIn) {
     return <LoginPage onLogin={handleLogin} isLoading={isLoggingIn} />;
   }
+
+  // currentUser is guaranteed non-null past this point (isLoggedIn implies it)
+  if (!currentMe) return null;
 
   // Layout Helpers
   const renderHeader = () => {
@@ -913,44 +930,54 @@ const App: React.FC = () => {
     </div>
   );
 
-  const renderFollowing = () => (
-    <div>
-      {pullIndicator}
-      <div className="px-4 py-3">
-      {feedPostsConverted.map(post => (
-        <PostCard 
-          key={post.id} 
-          post={post} 
-          onClick={(p) => {
-            setSelectedPost(p);
-            setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
-            fetchComments(Number(p.id), currentUser?.id);
-          }}
-          onUserClick={(id) => {
-            const user = feedPostsConverted.find(p => String(p.author.id) === String(id))?.author;
-            if (user) {
-              setSelectedUser(user);
-              setCurrentView('USER_PROFILE');
-            }
-          }}
-          onChallenge={handleChallenge}
-          onLike={handleLikeRequest}
-          onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
-          isLiked={likedPosts.has(String(post.id)) || post.isLiked}
-        />
-      ))}
-      {feedLoading && !isRefreshing && (
-        <div className="flex justify-center py-6">
-          <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+  const renderFollowing = () => {
+    const followingPosts = feedPostsConverted.filter(
+      (post) => followingIds.has(Number(post.author.id))
+    );
+    return (
+      <div>
+        {pullIndicator}
+        <div className="px-4 py-3">
+          {followingPosts.map(post => (
+            <PostCard
+              key={post.id}
+              post={post}
+              onClick={(p) => {
+                setSelectedPost(p);
+                setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
+                fetchComments(Number(p.id), currentUser?.id);
+              }}
+              onUserClick={(id) => {
+                const user = followingPosts.find(p => String(p.author.id) === String(id))?.author;
+                if (user) {
+                  setSelectedUser(user);
+                  setCurrentView('USER_PROFILE');
+                }
+              }}
+              onChallenge={handleChallenge}
+              onLike={handleLikeRequest}
+              onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
+              isLiked={likedPosts.has(String(post.id)) || post.isLiked}
+            />
+          ))}
+          {feedLoading && !isRefreshing && (
+            <div className="flex justify-center py-6">
+              <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          )}
+          {!feedLoading && followingPosts.length === 0 && (
+            <p className="text-center text-stone-500 text-sm py-12">
+              {followingIds.size === 0 ? 'Follow people to see their posts here.' : 'No posts from people you follow yet.'}
+            </p>
+          )}
+          {!feedHasMore && followingPosts.length > 0 && (
+            <p className="text-center text-stone-600 text-xs py-6">No more posts</p>
+          )}
+          <div ref={feedSentinelRef} className="h-1" />
         </div>
-      )}
-      {!feedHasMore && feedPostsConverted.length > 0 && (
-        <p className="text-center text-stone-600 text-xs py-6">No more posts</p>
-      )}
-      <div ref={feedSentinelRef} className="h-1" />
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderChat = () => {
     const chatQuickActions = [
@@ -1085,16 +1112,14 @@ const App: React.FC = () => {
           <span className="text-[19px] text-white select-none font-display font-bold tracking-tight">My QR Code</span>
         </div>
         <div className="flex flex-col items-center justify-center p-8 pt-16">
-          {/* QR Code placeholder - in real app would generate actual QR */}
-          <div className="w-64 h-64 bg-white rounded-3xl p-4 flex items-center justify-center mb-8">
-            <div className="w-full h-full bg-gradient-to-br from-stone-200 to-stone-100 rounded-2xl flex items-center justify-center relative">
-              <QrCode size={180} className="text-stone-800" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="w-16 h-16 bg-gradient-to-br from-orange-500 to-amber-600 rounded-xl flex items-center justify-center shadow-lg">
-                  <Zap className="w-8 h-8 text-white fill-white" />
-                </div>
-              </div>
-            </div>
+          {/* QR Code */}
+          <div className="w-64 h-64 bg-white rounded-3xl p-5 flex items-center justify-center mb-8 shadow-xl">
+            <QRCodeSVG
+              value={`https://bitlink.app/@${currentMe.handle}`}
+              size={200}
+              level="H"
+              includeMargin={false}
+            />
           </div>
 
           <div className="text-center mb-8">
@@ -1275,14 +1300,34 @@ const App: React.FC = () => {
         <div className="flex items-center gap-6 mt-4">
           <button
             className="text-center active:scale-[0.98]"
-            onClick={() => setCurrentView('FOLLOWERS_LIST')}
+            onClick={async () => {
+              if (!currentUser) return;
+              setIsLoadingUserList(true);
+              setCurrentView('FOLLOWERS_LIST');
+              try {
+                const users = await api.getFollowers(currentUser.id);
+                setFollowersList(users.map(apiUserToUser));
+              } catch { /* silent */ } finally {
+                setIsLoadingUserList(false);
+              }
+            }}
           >
             <span className="text-base font-bold text-stone-100 block leading-none">{followerCount}</span>
             <span className="text-xs font-bold uppercase tracking-wide text-stone-500">Followers</span>
           </button>
           <button
             className="text-center active:scale-[0.98]"
-            onClick={() => setCurrentView('FOLLOWING_LIST')}
+            onClick={async () => {
+              if (!currentUser) return;
+              setIsLoadingUserList(true);
+              setCurrentView('FOLLOWING_LIST');
+              try {
+                const users = await api.getFollowing(currentUser.id);
+                setFollowingList(users.map(apiUserToUser));
+              } catch { /* silent */ } finally {
+                setIsLoadingUserList(false);
+              }
+            }}
           >
             <span className="text-base font-bold text-stone-100 block leading-none">{followingCount}</span>
             <span className="text-xs font-bold uppercase tracking-wide text-stone-500">Following</span>
@@ -3977,21 +4022,25 @@ const App: React.FC = () => {
   };
 
   const renderFollowersList = () => {
-    // Use actual users from API (TODO: implement proper followers endpoint)
-    const followerUsers: User[] = availableUsers
-      .filter(u => u.id !== currentUser?.id)
-      .slice(0, 4)
-      .map(apiUserToUser);
-    return renderUserListPage('Followers', followerUsers);
+    if (isLoadingUserList) {
+      return (
+        <div className="fixed inset-0 z-[60] bg-black flex items-center justify-center sub-view">
+          <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      );
+    }
+    return renderUserListPage('Followers', followersList);
   };
 
   const renderFollowingList = () => {
-    // Use actual users from API (TODO: implement proper following endpoint)
-    const followingUsers: User[] = availableUsers
-      .filter(u => u.id !== currentUser?.id)
-      .slice(0, 4)
-      .map(apiUserToUser);
-    return renderUserListPage('Following', followingUsers);
+    if (isLoadingUserList) {
+      return (
+        <div className="fixed inset-0 z-[60] bg-black flex items-center justify-center sub-view">
+          <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      );
+    }
+    return renderUserListPage('Following', followingList);
   };
 
   const renderSettings = () => {

@@ -271,7 +271,7 @@ test.describe('Media Upload Feature', () => {
     await page.locator('[data-testid="new-post-button"]').click();
     await page.waitForTimeout(500);
 
-    const addTitleBtn = page.locator('button:has-text("Add title")');
+    const addTitleBtn = page.locator('button:has-text("Write an article instead")');
     await expect(addTitleBtn).toBeVisible({ timeout: 5000 });
     await addTitleBtn.click();
     await page.waitForTimeout(500);
