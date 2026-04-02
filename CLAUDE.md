@@ -13,7 +13,7 @@ BitLink is a crypto-native social media platform where "liking = investing." Ear
 | Pay Service | Python 3.12, FastAPI, tronpy (TRON), python-binance |
 | Database | PostgreSQL 16 |
 | Cache | Redis 7 |
-| Mobile | Capacitor (Android, app ID: `com.bitlink.app`) |
+| Mobile | Capacitor (Android, app ID: `io.bitlink.app`) |
 | Infra | Docker Compose |
 
 ## Project Structure

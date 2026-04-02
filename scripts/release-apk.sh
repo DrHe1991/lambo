@@ -40,6 +40,7 @@ echo "[1/5] Building UI with production API..."
 cd "$PROJECT_DIR/ui"
 VITE_API_URL="https://api.$DOMAIN" \
 VITE_WC_PROJECT_ID="76b9cd0936b1b074a6c42d5efd4ea8e2" \
+VITE_GOOGLE_CLIENT_ID="292172431256-hotp58doi02m8do3kg64qq2qn9qjil9f.apps.googleusercontent.com" \
 npm run build --silent
 
 echo "[2/5] Syncing Capacitor..."
