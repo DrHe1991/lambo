@@ -1,8 +1,8 @@
 """
 Deposit monitoring service for TRON blockchain.
 
-Polls the blockchain for new deposits to monitored addresses
-and updates the database accordingly.
+Monitors USDT (TRC-20) deposits to user deposit addresses
+and credits wallet balances accordingly.
 """
 
 import asyncio
@@ -96,90 +96,39 @@ class DepositMonitor:
         db: AsyncSession,
         deposit_address: DepositAddress,
     ):
-        """Check for new TRC-20 and TRX deposits to a specific address."""
+        """Check for new USDT (TRC-20) deposits to a specific address."""
         try:
-            # 1. Check TRX native transfers
-            await self._check_trx_transfers(db, deposit_address)
-            
-            # 2. Check TRC-20 (USDT) transfers
-            await self._check_trc20_transfers(db, deposit_address)
-        
+            # Check for USDT (TRC-20) deposits
+            await self._check_usdt_transfers(db, deposit_address)
         except Exception as e:
             logger.error(f'Error checking deposits for {deposit_address.address}: {e}')
     
-    async def _check_trx_transfers(
+    async def _check_usdt_transfers(
         self,
         db: AsyncSession,
         deposit_address: DepositAddress,
     ):
-        """Check for TRX native transfers."""
-        # Only check transactions from the last hour to avoid processing old history
-        import time
-        min_timestamp = (int(time.time()) - 3600) * 1000  # 1 hour ago in ms
-        
-        transfers = await self.tron_service.get_trx_transfers(
-            address=deposit_address.address,
-            min_timestamp=min_timestamp,
-            limit=20,
-        )
-        
-        current_block = await self.tron_service.get_current_block()
-        
-        for transfer in transfers:
-            # Skip if already processed
-            existing = await db.execute(
-                select(Deposit).where(
-                    Deposit.chain == 'tron',
-                    Deposit.tx_hash == transfer.tx_hash,
-                )
-            )
-            if existing.scalar_one_or_none():
-                continue
-            
-            # Create new deposit record
-            deposit = Deposit(
-                wallet_id=deposit_address.wallet_id,
-                deposit_address_id=deposit_address.id,
-                chain='tron',
-                tx_hash=transfer.tx_hash,
-                block_number=transfer.block_number if transfer.block_number > 0 else current_block - 5,
-                token_contract=None,
-                token_symbol='TRX',
-                amount=transfer.amount,
-                from_address=transfer.from_address,
-                confirmations=0,
-                required_confirmations=self.settings.deposit_confirmations,
-                status=DepositStatus.PENDING.value,
-            )
-            
-            db.add(deposit)
-            await db.commit()
-            
-            trx_amount = transfer.amount / 1_000_000
-            logger.info(
-                f'New TRX deposit detected: {trx_amount} TRX '
-                f'to {deposit_address.address} (tx: {transfer.tx_hash[:16]}...)'
-            )
-    
-    async def _check_trc20_transfers(
-        self,
-        db: AsyncSession,
-        deposit_address: DepositAddress,
-    ):
-        """Check for TRC-20 (USDT) transfers."""
+        """Check for USDT (TRC-20) transfers only."""
         import time
         min_timestamp = (int(time.time()) - 3600) * 1000  # 1 hour ago in ms
         
         usdt_contract = USDT_CONTRACTS.get(self.settings.tron_network, '')
+        if not usdt_contract:
+            logger.warning(f'No USDT contract configured for network: {self.settings.tron_network}')
+            return
         
         transfers = await self.tron_service.get_trc20_transfers(
             address=deposit_address.address,
-            contract_address=usdt_contract if usdt_contract else None,
+            contract_address=usdt_contract,
             min_timestamp=min_timestamp,
             limit=20,
         )
         
         for transfer in transfers:
+            # Only accept USDT transfers
+            if transfer.contract_address != usdt_contract:
+                continue
+            
             # Skip if already processed
             existing = await db.execute(
                 select(Deposit).where(
@@ -190,7 +139,7 @@ class DepositMonitor:
             if existing.scalar_one_or_none():
                 continue
             
-            # Create new deposit record
+            # USDT has 6 decimals, amount is in smallest unit
             deposit = Deposit(
                 wallet_id=deposit_address.wallet_id,
                 deposit_address_id=deposit_address.id,
@@ -198,7 +147,7 @@ class DepositMonitor:
                 tx_hash=transfer.tx_hash,
                 block_number=transfer.block_number,
                 token_contract=transfer.contract_address,
-                token_symbol=transfer.token_symbol or 'USDT',
+                token_symbol='USDT',
                 amount=transfer.amount,
                 from_address=transfer.from_address,
                 confirmations=0,
@@ -209,8 +158,9 @@ class DepositMonitor:
             db.add(deposit)
             await db.commit()
             
+            usdt_amount = transfer.amount / 1_000_000
             logger.info(
-                f'New TRC-20 deposit detected: {transfer.amount} {transfer.token_symbol} '
+                f'New USDT deposit detected: {usdt_amount} USDT '
                 f'to {deposit_address.address} (tx: {transfer.tx_hash[:16]}...)'
             )
     

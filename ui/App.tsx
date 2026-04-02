@@ -95,6 +95,7 @@ const App: React.FC = () => {
     cryptoBalances,
     fetchCryptoBalance,
     stableBalance,
+    satBalance,
     fetchUserBalances,
   } = useWalletStore();
 
@@ -558,15 +559,23 @@ const App: React.FC = () => {
     if (!currentUser || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const minWait = new Promise(r => setTimeout(r, 500));
-      await Promise.all([fetchFeed(currentUser.id), minWait]);
+      const minWait = new Promise(r => setTimeout(r, 2000));
+      if (activeTab === 'Profile') {
+        await Promise.all([
+          fetchCryptoBalance(currentUser.id),
+          fetchUserBalances(currentUser.id),
+          minWait,
+        ]);
+      } else {
+        await Promise.all([fetchFeed(currentUser.id), minWait]);
+      }
     } finally {
       setIsRefreshing(false);
     }
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    if (activeTab !== 'Feed' && activeTab !== 'Following') return;
+    if (activeTab !== 'Feed' && activeTab !== 'Following' && activeTab !== 'Profile') return;
     const scrollEl = mainContentRef.current;
     if (scrollEl && scrollEl.scrollTop <= 0) {
       pullStartY.current = e.touches[0].clientY;
@@ -1291,6 +1300,7 @@ const App: React.FC = () => {
 
     return (
     <div className="p-4 pb-4">
+      {pullIndicator}
       <div className="flex flex-col items-center mb-8">
         <div className="relative w-28 h-28 mb-4">
            <img src={getAvatarUrl(currentMe.avatar, currentMe.name)} className="w-full h-full rounded-full border-4 border-orange-500 object-cover" onError={(e) => handleAvatarError(e, currentMe.name)} />
@@ -1343,7 +1353,7 @@ const App: React.FC = () => {
           >
             <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">Balance</span>
             <div className="flex items-baseline gap-1">
-              <span data-testid="balance-amount" className="text-2xl font-bold text-stone-100 leading-none">{availableBalance.toLocaleString()}</span>
+              <span data-testid="balance-amount" className="text-2xl font-bold text-stone-100 leading-none">{(satBalance || availableBalance).toLocaleString()}</span>
               <span className="text-orange-500 text-xs font-bold">sat</span>
             </div>
             {change24h !== 0 && (
@@ -1971,7 +1981,7 @@ const App: React.FC = () => {
           <div className="pt-2 pb-1">
             <span className="text-[11px] font-bold text-stone-600 uppercase tracking-widest">Balance</span>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-4xl font-bold text-stone-100 tabular-nums font-display">{availableBalance.toLocaleString()}</span>
+              <span className="text-4xl font-bold text-stone-100 tabular-nums font-display">{(satBalance || availableBalance).toLocaleString()}</span>
               <span className="text-sm font-bold text-orange-500">sat</span>
             </div>
             <div className="flex items-center gap-4 mt-3 text-xs tabular-nums">
@@ -4129,7 +4139,7 @@ const App: React.FC = () => {
     <div className="h-dvh flex flex-col overflow-hidden select-none app-shell">
       <main
         ref={mainContentRef}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto overflow-x-hidden"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -4157,9 +4167,21 @@ const App: React.FC = () => {
       {currentView === 'GROUP_CHAT' && renderGroupChat()}
       {currentView === 'SCAN' && renderScan()}
       {currentView === 'SETTINGS' && renderSettings()}
-      {currentView === 'DEPOSIT' && <DepositView onBack={() => setCurrentView('MAIN')} />}
+      {currentView === 'DEPOSIT' && <DepositView onBack={() => {
+        setCurrentView('MAIN');
+        if (currentUser) {
+          fetchCryptoBalance(currentUser.id).catch(() => {});
+          fetchUserBalances(currentUser.id).catch(() => {});
+        }
+      }} />}
       {currentView === 'WITHDRAW' && <WithdrawView onBack={() => setCurrentView('MAIN')} />}
-      {currentView === 'EXCHANGE' && <ExchangeView onBack={() => setCurrentView('MAIN')} />}
+      {currentView === 'EXCHANGE' && <ExchangeView onBack={() => {
+        setCurrentView('MAIN');
+        if (currentUser) {
+          fetchCryptoBalance(currentUser.id).catch(() => {});
+          fetchUserBalances(currentUser.id).catch(() => {});
+        }
+      }} />}
       
       {/* Inline Comment Sheet */}
       {renderInlineCommentSheet()}

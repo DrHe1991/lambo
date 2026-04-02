@@ -1,10 +1,10 @@
 """
 TRON blockchain service for interacting with TRON network.
 
-Supports:
-- TRX native transfers
-- TRC-20 token transfers (USDT, USDC)
+Provides utilities for:
+- TRC-20 token transfers (USDT)
 - Transaction monitoring
+- Account balance queries
 """
 
 import httpx
@@ -61,10 +61,13 @@ class TronService:
         # Set API endpoint based on network
         if self.network == 'mainnet':
             self.api_base = 'https://api.trongrid.io'
+            self._verify_ssl = True
         elif self.network == 'shasta':
             self.api_base = 'https://api.shasta.trongrid.io'
+            self._verify_ssl = False  # Shasta has SSL issues from Docker
         elif self.network == 'nile':
             self.api_base = 'https://nile.trongrid.io'
+            self._verify_ssl = False  # Nile may have similar issues
         else:
             raise ValueError(f'Unknown TRON network: {self.network}')
         
@@ -77,9 +80,13 @@ class TronService:
             headers['TRON-PRO-API-KEY'] = self.api_key
         return headers
     
+    def _get_client(self) -> httpx.AsyncClient:
+        """Get HTTP client with appropriate SSL settings."""
+        return httpx.AsyncClient(verify=self._verify_ssl)
+    
     async def get_current_block(self) -> int:
         """Get the current block number."""
-        async with httpx.AsyncClient() as client:
+        async with self._get_client() as client:
             response = await client.post(
                 f'{self.api_base}/wallet/getnowblock',
                 headers=self._get_headers(),
@@ -118,7 +125,7 @@ class TronService:
         if min_timestamp:
             params['min_timestamp'] = min_timestamp
         
-        async with httpx.AsyncClient() as client:
+        async with self._get_client() as client:
             response = await client.get(
                 f'{self.api_base}/v1/accounts/{address}/transactions/trc20',
                 params=params,
@@ -180,7 +187,7 @@ class TronService:
         if min_timestamp:
             params['min_timestamp'] = min_timestamp
         
-        async with httpx.AsyncClient() as client:
+        async with self._get_client() as client:
             response = await client.get(
                 f'{self.api_base}/v1/accounts/{address}/transactions',
                 params=params,
@@ -221,7 +228,7 @@ class TronService:
         Returns:
             Dict with 'trx' (in sun) and 'tokens' (list of token balances)
         """
-        async with httpx.AsyncClient() as client:
+        async with self._get_client() as client:
             response = await client.get(
                 f'{self.api_base}/v1/accounts/{address}',
                 headers=self._get_headers(),
@@ -242,7 +249,7 @@ class TronService:
     
     async def validate_address(self, address: str) -> bool:
         """Validate a TRON address."""
-        async with httpx.AsyncClient() as client:
+        async with self._get_client() as client:
             response = await client.post(
                 f'{self.api_base}/wallet/validateaddress',
                 json={'address': address},

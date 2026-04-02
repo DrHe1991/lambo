@@ -94,13 +94,11 @@ export const ExchangeView: React.FC<ExchangeViewProps> = ({ onBack }) => {
       await confirmExchange(currentUser.id, exchangePreview.preview_id);
       setSuccess(true);
       setAmount('');
-      fetchUserBalances(currentUser.id);
-      fetchCryptoBalance(currentUser.id);
-      fetchExchangeQuota();
+      setTimeout(() => onBack(), 800);
     } catch (e) {
       // Error handled in store
     }
-  }, [currentUser?.id, exchangePreview, confirmExchange, fetchUserBalances, fetchCryptoBalance, fetchExchangeQuota]);
+  }, [currentUser?.id, exchangePreview, confirmExchange, onBack]);
 
   const handleMaxClick = () => {
     if (direction === 'buy_sat') {
@@ -152,17 +150,17 @@ export const ExchangeView: React.FC<ExchangeViewProps> = ({ onBack }) => {
             <label className="text-sm text-stone-400 block mb-2">
               Amount ({direction === 'buy_sat' ? 'USDT' : 'sat'})
             </label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 w-full">
               <input
                 type="number"
                 value={amount}
                 onChange={(e) => { setAmount(e.target.value); clearExchangePreview(); }}
                 placeholder={direction === 'buy_sat' ? '0.00' : '0'}
-                className="flex-1 bg-stone-800 text-white rounded-xl px-4 py-3 text-lg outline-none transition-colors focus:border-orange-500 border border-stone-700"
+                className="min-w-0 flex-1 bg-stone-800 text-white rounded-xl px-4 py-3 text-lg outline-none transition-colors focus:border-orange-500 border border-stone-700"
               />
               <button
                 onClick={handleMaxClick}
-                className="px-4 py-3 bg-stone-800 text-orange-500 rounded-xl text-sm font-medium border border-stone-700 hover:bg-stone-700 transition-colors"
+                className="shrink-0 px-4 py-3 bg-stone-800 text-orange-500 rounded-xl text-sm font-medium border border-stone-700 hover:bg-stone-700 transition-colors"
               >
                 MAX
               </button>
@@ -262,12 +260,14 @@ export const ExchangeView: React.FC<ExchangeViewProps> = ({ onBack }) => {
 
           {/* First Exchange Bonus Banner */}
           {isFirstExchangeEligible && direction === 'buy_sat' && !exchangePreview && (
-            <div className="bg-orange-900/20 border border-orange-500/30 rounded-xl p-3">
-              <div className="flex items-center gap-2">
-                <span className="text-xl">🎁</span>
+            <div className="bg-gradient-to-r from-orange-500/20 to-amber-500/20 border border-orange-500/40 rounded-xl p-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-orange-500/20 rounded-full flex items-center justify-center">
+                  <span className="text-2xl">🎁</span>
+                </div>
                 <div>
-                  <div className="text-orange-400 font-medium text-sm">First Exchange Bonus</div>
-                  <div className="text-orange-300/70 text-xs">Get +10% bonus on your first exchange (up to $5)</div>
+                  <div className="text-orange-500 font-bold text-sm">First Exchange Bonus</div>
+                  <div className="text-orange-600 dark:text-orange-300 text-xs">Get +10% bonus on your first exchange (up to $5)</div>
                 </div>
               </div>
             </div>

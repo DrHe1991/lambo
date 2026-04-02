@@ -98,7 +98,7 @@ services:
       - '3003:3003'
     environment:
       VITE_API_URL: http://localhost:8003
-      VITE_GOOGLE_CLIENT_ID: '99467099885-5fp7or3gdkdq60hob8fkojjhu9h36uvo.apps.googleusercontent.com'
+      VITE_WC_PROJECT_ID: '76b9cd0936b1b074a6c42d5efd4ea8e2'
     volumes:
       - ./ui:/app
       - /app/node_modules
