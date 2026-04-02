@@ -23,7 +23,7 @@ build_ui() {
   echo "→ Building UI..."
   cd "$PROJECT_DIR/ui"
   VITE_API_URL="https://api.$DOMAIN" \
-  VITE_GOOGLE_CLIENT_ID="99467099885-njmme06oms9n65j4pe9d33cp6f8rvok1.apps.googleusercontent.com" \
+  VITE_GOOGLE_CLIENT_ID="292172431256-hotp58doi02m8do3kg64qq2qn9qjil9f.apps.googleusercontent.com" \
   npm run build
   echo "→ Uploading UI to server..."
   cd "$PROJECT_DIR"
