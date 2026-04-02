@@ -86,7 +86,9 @@ export const LoginPage: React.FC<LoginPageProps> = () => {
     setError('');
     try {
       const { GoogleSignIn } = await import('@capawesome/capacitor-google-sign-in');
-      await GoogleSignIn.initialize();
+      await GoogleSignIn.initialize({
+        clientId: GOOGLE_CLIENT_ID || '',
+      });
       const result = await GoogleSignIn.signIn();
       if (result.idToken) {
         await loginWithGoogle(result.idToken);
