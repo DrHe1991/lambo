@@ -46,7 +46,10 @@ class PayClient:
                 )
 
                 if response.status_code >= 400:
-                    detail = response.json().get('detail', 'Unknown error')
+                    try:
+                        detail = response.json().get('detail', 'Unknown error')
+                    except Exception:
+                        detail = response.text or f'Pay service error ({response.status_code})'
                     raise PayClientError(detail, response.status_code)
 
                 return response.json()

@@ -65,16 +65,18 @@ class HDWalletService:
         )
     
     def _derive_native(self, index: int) -> str:
-        """Derive address using native bip_utils library."""
+        """Derive address from xpub using bip_utils."""
         from bip_utils import (
             Bip44,
             Bip44Coins,
             Bip44Changes,
-            Bip32Slip10Secp256k1,
+            Bip44PublicKey,
         )
-        
-        # This would parse xpub and derive - simplified for now
-        raise NotImplementedError('Native xpub derivation not yet implemented')
+
+        # Parse the account-level xpub and derive external chain / index
+        account = Bip44.FromExtendedKey(self.xpub, Bip44Coins.TRON)
+        addr_key = account.Change(Bip44Changes.CHAIN_EXT).AddressIndex(index)
+        return addr_key.PublicKey().ToAddress()
 
 
 class TestWalletService:
@@ -120,7 +122,7 @@ class TestWalletService:
         seed = Bip39SeedGenerator(self.mnemonic).Generate()
         bip44 = Bip44.FromSeed(seed, Bip44Coins.TRON)
         account = bip44.Purpose().Coin().Account(0)
-        return account.PublicKey().ToExtendedKey()
+        return account.PublicKey().ToExtended()
     
     def derive_address(self, index: int) -> dict:
         """
