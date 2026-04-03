@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
@@ -193,8 +194,8 @@ async def get_or_create_deposit_address(
             DepositAddress.chain == chain
         )
     )
-    max_index = max_index_result.scalar() or -1
-    next_index = max_index + 1
+    max_index = max_index_result.scalar()
+    next_index = 0 if max_index is None else max_index + 1
     
     # Derive new address
     settings = get_settings()
@@ -208,18 +209,30 @@ async def get_or_create_deposit_address(
         address_info = test_service.derive_address(next_index)
         address = address_info['address']
     
-    # Create deposit address record
+    # Create deposit address record (retry on race condition)
     deposit_address = DepositAddress(
         wallet_id=wallet_id,
         chain=chain,
         address=address,
         derivation_index=next_index,
     )
-    
-    db.add(deposit_address)
-    await db.commit()
-    await db.refresh(deposit_address)
-    
+
+    try:
+        db.add(deposit_address)
+        await db.commit()
+        await db.refresh(deposit_address)
+    except IntegrityError:
+        await db.rollback()
+        existing = await db.execute(
+            select(DepositAddress).where(
+                DepositAddress.wallet_id == wallet_id,
+                DepositAddress.chain == chain,
+            )
+        )
+        deposit_address = existing.scalar_one_or_none()
+        if not deposit_address:
+            raise HTTPException(status_code=500, detail='Failed to create deposit address')
+
     return deposit_address
 
 
