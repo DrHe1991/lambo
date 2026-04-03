@@ -25,6 +25,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { useChatWebSocket } from './hooks/useChatWebSocket';
 import { useTheme } from './hooks/useTheme';
 import { compressImage } from './utils/imageCompressor';
+import { takePhoto } from './utils/camera';
 import ImageLightbox from './components/ImageLightbox';
 
 // Views
@@ -437,6 +438,31 @@ const App: React.FC = () => {
     }
   }, [selectedChat, currentUser, fetchSessions]);
 
+  // Refresh chat data when app returns to foreground
+  const handleAppResume = useCallback(() => {
+    if (!currentUser) return;
+    fetchSessions(currentUser.id);
+    // Reload active chat messages to catch anything missed while backgrounded
+    const chat = selectedChatRef.current;
+    if (chat && chat.id !== 'new') {
+      api.getMessages(Number(chat.id), currentUser.id).then(msgs => {
+        setChatMessages(msgs.map(m => ({
+          id: m.id,
+          senderId: m.sender_id,
+          senderName: m.sender?.name,
+          senderAvatar: m.sender?.avatar,
+          content: m.content,
+          mediaUrl: m.media_url ? fixUrl(m.media_url) : undefined,
+          messageType: m.message_type,
+          status: m.status,
+          createdAt: m.created_at,
+          replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
+          reactions: m.reactions || []
+        })));
+      }).catch(() => {});
+    }
+  }, [currentUser, fetchSessions]);
+
   // Connect to WebSocket for real-time chat
   useChatWebSocket({
     userId: currentUser?.id ?? null,
@@ -446,6 +472,7 @@ const App: React.FC = () => {
     onMemberRemoved: handleMemberRemoved,
     onMembersAdded: handleMembersAdded,
     onYouWereRemoved: handleYouWereRemoved,
+    onResume: handleAppResume,
   });
 
   // Dynamic costs state (trust system removed)
@@ -2149,6 +2176,22 @@ const App: React.FC = () => {
       }
     };
 
+    const handlePostCamera = async () => {
+      if (publishImages.length >= 9) return;
+      const photo = await takePhoto();
+      if (!photo) return;
+      setIsUploadingImage(true);
+      try {
+        const compressed = await compressImage(photo);
+        const result = await api.uploadMedia(compressed, 'post');
+        setPublishImages(prev => [...prev, result.url]);
+      } catch {
+        toast.error('Failed to upload photo');
+      } finally {
+        setIsUploadingImage(false);
+      }
+    };
+
     const saveDraft = async () => {
       if (!currentUser || !publishContent.trim()) return;
       
@@ -2459,20 +2502,36 @@ const App: React.FC = () => {
           <div className="px-4 pt-3 pb-8 border-t border-stone-800/50">
             <div className="flex items-center gap-2 flex-wrap">
               {publishImages.length < 9 && (
-                <button
-                  onClick={() => publishImageInputRef.current?.click()}
-                  disabled={isUploadingImage}
-                  className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
-                    isUploadingImage
-                      ? 'text-stone-600 cursor-not-allowed border border-dashed border-stone-800'
-                      : `text-stone-500 border border-dashed border-stone-700 ${
-                          isQuestion ? 'hover:text-blue-400 hover:border-blue-500/50' : 'hover:text-orange-400 hover:border-orange-500/50'
-                        }`
-                  }`}
-                >
-                  <Image size={16} />
-                  {isUploadingImage ? 'Uploading...' : 'Add photo'}
-                </button>
+                <>
+                  <button
+                    onClick={() => publishImageInputRef.current?.click()}
+                    disabled={isUploadingImage}
+                    className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+                      isUploadingImage
+                        ? 'text-stone-600 cursor-not-allowed border border-dashed border-stone-800'
+                        : `text-stone-500 border border-dashed border-stone-700 ${
+                            isQuestion ? 'hover:text-blue-400 hover:border-blue-500/50' : 'hover:text-orange-400 hover:border-orange-500/50'
+                          }`
+                    }`}
+                  >
+                    <Image size={16} />
+                    {isUploadingImage ? 'Uploading...' : 'Add photo'}
+                  </button>
+                  <button
+                    onClick={handlePostCamera}
+                    disabled={isUploadingImage}
+                    className={`flex items-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors ${
+                      isUploadingImage
+                        ? 'text-stone-600 cursor-not-allowed border border-dashed border-stone-800'
+                        : `text-stone-500 border border-dashed border-stone-700 ${
+                            isQuestion ? 'hover:text-blue-400 hover:border-blue-500/50' : 'hover:text-orange-400 hover:border-orange-500/50'
+                          }`
+                    }`}
+                  >
+                    <Camera size={16} />
+                    Camera
+                  </button>
+                </>
               )}
 
               <div className="flex-1" />
@@ -2732,10 +2791,45 @@ const App: React.FC = () => {
       reactionLongPressTriggered.current = false;
     };
 
-    const handleAttachment = (type: 'camera' | 'album') => {
+    const handleAttachment = async (type: 'camera' | 'album') => {
       setShowAttachmentPicker(false);
       if (type === 'camera') {
-        toast.info('Camera requires native app — use Album on web');
+        if (!selectedChat || !currentUser) return;
+        const photo = await takePhoto();
+        if (!photo) return;
+        setIsUploadingChatImage(true);
+        try {
+          const compressed = await compressImage(photo);
+          const result = await api.uploadMedia(compressed, 'chat');
+          const responses = await api.sendMessage(
+            Number(selectedChat.id),
+            currentUser.id,
+            '',
+            undefined,
+            result.url,
+          );
+          if (responses.length > 0) {
+            const msg = responses[0];
+            setChatMessages(prev => [...prev, {
+              id: msg.id,
+              senderId: msg.sender_id,
+              senderName: msg.sender?.name,
+              senderAvatar: msg.sender?.avatar,
+              content: msg.content,
+              mediaUrl: msg.media_url ? fixUrl(msg.media_url) : undefined,
+              messageType: msg.message_type,
+              status: msg.status,
+              replyTo: null,
+              reactions: [],
+              createdAt: msg.created_at,
+            }]);
+          }
+          fetchSessions(currentUser.id);
+        } catch {
+          toast.error('Failed to send photo');
+        } finally {
+          setIsUploadingChatImage(false);
+        }
         return;
       }
       chatImageInputRef.current?.click();

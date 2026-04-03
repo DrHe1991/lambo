@@ -1,4 +1,6 @@
 import { useEffect, useRef } from 'react';
+import { App as CapApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import { ApiMessage } from '../api/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001';
@@ -32,6 +34,7 @@ interface UseChatWebSocketOptions {
   onMemberRemoved?: (event: GroupEvent) => void;
   onMembersAdded?: (event: GroupEvent & { count: number }) => void;
   onYouWereRemoved?: (event: { session_id: number }) => void;
+  onResume?: () => void;
 }
 
 export function useChatWebSocket({ 
@@ -41,29 +44,30 @@ export function useChatWebSocket({
   onReactionRemoved,
   onMemberRemoved,
   onMembersAdded,
-  onYouWereRemoved
+  onYouWereRemoved,
+  onResume
 }: UseChatWebSocketOptions) {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<number | null>(null);
   const isCleaningUpRef = useRef(false);
   
-  // Use refs for callbacks to avoid reconnecting when they change
   const onMessageRef = useRef(onMessage);
   const onReactionAddedRef = useRef(onReactionAdded);
   const onReactionRemovedRef = useRef(onReactionRemoved);
   const onMemberRemovedRef = useRef(onMemberRemoved);
   const onMembersAddedRef = useRef(onMembersAdded);
   const onYouWereRemovedRef = useRef(onYouWereRemoved);
+  const onResumeRef = useRef(onResume);
   const userIdRef = useRef(userId);
   
-  // Update refs when values change (no re-render needed)
   onMessageRef.current = onMessage;
   onReactionAddedRef.current = onReactionAdded;
   onReactionRemovedRef.current = onReactionRemoved;
   onMemberRemovedRef.current = onMemberRemoved;
   onMembersAddedRef.current = onMembersAdded;
   onYouWereRemovedRef.current = onYouWereRemoved;
+  onResumeRef.current = onResume;
   userIdRef.current = userId;
 
   useEffect(() => {
@@ -71,20 +75,32 @@ export function useChatWebSocket({
 
     isCleaningUpRef.current = false;
 
+    const destroySocket = () => {
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current);
+        pingIntervalRef.current = null;
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+
     const connect = () => {
       if (isCleaningUpRef.current) return;
       if (!userIdRef.current) return;
 
-      // Clean up existing connection
-      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-        return; // Already connected
-      }
+      destroySocket();
 
       const ws = new WebSocket(`${WS_BASE}/api/chat/ws/${userIdRef.current}`);
 
       ws.onopen = () => {
         console.log('[WS] Connected');
-        // Send periodic pings to keep connection alive
         if (pingIntervalRef.current) {
           clearInterval(pingIntervalRef.current);
         }
@@ -152,24 +168,37 @@ export function useChatWebSocket({
       wsRef.current = ws;
     };
 
+    // Force reconnect and refresh data when app returns to foreground
+    const handleResume = () => {
+      if (isCleaningUpRef.current || !userIdRef.current) return;
+      console.log('[WS] App resumed, reconnecting...');
+      connect();
+      onResumeRef.current?.();
+    };
+
     connect();
+
+    // Native: listen for Capacitor appStateChange
+    let nativeListener: { remove: () => void } | null = null;
+    if (Capacitor.isNativePlatform()) {
+      CapApp.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) handleResume();
+      }).then(l => { nativeListener = l; });
+    }
+
+    // Web fallback: visibilitychange
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') handleResume();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
 
     return () => {
       isCleaningUpRef.current = true;
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-        reconnectTimeoutRef.current = null;
-      }
-      if (pingIntervalRef.current) {
-        clearInterval(pingIntervalRef.current);
-        pingIntervalRef.current = null;
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
+      destroySocket();
+      document.removeEventListener('visibilitychange', handleVisibility);
+      nativeListener?.remove();
     };
-  }, [userId]); // Only reconnect when userId changes
+  }, [userId]);
 
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,

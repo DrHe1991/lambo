@@ -148,7 +148,7 @@
   -webkit-backdrop-filter: saturate(120%) blur(8px);
 }
 [data-theme="light"] .app-shell {
-  background-color: rgba(255, 253, 250, 0.96);
+  background-color: rgba(255, 253, 250, 0.72);
 }
 
 /* bg-white stays truly white (QR codes, CTA buttons with text-black) */
