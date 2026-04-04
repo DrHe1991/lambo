@@ -14,7 +14,9 @@ export async function takePhoto(): Promise<File | null> {
 }
 
 async function takePhotoNative(): Promise<File | null> {
-  const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+  // Variable import path defeats Vite's static analysis — only runs on native
+  const pkg = '@capacitor/camera';
+  const { Camera, CameraResultType, CameraSource } = await import(/* @vite-ignore */ pkg);
   try {
     const photo = await Camera.getPhoto({
       resultType: CameraResultType.DataUrl,

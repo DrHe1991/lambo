@@ -19,6 +19,7 @@ import { ArticleRenderer } from './components/ArticleRenderer';
 import { DepositView } from './components/DepositView';
 import { WithdrawView } from './components/WithdrawView';
 import { ExchangeView } from './components/ExchangeView';
+import { BountySlider } from './components/BountySlider';
 // Trust theme removed - trust system simplified
 import { ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest, ApiDraft } from './api/client';
 import { QRCodeSVG } from 'qrcode.react';
@@ -150,8 +151,10 @@ const App: React.FC = () => {
   const [inlineCommentDraft, setInlineCommentDraft] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
+  const [pullPhase, setPullPhase] = useState<'idle' | 'pulling' | 'releasing'>('idle');
   const pullStartY = useRef(0);
   const isPulling = useRef(false);
+  const pullDistRef = useRef(0);
   const mainContentRef = useRef<HTMLElement>(null);
   const [headerHidden, setHeaderHidden] = useState(false);
   const lastScrollY = useRef(0);
@@ -170,6 +173,7 @@ const App: React.FC = () => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [isUploadingChatImage, setIsUploadingChatImage] = useState(false);
   const chatImageInputRef = useRef<HTMLInputElement>(null);
+  const chatMessagesEndRef = useRef<HTMLDivElement>(null);
   const [chatLightboxSrc, setChatLightboxSrc] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{id: string | number; content: string} | null>(null);
   const [showReactorsFor, setShowReactorsFor] = useState<{messageId: string | number; emoji: string} | null>(null);
@@ -296,6 +300,12 @@ const App: React.FC = () => {
       showDraftList, showAddMembersModal, showInviteLinks, showMemberActions,
       inlineCommentPost, publishPreview]);
 
+  const scrollChatToBottom = useCallback((smooth = false) => {
+    setTimeout(() => {
+      chatMessagesEndRef.current?.scrollIntoView(smooth ? { behavior: 'smooth' } : undefined);
+    }, 50);
+  }, []);
+
   // Scroll to a specific message and briefly highlight it
   const scrollToMessage = (msgId: number) => {
     const el = messageRefs.current[String(msgId)];
@@ -373,6 +383,7 @@ const App: React.FC = () => {
           replyTo: message.reply_to ? { id: message.reply_to.id, content: message.reply_to.content, sender_name: message.reply_to.sender_name } : null,
         }];
       });
+      scrollChatToBottom(true);
     } else {
       // User is not viewing this chat - refresh sessions to update unread count
       if (currentUser?.id) {
@@ -459,9 +470,10 @@ const App: React.FC = () => {
           replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
           reactions: m.reactions || []
         })));
+        scrollChatToBottom();
       }).catch(() => {});
     }
-  }, [currentUser, fetchSessions]);
+  }, [currentUser, fetchSessions, scrollChatToBottom]);
 
   // Connect to WebSocket for real-time chat
   useChatWebSocket({
@@ -582,11 +594,11 @@ const App: React.FC = () => {
 
   const PULL_THRESHOLD = 60;
 
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     if (!currentUser || isRefreshing) return;
     setIsRefreshing(true);
     try {
-      const minWait = new Promise(r => setTimeout(r, 2000));
+      const minWait = new Promise(r => setTimeout(r, 1200));
       if (activeTab === 'Profile') {
         await Promise.all([
           fetchCryptoBalance(currentUser.id),
@@ -599,37 +611,67 @@ const App: React.FC = () => {
     } finally {
       setIsRefreshing(false);
     }
-  };
+  }, [currentUser, isRefreshing, activeTab, fetchCryptoBalance, fetchUserBalances, fetchFeed]);
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (activeTab !== 'Feed' && activeTab !== 'Following' && activeTab !== 'Profile') return;
-    const scrollEl = mainContentRef.current;
-    if (scrollEl && scrollEl.scrollTop <= 0) {
-      pullStartY.current = e.touches[0].clientY;
-      isPulling.current = true;
-    }
-  };
+  const handleRefreshRef = useRef(handleRefresh);
+  useEffect(() => { handleRefreshRef.current = handleRefresh; });
 
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (!isPulling.current) return;
-    const scrollEl = mainContentRef.current;
-    const dy = e.touches[0].clientY - pullStartY.current;
-    if (dy > 0 && scrollEl && scrollEl.scrollTop <= 0) {
-      setPullDistance(Math.min(dy * 0.5, 100));
-    } else {
+  // Non-passive touch handlers for smooth pull-to-refresh
+  useEffect(() => {
+    const el = mainContentRef.current;
+    if (!el) return;
+
+    const PULL_TABS = ['Feed', 'Following', 'Profile'];
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (!PULL_TABS.includes(activeTab) || isRefreshing) return;
+      if (el.scrollTop <= 0) {
+        pullStartY.current = e.touches[0].clientY;
+        isPulling.current = true;
+        setPullPhase('pulling');
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!isPulling.current || isRefreshing) return;
+      const dy = e.touches[0].clientY - pullStartY.current;
+      if (dy > 0 && el.scrollTop <= 0) {
+        e.preventDefault();
+        // Rubber-band resistance: pull gets harder the further you go
+        const damped = dy * (1 - Math.min(dy, 500) / 700);
+        const clamped = Math.min(damped, 130);
+        pullDistRef.current = clamped;
+        setPullDistance(clamped);
+      } else if (dy <= 0) {
+        isPulling.current = false;
+        pullDistRef.current = 0;
+        setPullDistance(0);
+        setPullPhase('idle');
+      }
+    };
+
+    const onTouchEnd = () => {
+      if (!isPulling.current) return;
+      setPullPhase('releasing');
+      if (pullDistRef.current >= PULL_THRESHOLD) {
+        handleRefreshRef.current();
+      }
       isPulling.current = false;
+      pullDistRef.current = 0;
       setPullDistance(0);
-    }
-  };
+      setTimeout(() => setPullPhase('idle'), 320);
+    };
 
-  const handleTouchEnd = () => {
-    if (!isPulling.current) { setPullDistance(0); return; }
-    if (pullDistance >= PULL_THRESHOLD) {
-      handleRefresh();
-    }
-    isPulling.current = false;
-    setPullDistance(0);
-  };
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [activeTab, isRefreshing]);
 
   // Handle Google Sign-In (placeholder for Phase 2)
   const handleLogin = async () => {
@@ -785,10 +827,9 @@ const App: React.FC = () => {
           replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
           reactions: m.reactions || []
         })));
-        // Clear unread count after messages are loaded (backend already marked as read)
         markSessionAsRead(Number(selectedChat.id));
+        scrollChatToBottom();
       } catch (error) {
-        // Failed to load messages
         setChatMessages([]);
       } finally {
         setIsLoadingChatMessages(false);
@@ -915,8 +956,13 @@ const App: React.FC = () => {
   // Sub-Views
   const pullIndicator = !isRefreshing && pullDistance > 10 ? (
     <div
-      className="flex justify-center items-center overflow-hidden transition-all duration-200"
-      style={{ height: pullDistance }}
+      className="flex justify-center items-center overflow-hidden"
+      style={{
+        height: pullDistance,
+        transition: pullPhase === 'releasing'
+          ? 'height 0.32s cubic-bezier(0.25, 1, 0.5, 1)'
+          : 'none',
+      }}
     >
       {pullDistance >= PULL_THRESHOLD ? (
         <span className="text-xs text-stone-400">Release to refresh</span>
@@ -2542,19 +2588,10 @@ const App: React.FC = () => {
             </div>
 
             {isQuestion && (
-              <div className={`mt-3 flex items-center justify-between p-4 bg-blue-500/10 border ${accentBorder} rounded-2xl`}>
-                <span className="text-sm font-bold text-blue-400">Bounty (optional)</span>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    value={publishBounty}
-                    onChange={(e) => setPublishBounty(e.target.value)}
-                    placeholder="0"
-                    className="w-20 bg-transparent border-none outline-none text-right text-xl font-bold text-white"
-                  />
-                  <span className="text-xs font-bold uppercase text-blue-400">sat</span>
-                </div>
-              </div>
+              <BountySlider
+                value={publishBounty ? parseInt(publishBounty) : 0}
+                onChange={(v) => setPublishBounty(v > 0 ? String(v) : '')}
+              />
             )}
           </div>
         )}
@@ -2627,8 +2664,8 @@ const App: React.FC = () => {
             }));
           return [...prev, ...newMsgs];
         });
-        // Update session's last message preview
         updateSessionLastMessage(Number(sessionId), content);
+        scrollChatToBottom(true);
       } catch (error) {
           toast.error('Failed to send message');
       }
@@ -2825,6 +2862,7 @@ const App: React.FC = () => {
             }]);
           }
           fetchSessions(currentUser.id);
+          scrollChatToBottom(true);
         } catch {
           toast.error('Failed to send photo');
         } finally {
@@ -2864,6 +2902,7 @@ const App: React.FC = () => {
           }]);
         }
         fetchSessions(currentUser.id);
+        scrollChatToBottom(true);
       } catch {
         toast.error('Failed to send image');
       } finally {
@@ -3192,6 +3231,7 @@ const App: React.FC = () => {
               </div>
             );
           })}
+          <div ref={chatMessagesEndRef} />
         </div>
 
         {/* Reply preview bar */}
@@ -4234,9 +4274,7 @@ const App: React.FC = () => {
       <main
         ref={mainContentRef}
         className="flex-1 overflow-y-auto overflow-x-hidden"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
+        style={{ overscrollBehaviorY: 'contain' }}
         onScroll={handleContentScroll}
       >
         {renderHeader()}
