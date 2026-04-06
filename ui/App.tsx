@@ -125,6 +125,8 @@ const App: React.FC = () => {
   const [publishBounty, setPublishBounty] = useState('');
   const [publishPreview, setPublishPreview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [publishStage, setPublishStage] = useState('');
+  const [publishProgress, setPublishProgress] = useState(0);
   const [publishImages, setPublishImages] = useState<string[]>([]);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const publishImageInputRef = useRef<HTMLInputElement>(null);
@@ -752,6 +754,7 @@ const App: React.FC = () => {
   // Fetch drafts when opening publish overlay
   useEffect(() => {
     if (isPublishing && currentUser) {
+      setCurrentDraftId(null);
       api.getDrafts(currentUser.id).then(setDrafts).catch(() => {});
     }
   }, [isPublishing, currentUser?.id]);
@@ -2299,10 +2302,17 @@ const App: React.FC = () => {
       const hasTitle = showTitleInput && publishTitle.trim();
       
       setIsSubmitting(true);
+      setPublishStage('Analyzing');
+      setPublishProgress(15);
+
       try {
         const bounty = isQuestion && publishBounty ? parseInt(publishBounty) : undefined;
         const postType = isQuestion ? 'question' : (hasTitle ? 'article' : 'note');
-        
+
+        const progressTimer = setInterval(() => {
+          setPublishProgress(prev => Math.min(prev + 6, 90));
+        }, 400);
+
         const newPost = await api.createPost(currentUser.id, {
           content: publishContent || ' ',
           post_type: postType,
@@ -2311,12 +2321,26 @@ const App: React.FC = () => {
           bounty,
           media_urls: publishImages.length ? publishImages : undefined,
         });
+        clearInterval(progressTimer);
+
+        if (newPost.status === 'challenged') {
+          setPublishStage('');
+          setPublishProgress(0);
+          toast.error('This post violates our content policy. Please revise your content.');
+          return;
+        }
+
+        setPublishStage('Published!');
+        setPublishProgress(100);
         
-        // Delete draft if it exists
         if (currentDraftId) {
           api.deleteDraft(currentDraftId, currentUser.id).catch(() => {});
         }
+
+        await new Promise(r => setTimeout(r, 400));
         resetPublishState();
+        setPublishStage('');
+        setPublishProgress(0);
         toast.success(hasTitle ? 'Article published' : 'Posted');
         setActiveTab('Feed');
         setCurrentView('MAIN');
@@ -2330,6 +2354,8 @@ const App: React.FC = () => {
           fetchLedger(currentUser.id);
         }
       } catch (err) {
+        setPublishStage('');
+        setPublishProgress(0);
         let msg = 'Failed to publish';
         if (err instanceof Error) {
           msg = err.message;
@@ -2339,6 +2365,8 @@ const App: React.FC = () => {
           msg = String((err as { detail: unknown }).detail);
         }
         if (msg.includes('Insufficient balance')) {
+          toast.warning(msg);
+        } else if (msg.includes('Daily') || msg.includes('limit')) {
           toast.warning(msg);
         } else {
           toast.error(msg);
@@ -2400,18 +2428,32 @@ const App: React.FC = () => {
               </button>
             )}
 
-            <button
-              data-testid="publish-button"
-              onClick={handlePublish}
-              disabled={!canPublish() || isSubmitting}
-              className={`px-5 py-2 rounded-xl text-sm font-bold uppercase tracking-tight transition-all duration-200 ${
-                canPublish()
-                  ? `${accentBg} text-white shadow-lg ${accentGlow} active:scale-95`
-                : 'bg-stone-800 text-stone-600'
-            }`}
-          >
-            {isSubmitting ? '...' : 'Post'}
-          </button>
+            {isSubmitting ? (
+              <div className="flex items-center gap-3">
+                <span className={`text-xs font-medium ${isQuestion ? 'text-blue-400' : 'text-orange-400'}`}>
+                  {publishStage}
+                </span>
+                <div className="w-20 h-1.5 bg-stone-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ease-out ${isQuestion ? 'bg-blue-500' : 'bg-orange-500'}`}
+                    style={{ width: `${publishProgress}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <button
+                data-testid="publish-button"
+                onClick={handlePublish}
+                disabled={!canPublish()}
+                className={`px-5 py-2 rounded-xl text-sm font-bold uppercase tracking-tight transition-all duration-200 ${
+                  canPublish()
+                    ? `${accentBg} text-white shadow-lg ${accentGlow} active:scale-95`
+                  : 'bg-stone-800 text-stone-600'
+              }`}
+              >
+                Post
+              </button>
+            )}
           </div>
         </div>
 
