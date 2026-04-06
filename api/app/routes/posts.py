@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import logging
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Query
 from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -22,9 +24,47 @@ from app.services.dynamic_like_service import (
 from app.services.rate_limit_service import (
     check_post_rate_limit, check_comment_rate_limit,
 )
+from app.services.ai_service import ai_service, AIServiceError
 from app.models.reward import InteractionLog, InteractionType
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def _run_post_ai(post_id: int, title: str | None, content: str, post_type: str):
+    """Background task: run AI moderation + quality scoring on a new post."""
+    from app.db.database import async_session
+    from app.models.post import Post, PostStatus
+
+    async with async_session() as db:
+        try:
+            post = await db.get(Post, post_id)
+            if not post:
+                return
+
+            moderation = await ai_service.moderate_content(
+                content, db=db, ref_id=post_id,
+            )
+            if moderation.severity == 'high':
+                post.status = PostStatus.CHALLENGED.value
+                logger.info('Post %d auto-moderated: %s', post_id, moderation.flags)
+
+            score = await ai_service.score_content(
+                title, content, post_type, db=db, ref_id=post_id,
+            )
+            post.quality_score = score.quality_score
+
+            if post_type == 'article' and len(content) > 300:
+                summary = await ai_service.summarize_content(
+                    content, db=db, ref_id=post_id,
+                )
+                post.ai_summary = summary
+
+            await db.commit()
+        except AIServiceError:
+            logger.warning('AI processing failed for post %d, skipping', post_id)
+        except Exception:
+            logger.exception('Unexpected error in AI processing for post %d', post_id)
 
 
 async def _log_interaction(
@@ -77,6 +117,8 @@ def build_post_response(
         cost_paid=post.cost_paid,
         media_urls=post.media_urls or [],
         is_ai=post.is_ai,
+        quality_score=post.quality_score,
+        ai_summary=post.ai_summary,
         created_at=post.created_at,
         is_liked=is_liked,
         like_status=like_status,
@@ -161,6 +203,7 @@ async def _check_comment_liked(db: AsyncSession, comment_ids: list[int], user_id
 @router.post('', response_model=PostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(
     post_data: PostCreate,
+    background_tasks: BackgroundTasks,
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
@@ -182,7 +225,6 @@ async def create_post(
     # Determine content format
     content_format = post_data.content_format if is_article else ContentFormat.PLAIN.value
 
-    # In minimal system, posting is free
     post = Post(
         author_id=author_id,
         title=post_data.title if is_article else None,
@@ -191,11 +233,18 @@ async def create_post(
         post_type=post_data.post_type,
         bounty=post_data.bounty,
         media_urls=post_data.media_urls,
-        cost_paid=0,  # Free in minimal system
+        cost_paid=0,
     )
     db.add(post)
     await db.flush()
     await db.refresh(post, ['author'])
+
+    if ai_service.api_key:
+        background_tasks.add_task(
+            _run_post_ai,
+            post.id, post.title, post.content, post.post_type,
+        )
+
     return build_post_response(post)
 
 

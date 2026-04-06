@@ -38,6 +38,8 @@ class PostResponse(BaseModel):
     cost_paid: int = 0
     media_urls: list[str] = []
     is_ai: bool
+    quality_score: int | None = None
+    ai_summary: str | None = None
     created_at: datetime
     is_liked: bool = False
     like_status: str | None = None

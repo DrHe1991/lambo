@@ -63,8 +63,12 @@ class Post(Base):
     is_ai: Mapped[bool] = mapped_column(default=False)
 
     # Boost (paid promotion)
-    boost_amount: Mapped[int] = mapped_column(BigInteger, default=0)  # Total sat spent on boost
-    boost_remaining: Mapped[float] = mapped_column(Float, default=0.0)  # Remaining boost points
+    boost_amount: Mapped[int] = mapped_column(BigInteger, default=0)
+    boost_remaining: Mapped[float] = mapped_column(Float, default=0.0)
+
+    # AI-assessed quality and summary
+    quality_score: Mapped[int | None] = mapped_column(Integer, default=None)
+    ai_summary: Mapped[str | None] = mapped_column(Text, default=None)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
