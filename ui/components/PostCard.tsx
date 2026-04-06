@@ -1,6 +1,6 @@
 import React from 'react';
 import { Post } from '../types';
-import { Heart, MessageSquare, ShieldAlert, Cpu, TrendingUp } from 'lucide-react';
+import { Heart, MessageSquare, Cpu, TrendingUp, MoreHorizontal, Trash2, Flag } from 'lucide-react';
 import { Badge } from './ui/Badge';
 import ImageGrid from './ImageGrid';
 
@@ -11,8 +11,10 @@ interface PostCardProps {
   onChallenge?: (post: Post) => void;
   onLike?: (post: Post) => void;
   onComment?: (post: Post) => void;
+  onDelete?: (post: Post) => void;
   isLiked?: boolean;
   likeCost?: number;
+  isOwnPost?: boolean;
 }
 
 function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | null): string {
@@ -25,9 +27,10 @@ function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | nu
   return 'text-orange-500';
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, isLiked, likeCost }) => {
+export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, onDelete, isLiked, likeCost, isOwnPost }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [isShaking, setIsShaking] = React.useState(false);
+  const [showMenu, setShowMenu] = React.useState(false);
   const contentText = post.content.trim();
   const articlePreview = contentText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   const shouldClampContent = post.type !== 'Article' && (
@@ -38,7 +41,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
     <div
       data-testid={`post-card-${post.id}`}
       className="border border-stone-800 rounded-2xl p-3 mb-2.5 active:scale-[0.98] transition-all duration-100 bg-stone-900 post-card"
-      onClick={() => onClick?.(post)}
+      onClick={() => { if (showMenu) { setShowMenu(false); return; } onClick?.(post); }}
     >
       <div className="flex items-start gap-3 mb-2.5">
         <button
@@ -75,6 +78,32 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
             )}
           </div>
           <span className="text-stone-500 text-xs">{post.author.handle} · {post.timestamp}</span>
+        </div>
+        <div className="relative shrink-0">
+          <button
+            className="p-1.5 -mr-1.5 -mt-0.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-500"
+            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+          >
+            <MoreHorizontal size={18} />
+          </button>
+          {showMenu && (
+            <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
+              {isOwnPost && onDelete && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDelete(post); }}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
+                >
+                  <Trash2 size={16} /> Delete
+                </button>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowMenu(false); onChallenge?.(post); }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
+              >
+                <Flag size={16} /> Report
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -165,14 +194,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
             <span className="text-xs font-medium">{post.comments}</span>
           </button>
         </div>
-        <button
-          data-testid={`report-button-${post.id}`}
-          className="text-stone-600 hover:text-red-500 transition-colors p-1"
-          onClick={(e) => { e.stopPropagation(); onChallenge?.(post); }}
-          aria-label="Report post"
-        >
-          <ShieldAlert size={16} />
-        </button>
+        <div />
       </div>
     </div>
   );

@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
-from app.models.post import Post, PostLike, Comment, CommentLike, InteractionStatus
+from app.models.post import Post, PostLike, Comment, CommentLike, InteractionStatus, PostStatus
 from app.models.ledger import Ledger, ActionType, RefType
 from app.models.revenue import PlatformRevenue
 
@@ -794,6 +794,132 @@ class DynamicLikeService:
             await self._add_platform_revenue(remainder)
 
         return earnings
+
+    # ========== Post Deletion with Refunds ==========
+
+    async def delete_post_with_refunds(self, post_id: int, author_id: int) -> dict:
+        """Delete a post and handle all financial cleanup.
+
+        - PENDING likes: full refund to likers
+        - SETTLED likes: early likers keep earnings, platform keeps cut
+        - Author earnings from this post: clawed back
+        - PENDING comment likes: full refund to likers
+        - Bounty: refunded if post is a question
+        """
+        post = await self.db.get(Post, post_id)
+        if not post:
+            raise ValueError('Post not found')
+        if post.author_id != author_id:
+            raise ValueError('Not authorized')
+        if post.status == PostStatus.DELETED.value:
+            raise ValueError('Post already deleted')
+
+        refund_summary: dict = {
+            'pending_likes_refunded': 0,
+            'settled_likes': 0,
+            'author_clawback': 0,
+            'comment_likes_refunded': 0,
+            'bounty_refunded': 0,
+            'total_refunded_to_likers': 0,
+        }
+
+        # 1. Handle post likes
+        result = await self.db.execute(
+            select(PostLike).where(
+                PostLike.post_id == post_id,
+                PostLike.status != InteractionStatus.CANCELLED.value,
+            )
+        )
+        post_likes = list(result.scalars().all())
+
+        for like in post_likes:
+            if like.status == InteractionStatus.PENDING.value:
+                liker = await self.db.get(User, like.user_id)
+                if liker:
+                    liker.available_balance += like.cost_paid
+                    await self._create_ledger(
+                        like.user_id, like.cost_paid, ActionType.REFUND_CANCEL,
+                        RefType.POST, post_id,
+                        f'post deleted — full refund of {like.cost_paid} sat',
+                    )
+                like.status = InteractionStatus.CANCELLED.value
+                refund_summary['pending_likes_refunded'] += 1
+                refund_summary['total_refunded_to_likers'] += like.cost_paid
+            else:
+                refund_summary['settled_likes'] += 1
+
+        # 2. Claw back author earnings from this post's settled likes
+        from app.models.ledger import Ledger
+        earn_result = await self.db.execute(
+            select(Ledger).where(
+                Ledger.user_id == author_id,
+                Ledger.ref_type == RefType.POST.value,
+                Ledger.ref_id == post_id,
+                Ledger.action_type == ActionType.EARN_LIKE.value,
+                Ledger.amount > 0,
+            )
+        )
+        author_earnings = list(earn_result.scalars().all())
+        clawback_total = sum(e.amount for e in author_earnings)
+
+        if clawback_total > 0:
+            author = await self.db.get(User, author_id)
+            if author:
+                actual_clawback = min(clawback_total, author.available_balance)
+                if actual_clawback > 0:
+                    author.available_balance -= actual_clawback
+                    await self._create_ledger(
+                        author_id, -actual_clawback, ActionType.FINE,
+                        RefType.POST, post_id,
+                        f'earnings clawback — post deleted',
+                    )
+                    refund_summary['author_clawback'] = actual_clawback
+
+        # 3. Handle comment likes (refund pending ones)
+        comments_result = await self.db.execute(
+            select(Comment).where(Comment.post_id == post_id)
+        )
+        post_comments = list(comments_result.scalars().all())
+        comment_ids = [c.id for c in post_comments]
+
+        if comment_ids:
+            cl_result = await self.db.execute(
+                select(CommentLike).where(
+                    CommentLike.comment_id.in_(comment_ids),
+                    CommentLike.status == InteractionStatus.PENDING.value,
+                )
+            )
+            pending_comment_likes = list(cl_result.scalars().all())
+
+            for cl in pending_comment_likes:
+                liker = await self.db.get(User, cl.user_id)
+                if liker:
+                    liker.available_balance += cl.cost_paid
+                    await self._create_ledger(
+                        cl.user_id, cl.cost_paid, ActionType.REFUND_CANCEL,
+                        RefType.COMMENT, cl.comment_id,
+                        f'post deleted — comment like refund',
+                    )
+                cl.status = InteractionStatus.CANCELLED.value
+                refund_summary['comment_likes_refunded'] += 1
+                refund_summary['total_refunded_to_likers'] += cl.cost_paid
+
+        # 4. Handle bounty refund (question with unaccepted bounty)
+        if post.bounty and post.bounty > 0:
+            author = await self.db.get(User, author_id)
+            if author:
+                author.available_balance += post.bounty
+                await self._create_ledger(
+                    author_id, post.bounty, ActionType.REFUND_CANCEL,
+                    RefType.POST, post_id,
+                    f'bounty refund — question deleted',
+                )
+                refund_summary['bounty_refunded'] = post.bounty
+
+        # 5. Soft-delete the post
+        post.status = PostStatus.DELETED.value
+
+        return refund_summary
 
     async def get_comment_like_status(self, user_id: int, comment_id: int) -> dict | None:
         """Get the like status for a user's like on a comment.

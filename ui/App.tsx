@@ -12,6 +12,8 @@ import { PostCard } from './components/PostCard';
 import { LoginPage } from './components/LoginPage';
 // ChallengeModal removed in minimal system
 import { LikeStakeModal } from './components/LikeStakeModal';
+import { Modal } from './components/ui/Modal';
+import { Button } from './components/ui/Button';
 // BoostModal removed in minimal system
 import { ToastContainer, toast } from './components/Toast';
 import { ArticleEditor } from './components/ArticleEditor';
@@ -80,6 +82,7 @@ const App: React.FC = () => {
     toggleLikePost,
     toggleLikeComment,
     deleteComment: deleteApiComment,
+    deletePost: deleteApiPost,
   } = usePostStore();
 
   const {
@@ -133,6 +136,8 @@ const App: React.FC = () => {
   const [drafts, setDrafts] = useState<ApiDraft[]>([]);
   const [currentDraftId, setCurrentDraftId] = useState<number | null>(null);
   const [showDraftList, setShowDraftList] = useState(false);
+  const [showPostMenu, setShowPostMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   // Challenge modal removed in minimal system
   const [showLikeModal, setShowLikeModal] = useState(false);
   const [likeTargetPost, setLikeTargetPost] = useState<Post | null>(null);
@@ -548,6 +553,36 @@ const App: React.FC = () => {
   };
 
   // Handle like action (toggle)
+  const handleDeletePostRequest = (post: Post) => {
+    setSelectedPost(post);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeletePost = async () => {
+    if (!currentUser || !selectedPost) return;
+    setShowDeleteConfirm(false);
+    setShowPostMenu(false);
+    const wasInDetail = currentView === 'POST_DETAIL' || currentView === 'QA_DETAIL';
+    try {
+      const result = await deleteApiPost(Number(selectedPost.id), currentUser.id);
+      if (wasInDetail) {
+        setCurrentView('MAIN');
+        usePostStore.getState().clearCurrentPost();
+      }
+      setSelectedPost(null);
+      fetchBalance(currentUser.id);
+      const parts: string[] = ['Post deleted'];
+      if (result.total_refunded_to_likers > 0) parts.push(`${result.total_refunded_to_likers} sat refunded to likers`);
+      if (result.author_clawback > 0) parts.push(`${result.author_clawback} sat clawed back`);
+      if (result.bounty_refunded > 0) parts.push(`${result.bounty_refunded} sat bounty refunded`);
+      toast.success(parts.join('. '));
+      if (activeTab === 'Feed') fetchFeed(currentUser.id);
+      else fetchPosts({ user_id: currentUser.id });
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to delete post');
+    }
+  };
+
   const handleLikeToggle = async (post: Post) => {
     if (!currentUser) return;
     const isLiked = likedPosts.has(String(post.id)) || post.isLiked;
@@ -998,7 +1033,9 @@ const App: React.FC = () => {
             onChallenge={handleChallenge}
             onLike={handleLikeRequest}
             onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
+            onDelete={handleDeletePostRequest}
             isLiked={likedPosts.has(String(post.id)) || post.isLiked}
+            isOwnPost={currentUser ? Number(post.author.id) === currentUser.id : false}
           />
         ))}
 
@@ -1042,7 +1079,9 @@ const App: React.FC = () => {
               onChallenge={handleChallenge}
               onLike={handleLikeRequest}
               onComment={(p) => { setInlineCommentPost(p); setInlineCommentDraft(''); }}
+              onDelete={handleDeletePostRequest}
               isLiked={likedPosts.has(String(post.id)) || post.isLiked}
+              isOwnPost={currentUser ? Number(post.author.id) === currentUser.id : false}
             />
           ))}
           {feedLoading && !isRefreshing && (
@@ -1792,12 +1831,36 @@ const App: React.FC = () => {
     const topLevel = apiComments.filter(c => !c.parent_id);
     const replies = apiComments.filter(c => c.parent_id);
     const isArticle = selectedPost.type === 'Article';
+    const isOwnPost = currentUser && Number(selectedPost.author.id) === currentUser.id;
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
-          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
-          <button className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><MoreHorizontal size={20} /></button>
+          <button onClick={() => { setCurrentView('MAIN'); setShowPostMenu(false); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <div className="relative">
+            <button onClick={() => setShowPostMenu(!showPostMenu)} className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-400"><MoreHorizontal size={20} /></button>
+            {showPostMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowPostMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
+                  {isOwnPost && (
+                    <button
+                      onClick={() => { setShowPostMenu(false); setShowDeleteConfirm(true); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
+                    >
+                      <Trash2 size={16} /> Delete
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowPostMenu(false)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
+                  >
+                    <ShieldCheck size={16} /> Report
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="p-4 pb-28">
           {isArticle ? (
@@ -1893,12 +1956,36 @@ const App: React.FC = () => {
     if (!selectedPost) return null;
     const answers = apiComments.filter(c => !c.parent_id);
     const answerReplies = apiComments.filter(c => c.parent_id);
+    const isOwnQuestion = currentUser && Number(selectedPost.author.id) === currentUser.id;
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
-          <button onClick={() => { setCurrentView('MAIN'); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
-          <button className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><MoreHorizontal size={20} /></button>
+          <button onClick={() => { setCurrentView('MAIN'); setShowPostMenu(false); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <div className="relative">
+            <button onClick={() => setShowPostMenu(!showPostMenu)} className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-400"><MoreHorizontal size={20} /></button>
+            {showPostMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowPostMenu(false)} />
+                <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
+                  {isOwnQuestion && (
+                    <button
+                      onClick={() => { setShowPostMenu(false); setShowDeleteConfirm(true); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
+                    >
+                      <Trash2 size={16} /> Delete
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowPostMenu(false)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
+                  >
+                    <ShieldCheck size={16} /> Report
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <div className="p-4 bg-orange-500/5 border-b border-orange-500/10 mb-4">
            <div className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-3 uppercase tracking-tight">Question</div>
@@ -4373,6 +4460,35 @@ const App: React.FC = () => {
 
       {/* Boost Modal removed in minimal system */}
       
+      <Modal isOpen={showDeleteConfirm && !!selectedPost} onClose={() => setShowDeleteConfirm(false)} size="sm">
+        <div className="flex justify-center mb-4">
+          <div className="w-14 h-14 bg-orange-500/10 border border-orange-500/30 rounded-full flex items-center justify-center">
+            <Trash2 className="w-7 h-7 text-orange-500" />
+          </div>
+        </div>
+        <h3 className="text-lg font-bold text-center text-white mb-2">
+          Delete this {selectedPost?.type === 'Question' ? 'question' : 'post'}?
+        </h3>
+        <p className="text-stone-500 text-sm text-center mb-6">
+          {selectedPost?.bounty
+            ? `Your ${selectedPost.bounty} sat bounty will be refunded. `
+            : ''}
+          {selectedPost && selectedPost.likes > 0
+            ? 'Pending likes will be refunded. Earnings will be clawed back. '
+            : ''}
+          This cannot be undone.
+        </p>
+        <div className="flex gap-3">
+          <Button variant="primary" size="lg" fullWidth onClick={handleDeletePost}>
+            <Trash2 size={16} />
+            Delete
+          </Button>
+          <Button variant="secondary" size="lg" fullWidth onClick={() => setShowDeleteConfirm(false)}>
+            Cancel
+          </Button>
+        </div>
+      </Modal>
+
       {/* Modals */}
       {renderPublishOverlay()}
       {renderBottomNav()}

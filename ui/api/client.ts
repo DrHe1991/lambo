@@ -585,6 +585,20 @@ export const api = {
       { method: 'DELETE', params: { user_id: userId } },
     ),
 
+  deletePost: (postId: number, userId: number) =>
+    apiRequest<{
+      status: string;
+      pending_likes_refunded: number;
+      settled_likes: number;
+      author_clawback: number;
+      comment_likes_refunded: number;
+      bounty_refunded: number;
+      total_refunded_to_likers: number;
+    }>(
+      `/api/posts/${postId}`,
+      { method: 'DELETE', params: { author_id: userId } },
+    ),
+
   // Chat
   createChatSession: (creatorId: number, data: { member_ids: number[]; name?: string; is_group?: boolean }) =>
     apiRequest<ApiChatSession>('/api/chat/sessions', {

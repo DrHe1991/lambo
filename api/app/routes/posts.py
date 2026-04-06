@@ -451,15 +451,22 @@ async def delete_post(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Soft delete a post (only by author)."""
+    """Delete a post with financial cleanup (refunds, clawbacks)."""
     post = await db.get(Post, post_id)
     if not post:
         raise HTTPException(status_code=404, detail='Post not found')
     if post.author_id != author_id:
         raise HTTPException(status_code=403, detail='Not authorized')
+    if post.status == PostStatus.DELETED.value:
+        raise HTTPException(status_code=400, detail='Post already deleted')
 
-    post.status = PostStatus.DELETED.value
-    return {'status': 'deleted'}
+    service = DynamicLikeService(db)
+    try:
+        refund_summary = await service.delete_post_with_refunds(post_id, author_id)
+        await db.commit()
+        return {'status': 'deleted', **refund_summary}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ── Post Likes (Dynamic Pricing + Early Supporter Revenue Sharing) ────────────
