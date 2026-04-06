@@ -15,6 +15,7 @@ interface PostCardProps {
   isLiked?: boolean;
   likeCost?: number;
   isOwnPost?: boolean;
+  hideMenu?: boolean;
 }
 
 function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | null): string {
@@ -27,7 +28,7 @@ function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | nu
   return 'text-orange-500';
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, onDelete, isLiked, likeCost, isOwnPost }) => {
+export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, onDelete, isLiked, likeCost, isOwnPost, hideMenu }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [isShaking, setIsShaking] = React.useState(false);
   const [showMenu, setShowMenu] = React.useState(false);
@@ -79,32 +80,37 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
           </div>
           <span className="text-stone-500 text-xs">{post.author.handle} · {post.timestamp}</span>
         </div>
-        <div className="relative shrink-0">
-          <button
-            className="p-1.5 -mr-1.5 -mt-0.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-500"
-            onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
-          >
-            <MoreHorizontal size={18} />
-          </button>
-          {showMenu && (
-            <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
-              {isOwnPost && onDelete && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDelete(post); }}
-                  className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
-                >
-                  <Trash2 size={16} /> Delete
-                </button>
-              )}
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowMenu(false); onChallenge?.(post); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
-              >
-                <Flag size={16} /> Report
-              </button>
-            </div>
-          )}
-        </div>
+        {!hideMenu && (
+          <div className="relative shrink-0">
+            <button
+              className="p-1.5 -mr-1.5 -mt-0.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-500"
+              onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
+            >
+              <MoreHorizontal size={18} />
+            </button>
+            {showMenu && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }} />
+                <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
+                  {isOwnPost && onDelete && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDelete(post); }}
+                      className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
+                    >
+                      <Trash2 size={16} /> Delete
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setShowMenu(false); onChallenge?.(post); }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
+                  >
+                    <Flag size={16} /> Report
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {post.type === 'Question' && (

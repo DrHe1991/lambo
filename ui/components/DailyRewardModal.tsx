@@ -80,7 +80,7 @@ export const DailyRewardModal: React.FC<DailyRewardModalProps> = ({
       <div className={`bg-stone-900/80 border border-orange-500/30 rounded-2xl p-6 mb-6 transition-all duration-500 ${showAmount ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
         <div className="flex items-center justify-center gap-2 mb-2">
           <Zap className="w-6 h-6 text-orange-500 fill-orange-500" />
-          <span className="text-4xl font-bold text-orange-500 font-display tabular-nums">
+          <span className="text-4xl font-bold text-orange-500 tabular-nums">
             +{counted.toLocaleString()}
           </span>
           <span className="text-lg font-bold text-orange-400">sat</span>

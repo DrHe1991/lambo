@@ -1835,32 +1835,8 @@ const App: React.FC = () => {
 
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
-        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
+        <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center top-nav">
           <button onClick={() => { setCurrentView('MAIN'); setShowPostMenu(false); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
-          <div className="relative">
-            <button onClick={() => setShowPostMenu(!showPostMenu)} className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-400"><MoreHorizontal size={20} /></button>
-            {showPostMenu && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setShowPostMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
-                  {isOwnPost && (
-                    <button
-                      onClick={() => { setShowPostMenu(false); setShowDeleteConfirm(true); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
-                    >
-                      <Trash2 size={16} /> Delete
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowPostMenu(false)}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
-                  >
-                    <ShieldCheck size={16} /> Report
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
         </div>
         <div className="p-4 pb-28">
           {isArticle ? (
@@ -1910,7 +1886,7 @@ const App: React.FC = () => {
               </div>
             </div>
           ) : (
-            <PostCard post={selectedPost} />
+            <PostCard post={selectedPost} isOwnPost={isOwnPost || false} onDelete={handleDeletePostRequest} />
           )}
 
 
@@ -1962,33 +1938,35 @@ const App: React.FC = () => {
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
           <button onClick={() => { setCurrentView('MAIN'); setShowPostMenu(false); usePostStore.getState().clearCurrentPost(); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
-          <div className="relative">
-            <button onClick={() => setShowPostMenu(!showPostMenu)} className="p-2.5 -mr-2.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-400"><MoreHorizontal size={20} /></button>
-            {showPostMenu && (
-              <>
-                <div className="fixed inset-0 z-30" onClick={() => setShowPostMenu(false)} />
-                <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
-                  {isOwnQuestion && (
-                    <button
-                      onClick={() => { setShowPostMenu(false); setShowDeleteConfirm(true); }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
-                    >
-                      <Trash2 size={16} /> Delete
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowPostMenu(false)}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
-                  >
-                    <ShieldCheck size={16} /> Report
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
         </div>
         <div className="p-4 bg-orange-500/5 border-b border-orange-500/10 mb-4">
-           <div className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full inline-block mb-3 uppercase tracking-tight">Question</div>
+           <div className="flex items-center justify-between mb-3">
+             <div className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full inline-block uppercase tracking-tight">Question</div>
+             <div className="relative">
+               <button onClick={() => setShowPostMenu(!showPostMenu)} className="p-1.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-500"><MoreHorizontal size={18} /></button>
+               {showPostMenu && (
+                 <>
+                   <div className="fixed inset-0 z-30" onClick={() => setShowPostMenu(false)} />
+                   <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
+                     {isOwnQuestion && (
+                       <button
+                         onClick={() => { setShowPostMenu(false); handleDeletePostRequest(selectedPost); }}
+                         className="w-full flex items-center gap-3 px-4 py-3 text-orange-400 hover:bg-stone-800 transition-colors text-sm font-bold"
+                       >
+                         <Trash2 size={16} /> Delete
+                       </button>
+                     )}
+                     <button
+                       onClick={() => setShowPostMenu(false)}
+                       className="w-full flex items-center gap-3 px-4 py-3 text-stone-300 hover:bg-stone-800 transition-colors text-sm"
+                     >
+                       <ShieldCheck size={16} /> Report
+                     </button>
+                   </div>
+                 </>
+               )}
+             </div>
+           </div>
            <h2 className="text-xl font-bold mb-4">{selectedPost.content}</h2>
            <div className="flex items-center justify-between">
              <div className="flex items-center gap-2">
@@ -2144,7 +2122,7 @@ const App: React.FC = () => {
           <div className="pt-2 pb-1">
             <span className="text-[11px] font-bold text-stone-600 uppercase tracking-widest">Balance</span>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-4xl font-bold text-stone-100 tabular-nums font-display">{(satBalance || availableBalance).toLocaleString()}</span>
+              <span className="text-4xl font-bold text-stone-100 tabular-nums">{(satBalance || availableBalance).toLocaleString()}</span>
               <span className="text-sm font-bold text-orange-500">sat</span>
             </div>
             <div className="flex items-center gap-4 mt-3 text-xs tabular-nums">
