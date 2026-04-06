@@ -24,8 +24,13 @@ class Settings(BaseSettings):
 
     # AI (Bank of AI — OpenAI-compatible LLM gateway)
     bankofai_api_key: str = ''
-    bankofai_model: str = 'gpt-5.2'
+    bankofai_model: str = 'gpt-5.4-mini'
     bankofai_base_url: str = 'https://api.bankofai.io/v1'
+    ai_enabled: bool = True
+
+    # Free post limits per day (early growth promotion, adjust via env vars)
+    free_posts_per_day: int = 3
+    free_articles_per_day: int = 1
 
     # Platform ops wallet (pay service wallet ID for operational expenses like AI)
     platform_wallet_id: int = 0

@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, desc, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -24,47 +24,12 @@ from app.services.dynamic_like_service import (
 from app.services.rate_limit_service import (
     check_post_rate_limit, check_comment_rate_limit,
 )
+from app.config import settings
 from app.services.ai_service import ai_service, AIServiceError
 from app.models.reward import InteractionLog, InteractionType
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-async def _run_post_ai(post_id: int, title: str | None, content: str, post_type: str):
-    """Background task: run AI moderation + quality scoring on a new post."""
-    from app.db.database import async_session
-    from app.models.post import Post, PostStatus
-
-    async with async_session() as db:
-        try:
-            post = await db.get(Post, post_id)
-            if not post:
-                return
-
-            moderation = await ai_service.moderate_content(
-                content, db=db, ref_id=post_id,
-            )
-            if moderation.severity == 'high':
-                post.status = PostStatus.CHALLENGED.value
-                logger.info('Post %d auto-moderated: %s', post_id, moderation.flags)
-
-            score = await ai_service.score_content(
-                title, content, post_type, db=db, ref_id=post_id,
-            )
-            post.quality_score = score.quality_score
-
-            if post_type == 'article' and len(content) > 300:
-                summary = await ai_service.summarize_content(
-                    content, db=db, ref_id=post_id,
-                )
-                post.ai_summary = summary
-
-            await db.commit()
-        except AIServiceError:
-            logger.warning('AI processing failed for post %d, skipping', post_id)
-        except Exception:
-            logger.exception('Unexpected error in AI processing for post %d', post_id)
 
 
 async def _log_interaction(
@@ -117,7 +82,8 @@ def build_post_response(
         cost_paid=post.cost_paid,
         media_urls=post.media_urls or [],
         is_ai=post.is_ai,
-        quality_score=post.quality_score,
+        quality=post.quality,
+        tags=post.tags,
         ai_summary=post.ai_summary,
         created_at=post.created_at,
         is_liked=is_liked,
@@ -200,14 +166,28 @@ async def _check_comment_liked(db: AsyncSession, comment_ids: list[int], user_id
 
 # ── Posts ────────────────────────────────────────────────────────────────────
 
+async def _count_posts_today(db: AsyncSession, author_id: int, post_type: str) -> int:
+    """Count posts created today by this author (for daily quota)."""
+    from datetime import datetime, time
+    today_start = datetime.combine(datetime.utcnow().date(), time.min)
+    result = await db.execute(
+        select(func.count(Post.id)).where(
+            Post.author_id == author_id,
+            Post.post_type == post_type,
+            Post.created_at >= today_start,
+            Post.status != PostStatus.DELETED.value,
+        )
+    )
+    return result.scalar() or 0
+
+
 @router.post('', response_model=PostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(
     post_data: PostCreate,
-    background_tasks: BackgroundTasks,
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new post. Free but rate-limited (3/hour, 10/day)."""
+    """Create a new post. Free with daily quota (configurable)."""
     author = await db.get(User, author_id)
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
@@ -221,6 +201,22 @@ async def create_post(
     is_article = post_data.post_type == PostType.ARTICLE.value
     if is_article and not post_data.title:
         raise HTTPException(status_code=400, detail='Articles require a title')
+
+    # Daily quota check
+    if is_article:
+        count = await _count_posts_today(db, author_id, PostType.ARTICLE.value)
+        if count >= settings.free_articles_per_day:
+            raise HTTPException(
+                status_code=429,
+                detail=f'Daily article limit reached ({settings.free_articles_per_day}/day)',
+            )
+    else:
+        count = await _count_posts_today(db, author_id, post_data.post_type)
+        if count >= settings.free_posts_per_day:
+            raise HTTPException(
+                status_code=429,
+                detail=f'Daily post limit reached ({settings.free_posts_per_day}/day)',
+            )
 
     # Determine content format
     content_format = post_data.content_format if is_article else ContentFormat.PLAIN.value
@@ -239,11 +235,32 @@ async def create_post(
     await db.flush()
     await db.refresh(post, ['author'])
 
-    if ai_service.api_key:
-        background_tasks.add_task(
-            _run_post_ai,
-            post.id, post.title, post.content, post.post_type,
-        )
+    # Run AI screening inline so violations are caught before returning
+    if settings.ai_enabled and ai_service.api_key:
+        try:
+            result = await ai_service.evaluate_post(
+                post.content, title=post.title, post_type=post.post_type,
+                db=db, ref_id=post.id,
+            )
+            post.quality = result.quality
+            post.tags = result.tags
+            if result.summary:
+                post.ai_summary = result.summary
+            if result.severity == 'high':
+                post.status = PostStatus.CHALLENGED.value
+                logger.info('Post %d auto-moderated: %s', post.id, result.flags)
+            await db.flush()
+        except AIServiceError as e:
+            if 'content_policy_violation' in e.message:
+                post.status = PostStatus.CHALLENGED.value
+                post.quality = 'low'
+                post.ai_summary = 'Blocked by content policy'
+                await db.flush()
+                logger.info('Post %d auto-challenged: content policy', post.id)
+            else:
+                logger.warning('AI screening failed for post %d, allowing', post.id)
+        except Exception:
+            logger.exception('AI screening error for post %d, allowing', post.id)
 
     return build_post_response(post)
 
@@ -296,12 +313,19 @@ async def get_posts(
     return [build_post_response(p, like_info=like_info_map.get(p.id)) for p in posts]
 
 
-def _feed_score(post: Post, following_ids: set[int]) -> float:
-    """Composite feed score aligned with simulator exposure_weight.
+# AI quality is a trash filter, not a ranking booster — engagement is the real signal
+AI_QUALITY_MULT = {'low': 0.3, 'medium': 1.0, 'good': 1.0, 'great': 1.0}
 
-    score = time_decay * quality_signal * author_trust_mult * boost_mult * following_mult
-    """
-    import math, time
+
+def _feed_score(
+    post: Post,
+    following_ids: set[int],
+    user_interests: dict[str, int] | None = None,
+) -> float:
+    """Composite feed score: time_decay * engagement * following * interest * ai_filter + noise."""
+    import math
+    import random
+    import time
 
     now = time.time()
     age_days = max(0.01, (now - post.created_at.timestamp()) / 86400)
@@ -309,21 +333,33 @@ def _feed_score(post: Post, following_ids: set[int]) -> float:
     likes = post.likes_count or 0
     comments = post.comments_count or 0
 
-    # 1. Time decay – exponential with dynamic half-life (base 3d, +engagement bonus)
+    # 1. Time decay
     half_life = 3.0 + min(4.0, math.log(likes + 1))
     time_decay = math.exp(-age_days * math.log(2) / half_life)
 
-    # 2. Quality signal – engagement density + comment ratio
+    # 2. Engagement signal (likes + comments = the real quality measure)
     like_density = likes / max(1.0, age_days)
     engagement = min(1.0, like_density / 5.0)
     comment_ratio = min(1.0, comments / max(1, likes))
-    quality = engagement * 0.7 + comment_ratio * 0.3 if likes else 0.3
+    engagement_score = engagement * 0.7 + comment_ratio * 0.3 if likes else 0.3
 
-    # 3. Following multiplier (followed authors get priority)
+    # 3. AI trash filter (only penalizes "low", neutral for everything else)
+    q_mult = AI_QUALITY_MULT.get(post.quality or 'medium', 1.0)
+
+    # 4. Following multiplier
     following_mult = 2.5 if post.author_id in following_ids else 1.0
 
-    # Simplified: no boost, no trust multiplier
-    return time_decay * quality * following_mult
+    # 5. Interest matching (overlap between post tags and user interests)
+    interest_mult = 1.0
+    post_tags = post.tags or []
+    if user_interests and post_tags:
+        overlap = sum(user_interests.get(t, 0) for t in post_tags)
+        interest_mult = 1.0 + min(1.0, overlap / 20.0)
+
+    # 6. Randomness (±15%) to prevent filter bubbles
+    noise = 1.0 + random.uniform(-0.15, 0.15)
+
+    return time_decay * engagement_score * q_mult * following_mult * interest_mult * noise
 
 
 @router.get('/feed', response_model=list[PostResponse])
@@ -335,6 +371,9 @@ async def get_feed(
 ):
     """Mixed feed: following posts + global posts, ranked by composite score."""
     from app.models.user import Follow
+
+    user = await db.get(User, user_id)
+    user_interests = user.interest_tags if user else None
 
     following_result = await db.execute(
         select(Follow.following_id).where(Follow.follower_id == user_id)
@@ -352,7 +391,10 @@ async def get_feed(
     result = await db.execute(query)
     posts = list(result.scalars().all())
 
-    posts.sort(key=lambda p: _feed_score(p, following_ids), reverse=True)
+    posts.sort(
+        key=lambda p: _feed_score(p, following_ids, user_interests),
+        reverse=True,
+    )
     page = posts[offset:offset + limit]
 
     like_info_map = await _check_post_liked(db, [p.id for p in page], user_id)
@@ -457,9 +499,19 @@ async def like_post(
     
     try:
         result = await service.like_post(user_id, post_id)
+
+        # Accumulate post tags into user interest profile
+        post = await db.get(Post, post_id)
+        if post and post.tags:
+            user = await db.get(User, user_id)
+            if user:
+                interests = dict(user.interest_tags or {})
+                for tag in post.tags:
+                    interests[tag] = interests.get(tag, 0) + 1
+                user.interest_tags = interests
+
         await db.commit()
         
-        post = await db.get(Post, post_id)
         return {
             'likes_count': post.likes_count if post else 0,
             'is_liked': True,

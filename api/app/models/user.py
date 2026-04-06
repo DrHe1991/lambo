@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, BigInteger, Boolean
+from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, BigInteger, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -46,6 +46,9 @@ class User(Base):
 
     # Every new user gets 1 free public post
     free_posts_remaining: Mapped[int] = mapped_column(Integer, default=1)
+
+    # AI-tracked topic interests (accumulated from liked posts' tags)
+    interest_tags: Mapped[dict | None] = mapped_column(JSON, default=None)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

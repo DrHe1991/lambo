@@ -75,7 +75,10 @@ services:
       S3_PUBLIC_URL: http://localhost:9000
       GOOGLE_CLIENT_ID: '292172431256-hotp58doi02m8do3kg64qq2qn9qjil9f.apps.googleusercontent.com'
       BANKOFAI_API_KEY: ${BANKOFAI_API_KEY:-}
-      BANKOFAI_MODEL: ${BANKOFAI_MODEL:-gpt-5.2}
+      BANKOFAI_MODEL: ${BANKOFAI_MODEL:-gpt-5.4-mini}
+      AI_ENABLED: ${AI_ENABLED:-true}
+      FREE_POSTS_PER_DAY: ${FREE_POSTS_PER_DAY:-3}
+      FREE_ARTICLES_PER_DAY: ${FREE_ARTICLES_PER_DAY:-1}
     volumes:
       - ./api:/app
     depends_on:

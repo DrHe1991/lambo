@@ -66,8 +66,9 @@ class Post(Base):
     boost_amount: Mapped[int] = mapped_column(BigInteger, default=0)
     boost_remaining: Mapped[float] = mapped_column(Float, default=0.0)
 
-    # AI-assessed quality and summary
-    quality_score: Mapped[int | None] = mapped_column(Integer, default=None)
+    # AI evaluation results
+    quality: Mapped[str | None] = mapped_column(String(20), default=None)
+    tags: Mapped[list | None] = mapped_column(JSON, default=None)
     ai_summary: Mapped[str | None] = mapped_column(Text, default=None)
 
     # Timestamps
