@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { Keyboard } from '@capacitor/keyboard';
@@ -138,6 +138,7 @@ const App: React.FC = () => {
   const [showDraftList, setShowDraftList] = useState(false);
   const [showPostMenu, setShowPostMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [openMenuPostId, setOpenMenuPostId] = useState<number | string | null>(null);
   // Challenge modal removed in minimal system
   const [showLikeModal, setShowLikeModal] = useState(false);
   const [likeTargetPost, setLikeTargetPost] = useState<Post | null>(null);
@@ -181,6 +182,7 @@ const App: React.FC = () => {
   const [isUploadingChatImage, setIsUploadingChatImage] = useState(false);
   const chatImageInputRef = useRef<HTMLInputElement>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+  const chatNeedsInstantScroll = useRef(false);
   const [chatLightboxSrc, setChatLightboxSrc] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<{id: string | number; content: string} | null>(null);
   const [showReactorsFor, setShowReactorsFor] = useState<{messageId: string | number; emoji: string} | null>(null);
@@ -279,6 +281,11 @@ const App: React.FC = () => {
       if (currentView === 'FOLLOWERS_LIST' || currentView === 'FOLLOWING_LIST') { setCurrentView('USER_PROFILE'); return; }
       if (currentView !== 'MAIN') {
         setCurrentView('MAIN');
+        if (currentView === 'CHAT_DETAIL') {
+          setSelectedChat(null);
+          setSelectedMessageId(null);
+          setReplyingTo(null);
+        }
         if (currentView === 'POST_DETAIL' || currentView === 'QA_DETAIL') {
           usePostStore.getState().clearCurrentPost();
         }
@@ -308,10 +315,20 @@ const App: React.FC = () => {
       inlineCommentPost, publishPreview]);
 
   const scrollChatToBottom = useCallback((smooth = false) => {
-    setTimeout(() => {
-      chatMessagesEndRef.current?.scrollIntoView(smooth ? { behavior: 'smooth' } : undefined);
-    }, 50);
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        chatMessagesEndRef.current?.scrollIntoView(smooth ? { behavior: 'smooth' } : undefined);
+      }, 100);
+    });
   }, []);
+
+  // Instant scroll before paint when opening a chat (no visible flash)
+  useLayoutEffect(() => {
+    if (chatNeedsInstantScroll.current && chatMessages.length > 0) {
+      chatMessagesEndRef.current?.scrollIntoView();
+      chatNeedsInstantScroll.current = false;
+    }
+  }, [chatMessages]);
 
   // Scroll to a specific message and briefly highlight it
   const scrollToMessage = (msgId: number) => {
@@ -463,6 +480,7 @@ const App: React.FC = () => {
     // Reload active chat messages to catch anything missed while backgrounded
     const chat = selectedChatRef.current;
     if (chat && chat.id !== 'new') {
+      chatNeedsInstantScroll.current = true;
       api.getMessages(Number(chat.id), currentUser.id).then(msgs => {
         setChatMessages(msgs.map(m => ({
           id: m.id,
@@ -477,10 +495,9 @@ const App: React.FC = () => {
           replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
           reactions: m.reactions || []
         })));
-        scrollChatToBottom();
       }).catch(() => {});
     }
-  }, [currentUser, fetchSessions, scrollChatToBottom]);
+  }, [currentUser, fetchSessions]);
 
   // Connect to WebSocket for real-time chat
   useChatWebSocket({
@@ -850,6 +867,7 @@ const App: React.FC = () => {
         return;
       }
       setIsLoadingChatMessages(true);
+      chatNeedsInstantScroll.current = true;
       try {
         const msgs = await api.getMessages(Number(selectedChat.id), currentUser.id);
         setChatMessages(msgs.map(m => ({ 
@@ -866,7 +884,6 @@ const App: React.FC = () => {
           reactions: m.reactions || []
         })));
         markSessionAsRead(Number(selectedChat.id));
-        scrollChatToBottom();
       } catch (error) {
         setChatMessages([]);
       } finally {
@@ -1036,6 +1053,8 @@ const App: React.FC = () => {
             onDelete={handleDeletePostRequest}
             isLiked={likedPosts.has(String(post.id)) || post.isLiked}
             isOwnPost={currentUser ? Number(post.author.id) === currentUser.id : false}
+            menuOpen={openMenuPostId === post.id}
+            onMenuToggle={setOpenMenuPostId}
           />
         ))}
 
@@ -1886,7 +1905,7 @@ const App: React.FC = () => {
               </div>
             </div>
           ) : (
-            <PostCard post={selectedPost} isOwnPost={isOwnPost || false} onDelete={handleDeletePostRequest} />
+            <PostCard post={selectedPost} isOwnPost={isOwnPost || false} onDelete={handleDeletePostRequest} menuOpen={openMenuPostId === selectedPost.id} onMenuToggle={setOpenMenuPostId} />
           )}
 
 
@@ -3038,7 +3057,7 @@ const App: React.FC = () => {
     return (
       <div className="fixed inset-0 z-[60] bg-black flex flex-col sub-view">
         <div className="bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center gap-3 top-nav">
-          <button onClick={() => { setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
+          <button onClick={() => { setSelectedChat(null); setCurrentView('MAIN'); setSelectedMessageId(null); setReplyingTo(null); }} className="p-2.5 -ml-2.5 rounded-full hover:bg-stone-800/60 transition-colors"><ArrowLeft size={20} /></button>
           <button
             className="flex items-center gap-3"
             onClick={isGroup ? handleOpenGroupInfo : handleOpenProfile}
@@ -4265,7 +4284,7 @@ const App: React.FC = () => {
         <div className="p-4">
           <h3 className="text-xs font-bold text-stone-500 uppercase tracking-wide mb-4">Activity</h3>
           {posts.filter(p => String(p.author.id) === String(selectedUser.id)).map(p => (
-            <PostCard key={p.id} post={p} />
+            <PostCard key={p.id} post={p} menuOpen={openMenuPostId === p.id} onMenuToggle={setOpenMenuPostId} />
           ))}
         </div>
       </div>

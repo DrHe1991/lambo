@@ -1,4 +1,5 @@
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { Post } from '../types';
 import { Heart, MessageSquare, Cpu, TrendingUp, MoreHorizontal, Trash2, Flag } from 'lucide-react';
 import { Badge } from './ui/Badge';
@@ -16,6 +17,8 @@ interface PostCardProps {
   likeCost?: number;
   isOwnPost?: boolean;
   hideMenu?: boolean;
+  menuOpen?: boolean;
+  onMenuToggle?: (postId: number | string | null) => void;
 }
 
 function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | null): string {
@@ -28,10 +31,11 @@ function getHeartColor(isLiked: boolean, likeStatus?: 'pending' | 'settled' | nu
   return 'text-orange-500';
 }
 
-export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, onDelete, isLiked, likeCost, isOwnPost, hideMenu }) => {
+export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, onChallenge, onLike, onComment, onDelete, isLiked, likeCost, isOwnPost, hideMenu, menuOpen, onMenuToggle }) => {
   const [isExpanded, setIsExpanded] = React.useState(false);
   const [isShaking, setIsShaking] = React.useState(false);
-  const [showMenu, setShowMenu] = React.useState(false);
+  const showMenu = menuOpen ?? false;
+  const setShowMenu = (open: boolean) => onMenuToggle?.(open ? post.id : null);
   const contentText = post.content.trim();
   const articlePreview = contentText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   const shouldClampContent = post.type !== 'Article' && (
@@ -83,15 +87,18 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
         {!hideMenu && (
           <div className="relative shrink-0">
             <button
-              className="p-1.5 -mr-1.5 -mt-0.5 rounded-full hover:bg-stone-800/60 transition-colors text-stone-500"
+              className={`p-1.5 -mr-1.5 -mt-0.5 rounded-full hover:bg-stone-800/60 transition-colors ${showMenu ? 'text-orange-500' : 'text-stone-500'}`}
               onClick={(e) => { e.stopPropagation(); setShowMenu(!showMenu); }}
             >
               <MoreHorizontal size={18} />
             </button>
             {showMenu && (
               <>
-                <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }} />
-                <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-40">
+                {createPortal(
+                  <div className="fixed inset-0 z-[55]" onClick={(e) => { e.stopPropagation(); setShowMenu(false); }} />,
+                  document.body
+                )}
+                <div className="absolute right-0 top-full mt-1 bg-stone-900 border border-stone-700 rounded-xl shadow-2xl overflow-hidden min-w-[200px] z-[56]">
                   {isOwnPost && onDelete && (
                     <button
                       onClick={(e) => { e.stopPropagation(); setShowMenu(false); onDelete(post); }}
