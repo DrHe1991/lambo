@@ -28,6 +28,16 @@ class BoostTargeting(BaseModel):
     suggested_category: str = ''
 
 
+class PostEvaluation(BaseModel):
+    """Batched AI evaluation: moderation + tags + quality in one call."""
+    safe: bool = True
+    flags: list[str] = Field(default_factory=list)
+    severity: str = 'none'
+    tags: list[str] = Field(default_factory=list)
+    quality: str = 'medium'
+    summary: str = ''
+
+
 class ReportCreate(BaseModel):
     """Schema for submitting a content report."""
     post_id: int

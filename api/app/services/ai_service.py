@@ -7,49 +7,86 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.ai_usage import AIUsage
-from app.schemas.ai import (
-    ReportVerdict, ContentScore, ModerationResult, BoostTargeting,
-)
+from app.schemas.ai import ReportVerdict, PostEvaluation
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPTS = {
-    'moderation': (
-        'You are a content safety moderator for BitLink, a crypto-native social platform. '
-        'Evaluate the post for policy violations: hate speech, harassment, scams, fraud, '
-        'illegal content, or spam. Respond with ONLY valid JSON:\n'
-        '{"safe": true/false, "flags": ["list of violations"], '
-        '"severity": "none"|"low"|"high"}\n'
-        'severity=high means immediate removal. severity=low means flag for review.'
-    ),
-    'quality_score': (
-        'You are a content quality evaluator for BitLink, a crypto-native social platform. '
-        'Score the post from 0-100 based on originality, substance, readability, and '
-        'effort. Also suggest up to 5 topic tags. Respond with ONLY valid JSON:\n'
-        '{"quality_score": 0-100, "tags": ["tag1", "tag2"]}\n'
-        'Score guide: 0-20=spam/low-effort, 21-50=average, 51-80=good, 81-100=exceptional.'
-    ),
-    'report': (
-        'You are a report adjudicator for BitLink, a crypto-native social platform. '
-        'A user has reported content for a policy violation. Evaluate whether the report '
-        'is valid based on the content and the stated reason. Respond with ONLY valid JSON:\n'
-        '{"verdict": "valid"|"invalid"|"escalate", "confidence": 0.0-1.0, '
-        '"reason": "brief explanation"}\n'
-        'Use "escalate" when you are unsure (confidence < 0.6).'
-    ),
-    'summary': (
-        'You are a concise summarizer for BitLink articles. '
-        'Write a 1-2 sentence TL;DR that captures the key point. '
-        'Respond with ONLY the summary text, no JSON, no quotes.'
-    ),
-    'boost': (
-        'You are an audience targeting assistant for BitLink, a crypto-native social platform. '
-        'Analyze the post content and suggest relevant audience tags, keywords, and a category '
-        'for ad targeting. Respond with ONLY valid JSON:\n'
-        '{"relevance_tags": ["tag1", "tag2"], "audience_keywords": ["kw1", "kw2"], '
-        '"suggested_category": "category"}'
-    ),
-}
+VALID_QUALITY = ('low', 'medium', 'good', 'great')
+VALID_SEVERITY = ('none', 'low', 'high')
+
+EVALUATE_PROMPT = '''\
+You are a content screener for BitLink, a social platform with a crypto-powered economy. \
+Users post about ANY topic — tech, finance, sports, art, politics, lifestyle, crypto, etc.
+
+Your main job is to:
+1. BLOCK harmful content (violence, hate, abuse, scams)
+2. TAG content for discovery
+3. Give a rough quality estimate (community engagement is the real quality signal)
+
+Respond with ONLY valid JSON matching this exact schema:
+{"safe": true, "flags": [], "severity": "none", "tags": ["tag1", "tag2"], "quality": "medium", "summary": ""}
+
+### Safety — THIS IS YOUR PRIMARY JOB. Be strict.
+
+**safe** (severity=none): Normal discussion, opinions, humor, questions, debates, memes.
+
+**unsafe severity=low** (flag but allow, monitor):
+- Aggressive language or personal insults directed at individuals
+- Unverified serious claims about specific named people
+- Mildly suggestive or edgy content that doesn't cross the line
+- Misleading headlines without outright fabrication
+
+**unsafe severity=high** (block immediately):
+- Violence: threats, glorification of violence, graphic descriptions of harm, incitement
+- Hate speech: racism, sexism, homophobia, religious hatred, dehumanizing language
+- Harassment: doxxing, stalking, targeted bullying, revenge content
+- Sexual: explicit/pornographic content, non-consensual sexual content
+- Self-harm: suicide encouragement, pro-eating-disorder content, self-injury promotion
+- Minors: any sexual or exploitative content involving minors
+- Illegal activity: drug trafficking, weapons sales, fraud instructions
+- Scams: phishing links, fake giveaways, pump-and-dump schemes, impersonation
+- Terrorism: extremist recruitment, radicalization, terror glorification
+
+Use "flags" to specify which categories triggered (e.g. ["violence", "threats"]).
+
+### Quality — rough initial screen only (community decides the rest):
+
+**low** - Trash / zero-effort / noise:
+- Single words or emojis with no substance ("gm", "🚀", "lol")
+- Pure spam or self-promotion links
+- Copy-pasted text with no original thought
+
+**medium** - Default. Has a point, let the community decide:
+- An opinion with basic reasoning
+- A question asking for help or advice
+- Sharing news or content with a short personal take
+
+**good** - Clearly shows effort:
+- Thoughtful analysis with supporting evidence
+- Detailed how-to or tutorial
+- Well-argued perspective with specifics
+
+**great** - Exceptional depth (rare, be conservative):
+- Original research or investigation
+- Comprehensive guide with real expertise
+
+When in doubt, default to "medium".
+
+### Tags (2-4 topic tags for content discovery):
+- Post about BTC price → ["bitcoin", "price-analysis", "trading"]
+- Fitness routine review → ["fitness", "health", "review"]
+- Film analysis essay → ["movies", "analysis", "culture"]
+- Startup funding story → ["startups", "venture-capital", "entrepreneurship"]
+- Cooking recipe share → ["cooking", "recipes", "food"]
+- Political opinion piece → ["politics", "opinion"]
+- Travel photography → ["travel", "photography"]'''
+
+REPORT_PROMPT = '''\
+You are a report adjudicator for BitLink, a crypto-native social platform.
+A user has reported content for a policy violation. Evaluate whether the report \
+is valid based on the content and the stated reason. Respond with ONLY valid JSON:
+{"verdict": "valid"|"invalid"|"escalate", "confidence": 0.0-1.0, "reason": "brief explanation"}
+Use "escalate" when you are unsure (confidence < 0.6).'''
 
 
 class AIServiceError(Exception):
@@ -73,6 +110,7 @@ class AIService:
                 'Content-Type': 'application/json',
             },
             timeout=30.0,
+            verify=settings.env != 'development',
         )
 
     async def _chat(
@@ -125,12 +163,13 @@ class AIService:
             return content
 
         except httpx.HTTPStatusError as e:
-            usage_record.error = f'HTTP {e.response.status_code}: {e.response.text[:200]}'
+            resp_text = e.response.text[:300]
+            usage_record.error = f'HTTP {e.response.status_code}: {resp_text}'
             if db:
                 db.add(usage_record)
                 await db.flush()
             logger.error('Bank of AI API error: %s', usage_record.error)
-            raise AIServiceError(f'LLM API error: {e.response.status_code}', 502)
+            raise AIServiceError(resp_text, e.response.status_code)
 
         except httpx.RequestError as e:
             usage_record.error = str(e)[:200]
@@ -142,7 +181,6 @@ class AIService:
 
     @staticmethod
     def _estimate_cost(input_tokens: int, output_tokens: int) -> float:
-        """Rough cost estimate based on typical GPT pricing ($/1M tokens)."""
         input_cost = input_tokens * 3.0 / 1_000_000
         output_cost = output_tokens * 15.0 / 1_000_000
         return round(input_cost + output_cost, 6)
@@ -158,68 +196,71 @@ class AIService:
             text = text.strip()
         return json.loads(text)
 
-    # ── Use Case Methods ─────────────────────────────────────────────────
+    @staticmethod
+    def _normalize_evaluation(data: dict) -> dict:
+        """Normalize unexpected values to valid defaults (fail safe)."""
+        if data.get('quality') not in VALID_QUALITY:
+            data['quality'] = 'medium'
+        if data.get('severity') not in VALID_SEVERITY:
+            data['severity'] = 'none'
+        if not isinstance(data.get('tags'), list):
+            data['tags'] = []
+        data['tags'] = [str(t).lower().strip() for t in data['tags'][:5]]
+        if not isinstance(data.get('safe'), bool):
+            data['safe'] = True
+        if not isinstance(data.get('flags'), list):
+            data['flags'] = []
+        if not isinstance(data.get('summary'), str):
+            data['summary'] = ''
+        return data
 
-    async def moderate_content(
+    # ── Batched evaluation (one call does everything) ────────────────────
+
+    async def evaluate_post(
         self,
         content: str,
+        title: str | None = None,
+        post_type: str = 'note',
         *,
         db: AsyncSession | None = None,
         ref_id: int | None = None,
-    ) -> ModerationResult:
-        """Screen content for policy violations."""
-        raw = await self._chat(
-            messages=[
-                {'role': 'system', 'content': SYSTEM_PROMPTS['moderation']},
-                {'role': 'user', 'content': content[:3000]},
-            ],
-            feature='moderation',
-            temperature=0.1,
-            max_tokens=200,
-            ref_type='post',
-            ref_id=ref_id,
-            db=db,
-        )
-        try:
-            data = self._parse_json(raw)
-            return ModerationResult(**data)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning('Failed to parse moderation response: %s', raw[:200])
-            return ModerationResult(safe=True, flags=[], severity='none')
-
-    async def score_content(
-        self,
-        title: str | None,
-        content: str,
-        post_type: str,
-        *,
-        db: AsyncSession | None = None,
-        ref_id: int | None = None,
-    ) -> ContentScore:
-        """Score content quality (0-100) with topic tags."""
+    ) -> PostEvaluation:
+        """Evaluate a post in one call: moderation + tags + quality + summary."""
         user_msg = f'Post type: {post_type}\n'
         if title:
             user_msg += f'Title: {title}\n'
         user_msg += f'Content:\n{content[:3000]}'
 
-        raw = await self._chat(
-            messages=[
-                {'role': 'system', 'content': SYSTEM_PROMPTS['quality_score']},
-                {'role': 'user', 'content': user_msg},
-            ],
-            feature='quality_score',
-            temperature=0.2,
-            max_tokens=150,
-            ref_type='post',
-            ref_id=ref_id,
-            db=db,
-        )
-        try:
-            data = self._parse_json(raw)
-            return ContentScore(**data)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning('Failed to parse quality score: %s', raw[:200])
-            return ContentScore(quality_score=50, tags=[])
+        for attempt in range(2):
+            try:
+                temp = 0.2 if attempt == 0 else 0.1
+                raw = await self._chat(
+                    messages=[
+                        {'role': 'system', 'content': EVALUATE_PROMPT},
+                        {'role': 'user', 'content': user_msg},
+                    ],
+                    feature='evaluate',
+                    temperature=temp,
+                    max_tokens=300,
+                    ref_type='post',
+                    ref_id=ref_id,
+                    db=db,
+                )
+                data = self._parse_json(raw)
+                data = self._normalize_evaluation(data)
+                return PostEvaluation(**data)
+            except (json.JSONDecodeError, TypeError, ValueError) as e:
+                if attempt == 0:
+                    logger.warning('AI eval parse failed (attempt 1), retrying: %s', e)
+                    continue
+                logger.warning('AI eval parse failed (attempt 2), using defaults')
+                return PostEvaluation()
+            except AIServiceError:
+                if attempt == 0:
+                    continue
+                raise
+
+    # ── Report judging (standalone) ──────────────────────────────────────
 
     async def judge_report(
         self,
@@ -235,84 +276,33 @@ class AIService:
             f'Report reason: {report_reason}'
         )
 
-        raw = await self._chat(
-            messages=[
-                {'role': 'system', 'content': SYSTEM_PROMPTS['report']},
-                {'role': 'user', 'content': user_msg},
-            ],
-            feature='report',
-            temperature=0.2,
-            max_tokens=300,
-            ref_type='report',
-            ref_id=ref_id,
-            db=db,
-        )
-        try:
-            data = self._parse_json(raw)
-            return ReportVerdict(**data)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning('Failed to parse report verdict: %s', raw[:200])
-            return ReportVerdict(
-                verdict='escalate', confidence=0.0,
-                reason='AI could not evaluate — escalated for human review',
-            )
+        for attempt in range(2):
+            try:
+                raw = await self._chat(
+                    messages=[
+                        {'role': 'system', 'content': REPORT_PROMPT},
+                        {'role': 'user', 'content': user_msg},
+                    ],
+                    feature='report',
+                    temperature=0.2 if attempt == 0 else 0.1,
+                    max_tokens=300,
+                    ref_type='report',
+                    ref_id=ref_id,
+                    db=db,
+                )
+                data = self._parse_json(raw)
+                return ReportVerdict(**data)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                if attempt == 0:
+                    continue
+                return ReportVerdict(
+                    verdict='escalate', confidence=0.0,
+                    reason='AI could not evaluate — escalated for human review',
+                )
+            except AIServiceError:
+                if attempt == 0:
+                    continue
+                raise
 
-    async def summarize_content(
-        self,
-        content: str,
-        *,
-        db: AsyncSession | None = None,
-        ref_id: int | None = None,
-    ) -> str:
-        """Generate a TL;DR summary for long-form content."""
-        raw = await self._chat(
-            messages=[
-                {'role': 'system', 'content': SYSTEM_PROMPTS['summary']},
-                {'role': 'user', 'content': content[:5000]},
-            ],
-            feature='summary',
-            temperature=0.4,
-            max_tokens=300,
-            ref_type='post',
-            ref_id=ref_id,
-            db=db,
-        )
-        return raw.strip().strip('"')
-
-    async def get_boost_targeting(
-        self,
-        content: str,
-        *,
-        db: AsyncSession | None = None,
-        ref_id: int | None = None,
-    ) -> BoostTargeting:
-        """Analyze content for audience targeting."""
-        raw = await self._chat(
-            messages=[
-                {'role': 'system', 'content': SYSTEM_PROMPTS['boost']},
-                {'role': 'user', 'content': content[:3000]},
-            ],
-            feature='boost',
-            temperature=0.3,
-            max_tokens=200,
-            ref_type='post',
-            ref_id=ref_id,
-            db=db,
-        )
-        try:
-            data = self._parse_json(raw)
-            return BoostTargeting(**data)
-        except (json.JSONDecodeError, ValueError):
-            logger.warning('Failed to parse boost targeting: %s', raw[:200])
-            return BoostTargeting()
-
-
-# TODO(monetization): All AI calls are platform-paid. Future options:
-#   - Premium subscription tier
-#   - Boost markup (AI targeting cost baked into boost price)
-#   - Report deposit (small sat fee, refunded if valid)
-#   - Increased platform cut (75/25 instead of 80/20)
-#   - Separate AI credit system
-# Decision depends on usage data from ai_usage table.
 
 ai_service = AIService()
