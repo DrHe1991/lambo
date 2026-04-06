@@ -708,7 +708,7 @@ const App: React.FC = () => {
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
     };
-  }, [activeTab, isRefreshing]);
+  }, [activeTab, isRefreshing, isLoggedIn]);
 
   // Handle Google Sign-In (placeholder for Phase 2)
   const handleLogin = async () => {
