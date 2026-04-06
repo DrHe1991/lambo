@@ -69,18 +69,16 @@ async def create_wallet(
             detail='App is not active',
         )
     
-    # Check if wallet already exists
+    # Return existing wallet if already created (idempotent)
     existing = await db.execute(
         select(Wallet).where(
             Wallet.app_id == app_id,
             Wallet.external_user_id == data.external_user_id,
         )
     )
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail='Wallet already exists for this user',
-        )
+    existing_wallet = existing.scalar_one_or_none()
+    if existing_wallet:
+        return existing_wallet
     
     wallet = Wallet(
         app_id=app_id,

@@ -67,19 +67,7 @@ class PayClient:
         Returns:
             Wallet data with id, balance, etc.
         """
-        # First try to find existing wallet
-        try:
-            wallets = await self._request(
-                'GET',
-                '/wallets',
-                params={'app_id': self.app_id, 'external_user_id': external_user_id},
-            )
-            if wallets:
-                return wallets[0]
-        except PayClientError:
-            pass
-
-        # Create new wallet
+        # Idempotent: pay service returns existing wallet if one exists
         return await self._request(
             'POST',
             '/wallets',
