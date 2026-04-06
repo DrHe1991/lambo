@@ -5,6 +5,8 @@ from app.models.ledger import Ledger
 from app.models.reward import InteractionLog
 from app.models.revenue import PlatformRevenue
 from app.models.draft import Draft
+from app.models.ai_usage import AIUsage
+from app.models.report import Report
 
 __all__ = [
     'User',
@@ -20,4 +22,6 @@ __all__ = [
     'InteractionLog',
     'PlatformRevenue',
     'Draft',
+    'AIUsage',
+    'Report',
 ]

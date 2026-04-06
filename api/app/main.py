@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.routes import posts, users, chat, drafts, pay, settlement, media, auth
+from app.routes import posts, users, chat, drafts, pay, settlement, media, auth, reports, ai_admin
 from app.services.media import media_service
 
 
@@ -41,6 +41,8 @@ app.include_router(drafts.router, prefix='/api/drafts', tags=['drafts'])
 app.include_router(pay.router, prefix='/api/pay', tags=['pay'])
 app.include_router(settlement.router, prefix='/api/settlement', tags=['settlement'])
 app.include_router(media.router, prefix='/api/media', tags=['media'])
+app.include_router(reports.router, prefix='/api/reports', tags=['reports'])
+app.include_router(ai_admin.router, prefix='/api/ai', tags=['ai'])
 
 
 @app.get('/health')

@@ -22,9 +22,13 @@ class Settings(BaseSettings):
     google_client_id: str = ''
     google_client_secret: str = ''
 
-    # AI
-    anthropic_api_key: str = ''
-    groq_api_key: str = ''
+    # AI (Bank of AI — OpenAI-compatible LLM gateway)
+    bankofai_api_key: str = ''
+    bankofai_model: str = 'gpt-5.2'
+    bankofai_base_url: str = 'https://api.bankofai.io/v1'
+
+    # Platform ops wallet (pay service wallet ID for operational expenses like AI)
+    platform_wallet_id: int = 0
 
     # Pay Service
     pay_service_url: str = 'http://pay:8000'
