@@ -1,7 +1,7 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy import select, desc, and_, func
+from sqlalchemy import select, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -166,28 +166,13 @@ async def _check_comment_liked(db: AsyncSession, comment_ids: list[int], user_id
 
 # ── Posts ────────────────────────────────────────────────────────────────────
 
-async def _count_posts_today(db: AsyncSession, author_id: int, post_type: str) -> int:
-    """Count posts created today by this author (for daily quota)."""
-    from datetime import datetime, time
-    today_start = datetime.combine(datetime.utcnow().date(), time.min)
-    result = await db.execute(
-        select(func.count(Post.id)).where(
-            Post.author_id == author_id,
-            Post.post_type == post_type,
-            Post.created_at >= today_start,
-            Post.status != PostStatus.DELETED.value,
-        )
-    )
-    return result.scalar() or 0
-
-
 @router.post('', response_model=PostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(
     post_data: PostCreate,
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new post. Free with daily quota (configurable)."""
+    """Create a new post. Charged unless user has free posts remaining."""
     author = await db.get(User, author_id)
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
@@ -201,22 +186,6 @@ async def create_post(
     is_article = post_data.post_type == PostType.ARTICLE.value
     if is_article and not post_data.title:
         raise HTTPException(status_code=400, detail='Articles require a title')
-
-    # Daily quota check
-    if is_article:
-        count = await _count_posts_today(db, author_id, PostType.ARTICLE.value)
-        if count >= settings.free_articles_per_day:
-            raise HTTPException(
-                status_code=429,
-                detail=f'Daily article limit reached ({settings.free_articles_per_day}/day)',
-            )
-    else:
-        count = await _count_posts_today(db, author_id, post_data.post_type)
-        if count >= settings.free_posts_per_day:
-            raise HTTPException(
-                status_code=429,
-                detail=f'Daily post limit reached ({settings.free_posts_per_day}/day)',
-            )
 
     # Determine content format
     content_format = post_data.content_format if is_article else ContentFormat.PLAIN.value
