@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
@@ -6,7 +6,7 @@ import Underline from '@tiptap/extension-underline';
 import Placeholder from '@tiptap/extension-placeholder';
 import CharacterCount from '@tiptap/extension-character-count';
 import TiptapImage from '@tiptap/extension-image';
-import { Bold, Italic, Underline as UnderlineIcon, Link as LinkIcon, Heading1, Heading2, List, ListOrdered, Quote, Undo, Redo, X, Image as ImageIcon } from 'lucide-react';
+import { Bold, Italic, Underline as UnderlineIcon, Link as LinkIcon, Heading1, Heading2, List, ListOrdered, Quote, Undo, Redo, X, Image as ImageIcon, Check, Unlink } from 'lucide-react';
 
 interface ArticleEditorProps {
   title: string;
@@ -30,6 +30,9 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
   onImageUpload,
 }) => {
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const linkInputRef = useRef<HTMLInputElement>(null);
+  const [showLinkInput, setShowLinkInput] = useState(false);
+  const [linkUrl, setLinkUrl] = useState('');
 
   const editor = useEditor({
     extensions: [
@@ -70,33 +73,34 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
     }
   }, [content, editor]);
 
-  const addLink = () => {
+  const openLinkInput = useCallback(() => {
     if (!editor) return;
+    const previousUrl = editor.getAttributes('link').href || '';
+    setLinkUrl(previousUrl || 'https://');
+    setShowLinkInput(true);
+    setTimeout(() => linkInputRef.current?.focus(), 50);
+  }, [editor]);
 
-    const previousUrl = editor.getAttributes('link').href;
-    const url = window.prompt('Enter URL:', previousUrl || 'https://');
-
-    if (url === null) return;
-
-    if (url === '') {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+  const applyLink = useCallback(() => {
+    if (!editor || !linkUrl.trim()) {
+      setShowLinkInput(false);
       return;
     }
 
-    // Validate URL to prevent XSS via javascript: or data: URIs
     let sanitizedUrl: string;
     try {
-      const parsed = new URL(url);
-      if (!['http:', 'https:'].includes(parsed.protocol)) return;
+      const parsed = new URL(linkUrl.trim());
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        setShowLinkInput(false);
+        return;
+      }
       sanitizedUrl = parsed.href;
     } catch {
-      // If not a valid URL, prefix with https://
-      sanitizedUrl = `https://${url}`;
+      sanitizedUrl = `https://${linkUrl.trim()}`;
     }
 
     const { from, to } = editor.state.selection;
     if (from === to) {
-      // Use TipTap's setLink API instead of raw HTML insertion
       editor.chain().focus()
         .insertContent(sanitizedUrl)
         .setTextSelection({ from, to: from + sanitizedUrl.length })
@@ -105,7 +109,17 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
     } else {
       editor.chain().focus().extendMarkRange('link').setLink({ href: sanitizedUrl }).run();
     }
-  };
+
+    setShowLinkInput(false);
+    setLinkUrl('');
+  }, [editor, linkUrl]);
+
+  const removeLink = useCallback(() => {
+    if (!editor) return;
+    editor.chain().focus().extendMarkRange('link').unsetLink().run();
+    setShowLinkInput(false);
+    setLinkUrl('');
+  }, [editor]);
 
   const handleImageInsert = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -246,8 +260,8 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
         <div className="w-px h-5 bg-stone-700 mx-1" />
         
         <ToolbarButton
-          onClick={addLink}
-          isActive={editor?.isActive('link') ?? false}
+          onClick={openLinkInput}
+          isActive={showLinkInput || (editor?.isActive('link') ?? false)}
           title="Add Link"
         >
           <LinkIcon size={16} />
@@ -288,6 +302,51 @@ export const ArticleEditor: React.FC<ArticleEditorProps> = ({
           <Redo size={16} />
         </ToolbarButton>
       </div>
+
+      {/* Inline link input */}
+      {showLinkInput && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-stone-800 rounded-xl border border-orange-500/40 animate-in fade-in slide-in-from-top-1 duration-150">
+          <LinkIcon size={14} className="text-stone-500 shrink-0" />
+          <input
+            ref={linkInputRef}
+            type="url"
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); applyLink(); }
+              if (e.key === 'Escape') { setShowLinkInput(false); setLinkUrl(''); }
+            }}
+            placeholder="https://example.com"
+            className="flex-1 bg-transparent text-sm text-white outline-none placeholder:text-stone-500 min-w-0"
+          />
+          <button
+            type="button"
+            onClick={applyLink}
+            className="p-1.5 rounded-lg bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 transition-colors"
+            title="Apply link"
+          >
+            <Check size={14} />
+          </button>
+          {editor?.isActive('link') && (
+            <button
+              type="button"
+              onClick={removeLink}
+              className="p-1.5 rounded-lg text-stone-400 hover:bg-stone-700 hover:text-red-400 transition-colors"
+              title="Remove link"
+            >
+              <Unlink size={14} />
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => { setShowLinkInput(false); setLinkUrl(''); }}
+            className="p-1.5 rounded-lg text-stone-400 hover:bg-stone-700 hover:text-white transition-colors"
+            title="Cancel"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* WYSIWYG Editor */}
       <div className="bg-stone-900/30 border border-orange-500/30 focus-within:border-orange-500/60 rounded-xl p-4">

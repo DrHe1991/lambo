@@ -5,6 +5,83 @@ import { Heart, MessageSquare, Cpu, TrendingUp, MoreHorizontal, Trash2, Flag } f
 import { Badge } from './ui/Badge';
 import ImageGrid from './ImageGrid';
 
+function linkifyText(text: string): (string | JSX.Element)[] {
+  const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, i) => {
+    if (urlRegex.test(part)) {
+      urlRegex.lastIndex = 0;
+      return (
+        <a
+          key={i}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-orange-400 underline hover:text-orange-300"
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
+function renderHtmlLinks(html: string, maxLength: number): JSX.Element {
+  const linkRegex = /<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/gi;
+  let stripped = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (stripped.length > maxLength) {
+    stripped = stripped.slice(0, maxLength).trim() + '...';
+  }
+  
+  const links: { href: string; text: string }[] = [];
+  let match;
+  while ((match = linkRegex.exec(html)) !== null) {
+    const href = match[1];
+    const text = match[2].replace(/<[^>]*>/g, '').trim();
+    if (text && href.startsWith('http')) {
+      links.push({ href, text });
+    }
+  }
+
+  if (links.length === 0) {
+    return <>{linkifyText(stripped)}</>;
+  }
+
+  let result = stripped;
+  const elements: (string | JSX.Element)[] = [];
+  let lastIndex = 0;
+
+  for (const link of links) {
+    const idx = result.indexOf(link.text, lastIndex);
+    if (idx !== -1) {
+      if (idx > lastIndex) {
+        elements.push(...linkifyText(result.slice(lastIndex, idx)));
+      }
+      elements.push(
+        <a
+          key={link.href + idx}
+          href={link.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-orange-400 underline hover:text-orange-300"
+        >
+          {link.text}
+        </a>
+      );
+      lastIndex = idx + link.text.length;
+    }
+  }
+
+  if (lastIndex < result.length) {
+    elements.push(...linkifyText(result.slice(lastIndex)));
+  }
+
+  return <>{elements}</>;
+}
+
 interface PostCardProps {
   post: Post;
   onClick?: (post: Post) => void;
@@ -163,8 +240,8 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
 
       {post.type === 'Article' ? (
         <>
-          <p className="text-stone-200 text-sm leading-relaxed mb-3">
-            {articlePreview.length > 150 ? `${articlePreview.slice(0, 150).trim()}...` : articlePreview}
+          <p className="text-stone-200 text-sm leading-relaxed mb-2">
+            {renderHtmlLinks(contentText, 150)}
           </p>
           <button
             className="text-orange-400 text-sm font-medium hover:text-orange-300 transition-colors mb-2.5"
@@ -180,7 +257,7 @@ export const PostCard: React.FC<PostCardProps> = ({ post, onClick, onUserClick, 
               shouldClampContent && !isExpanded ? 'line-clamp-4' : ''
             }`}
           >
-            {contentText}
+            {linkifyText(contentText)}
           </p>
           {shouldClampContent && (
             <button
