@@ -218,7 +218,7 @@ const App: React.FC = () => {
 
   // Android platform setup: status bar, keyboard, overscroll
   useEffect(() => {
-    const themeColor = isDark ? '#000000' : '#fffdf9';
+    const themeColor = isDark ? '#0c0a09' : '#fffdf9';
     StatusBar.setStyle({ style: isDark ? Style.Dark : Style.Light }).catch(() => {});
     StatusBar.setOverlaysWebView({ overlay: true }).catch(() => {});
     StatusBar.setBackgroundColor({ color: themeColor }).catch(() => {});
@@ -2271,8 +2271,6 @@ const App: React.FC = () => {
     const accentText = isQuestion ? 'text-blue-400' : 'text-orange-500';
     const accentBorder = isQuestion ? 'border-blue-500/30' : 'border-orange-500/30';
     const accentGlow = isQuestion ? 'shadow-blue-500/30' : 'shadow-orange-500/30';
-    const freePost = currentUser?.free_posts_remaining && currentUser.free_posts_remaining > 0;
-
     const resetPublishState = (clearDraft = true) => {
       if (clearDraft) {
         setCurrentDraftId(null);
@@ -2449,8 +2447,6 @@ const App: React.FC = () => {
           msg = String((err as { detail: unknown }).detail);
         }
         if (msg.includes('Insufficient balance')) {
-          toast.warning(msg);
-        } else if (msg.includes('Daily') || msg.includes('limit')) {
           toast.warning(msg);
         } else {
           toast.error(msg);
@@ -3272,23 +3268,20 @@ const App: React.FC = () => {
                       {showReactorsFor?.messageId === msg.id && (
                         <>
                           <div className="fixed inset-0 z-40" onClick={() => setShowReactorsFor(null)} />
-                          <div className="absolute bottom-full mb-2 left-0 bg-stone-900 border border-stone-700 rounded-xl p-3 shadow-xl z-50 min-w-[160px]">
-                            <div className="text-sm font-bold mb-2 flex items-center gap-2">
-                              <span className="text-lg">{showReactorsFor.emoji}</span>
-                              <span className="text-stone-400">Reactions</span>
-                            </div>
+                          <div className={`absolute bottom-full mb-2 ${isMe ? 'right-0' : 'left-0'} bg-stone-900 border border-stone-700 rounded-xl p-3 shadow-xl z-50 min-w-[160px] max-w-[240px]`}>
                             <div className="space-y-2 max-h-40 overflow-y-auto">
                               {msg.reactions
                                 .filter(r => r.emoji === showReactorsFor.emoji)
                                 .map((r, idx) => (
                                   <div key={`${r.user_id}-${idx}`} className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-full bg-stone-700 flex items-center justify-center text-xs font-bold">
+                                    <div className="w-6 h-6 rounded-full bg-stone-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
                                       {r.user_name?.charAt(0)?.toUpperCase() || '?'}
                                     </div>
-                                    <span className="text-sm text-stone-300">{r.user_name}</span>
+                                    <span className="text-sm text-stone-300 truncate flex-1">{r.user_name}</span>
                                     {currentUser && Number(r.user_id) === Number(currentUser.id) && (
-                                      <span className="text-xs text-orange-400">(you)</span>
+                                      <span className="text-xs text-orange-400 flex-shrink-0">(you)</span>
                                     )}
+                                    <span className="text-sm flex-shrink-0">{r.emoji}</span>
                                   </div>
                                 ))
                               }
