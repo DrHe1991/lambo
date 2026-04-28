@@ -1,4 +1,7 @@
+import json
 import logging
+from datetime import date, datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, desc, and_
@@ -17,16 +20,20 @@ from app.schemas.post import (
 from app.schemas.user import UserBrief
 from app.services.ledger_service import LedgerService
 from app.services.dynamic_like_service import (
-    DynamicLikeService, like_cost as calc_like_cost,
-    AlreadyLiked, CannotLikeOwnPost, CannotUnlikeSettled,
+    DynamicLikeService, like_cost as calc_like_cost, comment_like_cost,
+    AlreadyLiked, CannotLikeOwnPost,
     InsufficientBalance as DynamicInsufficientBalance,
+    RateLimitExceeded,
 )
 from app.services.rate_limit_service import (
     check_post_rate_limit, check_comment_rate_limit,
 )
+from app.services.redis_service import get_redis
 from app.config import settings
 from app.services.ai_service import ai_service, AIServiceError
 from app.models.reward import InteractionLog, InteractionType
+
+QUOTE_TTL_SECONDS = 20
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -166,13 +173,17 @@ async def _check_comment_liked(db: AsyncSession, comment_ids: list[int], user_id
 
 # ── Posts ────────────────────────────────────────────────────────────────────
 
+POST_COST = 10
+FREE_POSTS_PER_DAY = 3
+
+
 @router.post('', response_model=PostResponse, status_code=status.HTTP_201_CREATED)
 async def create_post(
     post_data: PostCreate,
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new post. Charged unless user has free posts remaining."""
+    """Create a new post. 3 free posts per day, then 10 sats per post."""
     author = await db.get(User, author_id)
     if not author:
         raise HTTPException(status_code=404, detail='Author not found')
@@ -181,6 +192,34 @@ async def create_post(
     allowed, error_msg = await check_post_rate_limit(db, author_id)
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg)
+
+    # Reset daily free posts if needed
+    today = date.today()
+    if author.free_posts_reset_date is None or author.free_posts_reset_date < today:
+        author.free_posts_remaining = FREE_POSTS_PER_DAY
+        author.free_posts_reset_date = today
+
+    # Determine cost
+    cost_paid = 0
+    if author.free_posts_remaining > 0:
+        author.free_posts_remaining -= 1
+    else:
+        if author.available_balance < POST_COST:
+            raise HTTPException(
+                status_code=402,
+                detail=f'Insufficient balance. Need {POST_COST} sats to post (or wait for daily reset).'
+            )
+        author.available_balance -= POST_COST
+        cost_paid = POST_COST
+        db.add(Ledger(
+            user_id=author_id,
+            amount=-POST_COST,
+            balance_after=author.available_balance,
+            action_type=ActionType.SPEND_POST.value,
+            ref_type=RefType.NONE.value,
+            ref_id=None,
+            note='post creation fee',
+        ))
 
     # Articles require a title
     is_article = post_data.post_type == PostType.ARTICLE.value
@@ -198,7 +237,7 @@ async def create_post(
         post_type=post_data.post_type,
         bounty=post_data.bounty,
         media_urls=post_data.media_urls,
-        cost_paid=0,
+        cost_paid=cost_paid,
     )
     db.add(post)
     await db.flush()
@@ -238,9 +277,10 @@ from pydantic import BaseModel
 
 
 class CostEstimateResponse(BaseModel):
-    """Response with cost breakdown - simplified for minimal system."""
-    post_cost: int = 0
-    message: str = 'Posting is free in minimal system'
+    """Response with cost breakdown."""
+    post_cost: int
+    free_posts_remaining: int
+    message: str
 
 
 @router.post('/estimate-cost', response_model=CostEstimateResponse)
@@ -248,8 +288,29 @@ async def estimate_post_cost(
     author_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Estimate cost for a post - always free in minimal system."""
-    return CostEstimateResponse()
+    """Estimate cost for next post. 3 free per day, then 10 sats."""
+    author = await db.get(User, author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail='Author not found')
+    
+    # Check if daily reset is needed
+    today = date.today()
+    free_remaining = author.free_posts_remaining
+    if author.free_posts_reset_date is None or author.free_posts_reset_date < today:
+        free_remaining = FREE_POSTS_PER_DAY
+    
+    if free_remaining > 0:
+        return CostEstimateResponse(
+            post_cost=0,
+            free_posts_remaining=free_remaining,
+            message=f'{free_remaining} free posts remaining today'
+        )
+    else:
+        return CostEstimateResponse(
+            post_cost=POST_COST,
+            free_posts_remaining=0,
+            message=f'Next post costs {POST_COST} sats (resets daily)'
+        )
 
 
 @router.get('', response_model=list[PostResponse])
@@ -459,24 +520,107 @@ async def get_like_cost(
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.post('/{post_id}/like', status_code=status.HTTP_200_OK)
-async def like_post(
+@router.post('/{post_id}/like-quote')
+async def create_like_quote(
     post_id: int,
     user_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a post with 1h lock period.
+    """Create a price quote locked for 20 seconds.
     
-    - Sats are locked for 1 hour before settlement
-    - User can unlike within 1h for 90% refund
-    - After 1h, like is settled and revenue is distributed
+    Returns quote_id, cost, position, and break-even info. User must confirm
+    within 20 seconds using POST /like with the quote_id.
+    """
+    post = await db.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail='Post not found')
+    
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+    
+    # Check if user already liked
+    existing = await db.execute(
+        select(PostLike).where(
+            PostLike.post_id == post_id,
+            PostLike.user_id == user_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail='Already liked this post')
+
+    if post.author_id == user_id:
+        raise HTTPException(status_code=400, detail='Cannot like your own post')
+    
+    # Calculate current price and position
+    current_likes = post.likes_count
+    cost = calc_like_cost(current_likes)
+    position = current_likes + 1
+    
+    # Break-even calculation: position * 2.52 (rounded up)
+    break_even_at = int(position * 2.52) + 1
+    likes_needed = max(0, break_even_at - current_likes - 1)
+    
+    # Check balance upfront
+    has_balance = user.available_balance >= cost
+    
+    # Create quote and store in Redis
+    quote_id = f'like_quote:{user_id}:{post_id}:{uuid4().hex[:8]}'
+    quote_data = {
+        'user_id': user_id,
+        'post_id': post_id,
+        'cost': cost,
+        'position': position,
+        'created_at': datetime.utcnow().isoformat(),
+    }
+    
+    redis = await get_redis()
+    await redis.setex(quote_id, QUOTE_TTL_SECONDS, json.dumps(quote_data))
+    
+    return {
+        'quote_id': quote_id,
+        'cost': cost,
+        'likes_count': current_likes,
+        'your_position': position,
+        'break_even_at': break_even_at,
+        'likes_needed': likes_needed,
+        'expires_in_seconds': QUOTE_TTL_SECONDS,
+        'has_balance': has_balance,
+        'available_balance': user.available_balance,
+    }
+
+
+@router.post('/{post_id}/like', status_code=status.HTTP_200_OK)
+async def like_post(
+    post_id: int,
+    user_id: int = Query(...),
+    quote_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Like a post permanently. Author and platform paid instantly, liker
+    earnings accumulate in pool and are distributed by cron.
+
+    If quote_id is provided, uses the locked price from that quote (20s guarantee).
     """
     service = DynamicLikeService(db)
-    
-    try:
-        result = await service.like_post(user_id, post_id)
+    locked_cost = None
 
-        # Accumulate post tags into user interest profile
+    if quote_id:
+        redis = await get_redis()
+        quote_json = await redis.get(quote_id)
+        if not quote_json:
+            raise HTTPException(status_code=410, detail='Quote expired. Request a new quote.')
+
+        quote = json.loads(quote_json)
+        if quote['user_id'] != user_id or quote['post_id'] != post_id:
+            raise HTTPException(status_code=400, detail='Invalid quote')
+
+        await redis.delete(quote_id)
+        locked_cost = quote['cost']
+
+    try:
+        result = await service.like_post(user_id, post_id, locked_cost=locked_cost)
+
         post = await db.get(Post, post_id)
         if post and post.tags:
             user = await db.get(User, user_id)
@@ -487,12 +631,11 @@ async def like_post(
                 user.interest_tags = interests
 
         await db.commit()
-        
+
         return {
             'likes_count': post.likes_count if post else 0,
             'is_liked': True,
             'like_status': result['status'],
-            'locked_until': result['locked_until'].isoformat(),
             'cost': result['cost'],
             'your_weight': result['weight'],
             'like_rank': result['like_rank'],
@@ -501,52 +644,17 @@ async def like_post(
         raise HTTPException(status_code=400, detail='Cannot like your own post')
     except AlreadyLiked:
         post = await db.get(Post, post_id)
-        like_info = await service.get_like_status(user_id, post_id)
         return {
             'likes_count': post.likes_count if post else 0,
             'is_liked': True,
-            'like_status': like_info['status'] if like_info else None,
-            'locked_until': like_info['locked_until'] if like_info else None,
+            'like_status': 'settled',
         }
     except DynamicInsufficientBalance as e:
         raise HTTPException(status_code=402, detail=str(e))
+    except RateLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-
-
-@router.delete('/{post_id}/like', status_code=status.HTTP_200_OK)
-async def unlike_post(
-    post_id: int,
-    user_id: int = Query(...),
-    db: AsyncSession = Depends(get_db),
-):
-    """Unlike a post within the 1h lock period.
-    
-    - PENDING like: 90% refund, 10% to platform
-    - SETTLED like: Cannot unlike (returns error)
-    """
-    service = DynamicLikeService(db)
-    
-    try:
-        result = await service.unlike_post(user_id, post_id)
-        await db.commit()
-        
-        post = await db.get(Post, post_id)
-        
-        if not result.get('success'):
-            raise HTTPException(status_code=404, detail=result.get('error', 'Like not found'))
-        
-        return {
-            'likes_count': post.likes_count if post else 0,
-            'is_liked': False,
-            'refund_amount': result.get('refund_amount', 0),
-            'refund_rate': '90%',
-        }
-    except CannotUnlikeSettled:
-        raise HTTPException(
-            status_code=400,
-            detail='Cannot unlike after 1h - like has been settled',
-        )
 
 
 @router.get('/{post_id}/likers')
@@ -769,6 +877,76 @@ async def get_comment_like_cost(
     }
 
 
+@router.post('/{post_id}/comments/{comment_id}/like-quote')
+async def create_comment_like_quote(
+    post_id: int,
+    comment_id: int,
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Create a price quote for liking a comment, locked for 20 seconds.
+    
+    Returns quote_id, cost, position, and break-even info.
+    """
+    comment = await db.get(Comment, comment_id)
+    if not comment or comment.post_id != post_id:
+        raise HTTPException(status_code=404, detail='Comment not found')
+    
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+    
+    # Check if user already liked
+    existing = await db.execute(
+        select(CommentLike).where(
+            CommentLike.comment_id == comment_id,
+            CommentLike.user_id == user_id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail='Already liked this comment')
+
+    if comment.author_id == user_id:
+        raise HTTPException(status_code=400, detail='Cannot like your own comment')
+    
+    # Calculate current price and position
+    current_likes = comment.likes_count
+    cost = comment_like_cost(current_likes)
+    position = current_likes + 1
+    
+    # Break-even calculation
+    break_even_at = int(position * 2.52) + 1
+    likes_needed = max(0, break_even_at - current_likes - 1)
+    
+    # Check balance upfront
+    has_balance = user.available_balance >= cost
+    
+    # Create quote and store in Redis
+    quote_id = f'comment_like_quote:{user_id}:{comment_id}:{uuid4().hex[:8]}'
+    quote_data = {
+        'user_id': user_id,
+        'comment_id': comment_id,
+        'cost': cost,
+        'position': position,
+        'created_at': datetime.utcnow().isoformat(),
+    }
+    
+    redis = await get_redis()
+    await redis.setex(quote_id, QUOTE_TTL_SECONDS, json.dumps(quote_data))
+    
+    return {
+        'quote_id': quote_id,
+        'cost': cost,
+        'likes_count': current_likes,
+        'your_position': position,
+        'break_even_at': break_even_at,
+        'likes_needed': likes_needed,
+        'expires_in_seconds': QUOTE_TTL_SECONDS,
+        'has_balance': has_balance,
+        'available_balance': user.available_balance,
+    }
+
+
 @router.post(
     '/{post_id}/comments/{comment_id}/like',
     status_code=status.HTTP_200_OK,
@@ -777,33 +955,46 @@ async def like_comment(
     post_id: int,
     comment_id: int,
     user_id: int = Query(...),
+    quote_id: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    """Like a comment with 1h lock period.
-    
-    - Sats are locked for 1 hour before settlement
-    - User can unlike within 1h for 90% refund
-    - After 1h, like is settled and revenue is distributed
+    """Like a comment permanently. Author and platform paid instantly, liker
+    earnings accumulate in pool and are distributed by cron.
+
+    If quote_id is provided, uses the locked price from that quote (20s guarantee).
     """
     comment = await db.get(Comment, comment_id)
     if not comment or comment.post_id != post_id:
         raise HTTPException(status_code=404, detail='Comment not found')
 
     service = DynamicLikeService(db)
+    locked_cost = None
+
+    if quote_id:
+        redis = await get_redis()
+        quote_json = await redis.get(quote_id)
+        if not quote_json:
+            raise HTTPException(status_code=410, detail='Quote expired. Request a new quote.')
+
+        quote = json.loads(quote_json)
+        if quote['user_id'] != user_id or quote['comment_id'] != comment_id:
+            raise HTTPException(status_code=400, detail='Invalid quote')
+
+        await redis.delete(quote_id)
+        locked_cost = quote['cost']
+
     try:
-        result = await service.like_comment(user_id, comment_id)
+        result = await service.like_comment(user_id, comment_id, locked_cost=locked_cost)
         await db.commit()
-        
-        # Log interaction
+
         await _log_interaction(
             db, user_id, comment.author_id, InteractionType.COMMENT_LIKE, comment_id,
         )
-        
+
         return {
             'likes_count': comment.likes_count,
             'is_liked': True,
             'like_status': result['status'],
-            'locked_until': result['locked_until'].isoformat(),
             'cost': result['cost'],
             'your_weight': result['weight'],
             'like_rank': result['like_rank'],
@@ -811,56 +1002,16 @@ async def like_comment(
     except CannotLikeOwnPost:
         raise HTTPException(status_code=400, detail='Cannot like your own comment')
     except AlreadyLiked:
-        like_info = await service.get_comment_like_status(user_id, comment_id)
         return {
             'likes_count': comment.likes_count,
             'is_liked': True,
-            'like_status': like_info['status'] if like_info else None,
-            'locked_until': like_info['locked_until'] if like_info else None,
+            'like_status': 'settled',
         }
     except DynamicInsufficientBalance as e:
         raise HTTPException(status_code=402, detail=str(e))
+    except RateLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e))
 
-
-@router.delete(
-    '/{post_id}/comments/{comment_id}/like',
-    status_code=status.HTTP_200_OK,
-)
-async def unlike_comment(
-    post_id: int,
-    comment_id: int,
-    user_id: int = Query(...),
-    db: AsyncSession = Depends(get_db),
-):
-    """Unlike a comment within the 1h lock period.
-    
-    - PENDING like: 90% refund, 10% to platform
-    - SETTLED like: Cannot unlike (returns error)
-    """
-    comment = await db.get(Comment, comment_id)
-    if not comment or comment.post_id != post_id:
-        raise HTTPException(status_code=404, detail='Comment not found')
-
-    service = DynamicLikeService(db)
-    
-    try:
-        result = await service.unlike_comment(user_id, comment_id)
-        await db.commit()
-        
-        if not result.get('success'):
-            raise HTTPException(status_code=404, detail=result.get('error', 'Like not found'))
-        
-        return {
-            'likes_count': comment.likes_count,
-            'is_liked': False,
-            'refund_amount': result.get('refund_amount', 0),
-            'refund_rate': '90%',
-        }
-    except CannotUnlikeSettled:
-        raise HTTPException(
-            status_code=400,
-            detail='Cannot unlike after 1h - like has been settled',
-        )
 
 
 # Boost endpoints removed in minimal system

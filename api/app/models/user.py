@@ -1,5 +1,5 @@
-from datetime import datetime
-from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, BigInteger, Boolean, JSON
+from datetime import datetime, date
+from sqlalchemy import String, Integer, ForeignKey, DateTime, UniqueConstraint, BigInteger, Boolean, JSON, Date
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -44,8 +44,9 @@ class User(Base):
     first_exchange_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
     welcome_bonus_claimed: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Every new user gets 1 free public post
-    free_posts_remaining: Mapped[int] = mapped_column(Integer, default=1)
+    # Daily free posts (resets at midnight UTC)
+    free_posts_remaining: Mapped[int] = mapped_column(Integer, default=3)
+    free_posts_reset_date: Mapped[date | None] = mapped_column(Date, default=None)
 
     # AI-tracked topic interests (accumulated from liked posts' tags)
     interest_tags: Mapped[dict | None] = mapped_column(JSON, default=None)

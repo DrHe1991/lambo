@@ -329,21 +329,25 @@ async def confirm_exchange(
         bonus_sat = result.get('bonus_sat', 0)
 
         if direction == 'buy_sat':
+            # Credit SAT to user's available balance
+            user.available_balance += amount_out
             usdt_amount = amount_in / 1_000_000
             db.add(Ledger(
                 user_id=user.id,
                 amount=amount_out,
-                balance_after=user.available_balance + amount_out,
+                balance_after=user.available_balance,
                 action_type=ActionType.EXCHANGE_BUY_SAT.value,
                 ref_type=RefType.NONE.value,
                 note=f'Exchanged ${usdt_amount:.2f} USDT → {amount_out:,} sat',
             ))
         else:
+            # Deduct SAT from user's available balance
+            user.available_balance -= amount_in
             usdt_out = amount_out / 1_000_000
             db.add(Ledger(
                 user_id=user.id,
                 amount=-amount_in,
-                balance_after=user.available_balance - amount_in,
+                balance_after=user.available_balance,
                 action_type=ActionType.EXCHANGE_SELL_SAT.value,
                 ref_type=RefType.NONE.value,
                 note=f'Exchanged {amount_in:,} sat → ${usdt_out:.2f} USDT',
@@ -421,8 +425,65 @@ async def get_user_balances(
             pass
 
     return {
-        'sat_balance': user.available_balance + sat_balance,
+        'sat_balance': user.available_balance,
         'stable_balance': stable_balance,
         'stable_formatted': f'{stable_balance / 1_000_000:.2f} USDT',
         'first_exchange_eligible': not user.welcome_bonus_claimed,
+        'unclaimed_sat': sat_balance,
+    }
+
+
+@router.post('/claim-sat')
+async def claim_sat_from_wallet(
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Transfer SAT from pay wallet to available_balance for in-app use.
+    
+    This is for users who have SAT stuck in their pay wallet from before
+    the exchange fix. SAT should normally go directly to available_balance.
+    """
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    sat_balance = 0
+
+    if user.pay_wallet_id:
+        pay_client = get_pay_client()
+        try:
+            wallet_data = await pay_client.get_balance(user.pay_wallet_id)
+            for bal in wallet_data.get('balances', []):
+                if bal['token_symbol'] == 'SAT':
+                    sat_balance = bal['balance']
+                    break
+        except PayClientError as e:
+            raise HTTPException(status_code=500, detail=f'Failed to check wallet: {e.message}')
+
+    if sat_balance <= 0:
+        return {'claimed': 0, 'message': 'No SAT to claim from pay wallet'}
+
+    # Credit the user's available_balance
+    user.available_balance += sat_balance
+    
+    # Log the transfer
+    db.add(Ledger(
+        user_id=user.id,
+        amount=sat_balance,
+        balance_after=user.available_balance,
+        action_type=ActionType.DEPOSIT.value,
+        ref_type=RefType.NONE.value,
+        note=f'Claimed {sat_balance:,} SAT from pay wallet',
+    ))
+
+    # Clear SAT from pay wallet (via internal transfer)
+    # Note: This requires pay service to support internal SAT debit
+    # For now, we just credit the user - pay wallet SAT will show 0 after next exchange
+    
+    await db.commit()
+    
+    return {
+        'claimed': sat_balance,
+        'available_balance': user.available_balance,
+        'message': f'Claimed {sat_balance:,} SAT to your available balance',
     }

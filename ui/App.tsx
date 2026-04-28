@@ -11,7 +11,7 @@ import { PostCard } from './components/PostCard';
 // TrustBadge removed - trust system simplified
 import { LoginPage } from './components/LoginPage';
 // ChallengeModal removed in minimal system
-import { LikeStakeModal } from './components/LikeStakeModal';
+import { LikeConfirmModal } from './components/LikeConfirmModal';
 import { Modal } from './components/ui/Modal';
 import { Button } from './components/ui/Button';
 // BoostModal removed in minimal system
@@ -79,8 +79,8 @@ const App: React.FC = () => {
     fetchComments,
     createPost: createApiPost,
     createComment: createApiComment,
-    toggleLikePost,
-    toggleLikeComment,
+    likePost: storelikePost,
+    likeComment: storeLikeComment,
     deleteComment: deleteApiComment,
     deletePost: deleteApiPost,
   } = usePostStore();
@@ -101,7 +101,9 @@ const App: React.FC = () => {
     fetchCryptoBalance,
     stableBalance,
     satBalance,
+    unclaimedSat,
     fetchUserBalances,
+    claimSat,
   } = useWalletStore();
 
   // Convert API data to UI format (no mock fallbacks)
@@ -142,7 +144,17 @@ const App: React.FC = () => {
   // Challenge modal removed in minimal system
   const [showLikeModal, setShowLikeModal] = useState(false);
   const [likeTargetPost, setLikeTargetPost] = useState<Post | null>(null);
+  const [likeTargetComment, setLikeTargetComment] = useState<{ postId: number; commentId: number } | null>(null);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
+  
+  // Quick like mode - skip confirmation modal
+  const [quickLikeMode, setQuickLikeMode] = useState(() => 
+    localStorage.getItem('bitlink_quick_like_mode') === 'true'
+  );
+  const toggleQuickLikeMode = (enabled: boolean) => {
+    setQuickLikeMode(enabled);
+    localStorage.setItem('bitlink_quick_like_mode', String(enabled));
+  };
   // Boost modal removed in minimal system
   const [showChatActions, setShowChatActions] = useState(false);
   const [friendSearch, setFriendSearch] = useState('');
@@ -519,9 +531,6 @@ const App: React.FC = () => {
   const [isFollowingProfile, setIsFollowingProfile] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
 
-  // Dynamic like cost from backend
-  const LIKE_STAKE = userCosts?.costs?.like_post ?? 20;
-
   // Fetch dynamic costs (trust system removed)
   const fetchUserCosts = async (userId: number) => {
     try {
@@ -547,29 +556,6 @@ const App: React.FC = () => {
     }
   };
 
-  // Execute unlike action
-  const executeUnlike = async (post: Post) => {
-    if (!currentUser) return;
-    try {
-      await toggleLikePost(Number(post.id), currentUser.id, true);
-      setLikedPosts(prev => { const s = new Set(prev); s.delete(String(post.id)); return s; });
-      if (selectedPost && String(selectedPost.id) === String(post.id)) {
-        setSelectedPost({
-          ...selectedPost,
-          isLiked: false,
-          likeStatus: null,
-          likes: Math.max(0, selectedPost.likes - 1),
-        });
-      }
-      toast.success('Unliked! 90% refunded');
-      fetchBalance(currentUser.id);
-    } catch (error) {
-      const msg = (error as Error).message || 'Unlike failed';
-      toast.warning(msg);
-    }
-  };
-
-  // Handle like action (toggle)
   const handleDeletePostRequest = (post: Post) => {
     setSelectedPost(post);
     setShowDeleteConfirm(true);
@@ -603,45 +589,99 @@ const App: React.FC = () => {
   const handleLikeToggle = async (post: Post) => {
     if (!currentUser) return;
     const isLiked = likedPosts.has(String(post.id)) || post.isLiked;
-    
-    // Settled likes cannot be unliked (PostCard handles UI feedback)
-    if (isLiked && post.likeStatus === 'settled') {
+
+    // Likes are permanent — already liked means no action
+    if (isLiked) return;
+
+    // Quick like mode: skip modal, get quote and confirm immediately
+    if (quickLikeMode) {
+      try {
+        const quote = await api.createLikeQuote(Number(post.id), currentUser.id);
+        if (!quote.has_balance) {
+          toast.error(`Insufficient balance (${quote.available_balance} sat)`);
+          return;
+        }
+        await storelikePost(Number(post.id), currentUser.id, quote.quote_id);
+        setLikedPosts(prev => new Set([...prev, String(post.id)]));
+        if (selectedPost && String(selectedPost.id) === String(post.id)) {
+          setSelectedPost({
+            ...selectedPost,
+            isLiked: true,
+            likeStatus: 'settled',
+            likes: selectedPost.likes + 1,
+          });
+        }
+        toast.success(`Liked! ${quote.cost} sat`);
+        fetchBalance(currentUser.id);
+      } catch (err) {
+        toast.error((err as Error).message);
+      }
       return;
     }
-    
-    // If trying to unlike a pending like, show toast with confirm button
-    if (isLiked && post.likeStatus === 'pending') {
-      toast.confirm('Unlike? 90% refund (10% fee)', () => executeUnlike(post), 'Unlike');
+
+    // Normal mode: open the confirm modal with quote system
+    setLikeTargetPost(post);
+    setShowLikeModal(true);
+  };
+
+  const handleLikeWithQuote = async (quoteId: string) => {
+    if (!currentUser) return;
+
+    if (likeTargetComment) {
+      await storeLikeComment(likeTargetComment.postId, likeTargetComment.commentId, currentUser.id, quoteId);
+      toast.success('Liked!');
+      fetchBalance(currentUser.id);
+      setLikeTargetComment(null);
       return;
     }
-    
-    // Like action
-    try {
-      await toggleLikePost(Number(post.id), currentUser.id, false);
-      setLikedPosts(prev => new Set([...prev, String(post.id)]));
-      if (selectedPost && String(selectedPost.id) === String(post.id)) {
+
+    if (likeTargetPost) {
+      await storelikePost(Number(likeTargetPost.id), currentUser.id, quoteId);
+      setLikedPosts(prev => new Set([...prev, String(likeTargetPost.id)]));
+      if (selectedPost && String(selectedPost.id) === String(likeTargetPost.id)) {
         setSelectedPost({
           ...selectedPost,
           isLiked: true,
-          likeStatus: 'pending',
+          likeStatus: 'settled',
           likes: selectedPost.likes + 1,
         });
       }
-      toast.success('Liked! Locked for 1h');
+      toast.success('Liked!');
       fetchBalance(currentUser.id);
-    } catch (error) {
-      const msg = (error as Error).message || 'Like failed';
-      toast.warning(msg);
     }
   };
 
-  // Legacy — keep modal wiring for now but simplified
-  const handleLikeRequest = (post: Post) => {
-    handleLikeToggle(post);
+  const handleCommentLikeToggle = async (postId: number, comment: { id: number; is_liked: boolean; like_status?: string | null }) => {
+    if (!currentUser) return;
+
+    // Likes are permanent — already liked means no action
+    if (comment.is_liked) return;
+
+    // Quick like mode: skip modal
+    if (quickLikeMode) {
+      try {
+        const quote = await api.createCommentLikeQuote(postId, comment.id, currentUser.id);
+        if (!quote.has_balance) {
+          toast.error(`Insufficient balance (${quote.available_balance} sat)`);
+          return;
+        }
+        await storeLikeComment(postId, comment.id, currentUser.id, quote.quote_id);
+        toast.success(`Liked! ${quote.cost} sat`);
+        fetchBalance(currentUser.id);
+      } catch (err) {
+        toast.error((err as Error).message);
+      }
+      return;
+    }
+
+    // Normal mode: open the confirm modal
+    setLikeTargetComment({ postId, commentId: comment.id });
+    setShowLikeModal(true);
   };
 
-  const handleLikeConfirm = async () => {
-    if (likeTargetPost) handleLikeToggle(likeTargetPost);
+  // Legacy — keep for compatibility
+  const handleLikeRequest = (post: Post) => {
+    handleLikeToggle(post);
   };
 
   // Boost handlers removed in minimal system
@@ -1702,29 +1742,9 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4 mt-2">
             <button
               className={`flex items-center gap-1 text-xs font-bold ${heartColor}`}
-              onClick={async () => {
+              onClick={() => {
                 if (!currentUser || !selectedPost) return;
-                try {
-                  const result = await toggleLikeComment(Number(selectedPost.id), c.id, currentUser.id, isLiked);
-                  fetchBalance(currentUser.id);
-                  if (!isLiked) {
-                    toast.success('Liked! Locked for 1h');
-                  } else {
-                    const res = result as { refund_amount?: number } | undefined;
-                    if (res?.refund_amount !== undefined) {
-                      toast.info(`Unliked! ${res.refund_amount} sat refunded`);
-                    }
-                  }
-                } catch (err) {
-                  const msg = (err as Error).message;
-                  if (msg.includes('settled')) {
-                    toast.error('Cannot unlike after 1h');
-                  } else if (msg.includes('402') || msg.includes('Insufficient')) {
-                    toast.error('Insufficient balance');
-                  } else {
-                    toast.warning(msg);
-                  }
-                }
+                handleCommentLikeToggle(Number(selectedPost.id), c);
               }}
             >
               <Heart size={12} fill={isLiked ? 'currentColor' : 'none'} /> {c.likes_count}
@@ -2019,29 +2039,9 @@ const App: React.FC = () => {
                <div className="flex items-center gap-4">
                  <button
                    className={`flex items-center gap-1 text-xs font-bold ${getCommentHeartColor(answer)}`}
-                   onClick={async () => {
+                   onClick={() => {
                      if (!currentUser || !selectedPost) return;
-                     try {
-                       const result = await toggleLikeComment(Number(selectedPost.id), answer.id, currentUser.id, answer.is_liked);
-                       fetchBalance(currentUser.id);
-                       if (!answer.is_liked) {
-                         toast.success('Liked! Locked for 1h');
-                       } else {
-                         const res = result as { refund_amount?: number } | undefined;
-                         if (res?.refund_amount !== undefined) {
-                           toast.info(`Unliked! ${res.refund_amount} sat refunded`);
-                         }
-                       }
-                     } catch (err) {
-                       const msg = (err as Error).message;
-                       if (msg.includes('settled')) {
-                         toast.error('Cannot unlike after 1h');
-                       } else if (msg.includes('402') || msg.includes('Insufficient')) {
-                         toast.error('Insufficient balance');
-                       } else {
-                         toast.warning(msg);
-                       }
-                     }
+                     handleCommentLikeToggle(Number(selectedPost.id), answer);
                    }}
                  >
                    <Heart size={12} fill={answer.is_liked ? 'currentColor' : 'none'} /> {answer.likes_count}
@@ -2150,6 +2150,31 @@ const App: React.FC = () => {
               <span className="text-stone-500"><span className="text-stone-400 font-semibold">{totalOut.toLocaleString()}</span> spent</span>
             </div>
           </div>
+
+          {/* Unclaimed SAT banner */}
+          {unclaimedSat > 0 && (
+            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center justify-between">
+              <div>
+                <p className="text-amber-400 font-semibold text-sm">{unclaimedSat.toLocaleString()} SAT unclaimed</p>
+                <p className="text-amber-400/70 text-xs mt-0.5">From your pay wallet - claim to use for likes</p>
+              </div>
+              <button
+                className="bg-amber-500 hover:bg-amber-600 text-black font-bold px-4 py-2 rounded-lg text-sm transition-colors"
+                onClick={async () => {
+                  if (!currentUser) return;
+                  try {
+                    const result = await claimSat(currentUser.id);
+                    toast.success(result.message);
+                    fetchBalance(currentUser.id);
+                  } catch (err) {
+                    toast.error((err as Error).message);
+                  }
+                }}
+              >
+                Claim
+              </button>
+            </div>
+          )}
 
           {/* Transactions */}
           {ledgerEntries.length === 0 ? (
@@ -4346,6 +4371,26 @@ const App: React.FC = () => {
             </button>
           </div>
 
+          {/* Like Preferences section */}
+          <div>
+            <h3 className="text-[11px] font-bold text-stone-500 uppercase tracking-widest mb-2 px-1">Like Preferences</h3>
+            <button
+              onClick={() => toggleQuickLikeMode(!quickLikeMode)}
+              className="w-full flex items-center gap-3 p-4 bg-stone-900/60 rounded-2xl active:bg-stone-800 transition-colors"
+            >
+              <div className="w-9 h-9 rounded-xl bg-pink-500/15 flex items-center justify-center shrink-0">
+                <Zap size={18} className="text-pink-500" />
+              </div>
+              <div className="text-left flex-1">
+                <span className="text-sm font-semibold text-stone-200 block">Quick Like Mode</span>
+                <span className="text-xs text-stone-500">Skip confirmation, like instantly</span>
+              </div>
+              <div className={`w-11 h-6 rounded-full p-0.5 transition-colors duration-200 ${quickLikeMode ? 'bg-pink-500' : 'bg-stone-600'}`}>
+                <div className={`w-5 h-5 rounded-full bg-white shadow transition-transform duration-200 ${quickLikeMode ? 'translate-x-5' : 'translate-x-0'}`} />
+              </div>
+            </button>
+          </div>
+
           {/* General section */}
           <div>
             <h3 className="text-[11px] font-bold text-stone-500 uppercase tracking-widest mb-2 px-1">General</h3>
@@ -4439,14 +4484,26 @@ const App: React.FC = () => {
 
       {/* Challenge Modal removed in minimal system */}
 
-      {/* Like Stake Modal */}
-      <LikeStakeModal
-        isOpen={showLikeModal}
-        onClose={() => setShowLikeModal(false)}
-        onConfirm={handleLikeConfirm}
-        stakeAmount={LIKE_STAKE}
-        userBalance={availableBalance}
-      />
+      {/* Like Confirm Modal with Quote System */}
+      {currentUser && (likeTargetPost || likeTargetComment) && (
+        <LikeConfirmModal
+          isOpen={showLikeModal}
+          onClose={() => {
+            setShowLikeModal(false);
+            setLikeTargetPost(null);
+            setLikeTargetComment(null);
+          }}
+          onConfirm={handleLikeWithQuote}
+          postId={likeTargetComment ? likeTargetComment.postId : Number(likeTargetPost!.id)}
+          userId={currentUser.id}
+          isComment={!!likeTargetComment}
+          commentId={likeTargetComment?.commentId}
+          onEnableQuickMode={quickLikeMode ? undefined : () => {
+            toggleQuickLikeMode(true);
+            toast.success('Quick Like Mode enabled!');
+          }}
+        />
+      )}
 
       {/* Boost Modal removed in minimal system */}
       

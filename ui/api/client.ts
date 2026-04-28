@@ -432,6 +432,19 @@ export interface UserBalances {
   stable_balance: number;
   stable_formatted: string;
   first_exchange_eligible: boolean;
+  unclaimed_sat?: number;
+}
+
+export interface LikeQuote {
+  quote_id: string;
+  cost: number;
+  likes_count: number;
+  your_position: number;
+  break_even_at: number;
+  likes_needed: number;
+  expires_in_seconds: number;
+  has_balance: boolean;
+  available_balance: number;
 }
 
 // API methods
@@ -514,29 +527,23 @@ export const api = {
   getLikeCost: (postId: number) =>
     apiRequest<{ post_id: number; cost: number; likes_count: number }>(`/api/posts/${postId}/like-cost`),
 
-  likePost: (postId: number, userId: number) =>
+  createLikeQuote: (postId: number, userId: number) =>
+    apiRequest<LikeQuote>(`/api/posts/${postId}/like-quote`, {
+      method: 'POST',
+      params: { user_id: userId },
+    }),
+
+  likePost: (postId: number, userId: number, quoteId?: string) =>
     apiRequest<{
       likes_count: number;
       is_liked: boolean;
-      like_status: 'pending' | 'settled';
-      locked_until: string;
+      like_status: 'settled';
       cost: number;
       your_weight: number;
       like_rank: number;
     }>(`/api/posts/${postId}/like`, {
       method: 'POST',
-      params: { user_id: userId },
-    }),
-
-  unlikePost: (postId: number, userId: number) =>
-    apiRequest<{
-      likes_count: number;
-      is_liked: boolean;
-      refund_amount: number;
-      refund_rate: string;
-    }>(`/api/posts/${postId}/like`, {
-      method: 'DELETE',
-      params: { user_id: userId },
+      params: { user_id: userId, quote_id: quoteId },
     }),
 
   getPostLikers: (postId: number) =>
@@ -554,29 +561,23 @@ export const api = {
       params: { author_id: authorId },
     }),
 
-  likeComment: (postId: number, commentId: number, userId: number) =>
+  createCommentLikeQuote: (postId: number, commentId: number, userId: number) =>
+    apiRequest<LikeQuote>(`/api/posts/${postId}/comments/${commentId}/like-quote`, {
+      method: 'POST',
+      params: { user_id: userId },
+    }),
+
+  likeComment: (postId: number, commentId: number, userId: number, quoteId?: string) =>
     apiRequest<{
       likes_count: number;
       is_liked: boolean;
-      like_status: 'pending' | 'settled';
-      locked_until: string;
+      like_status: 'settled';
       cost: number;
       your_weight: number;
       like_rank: number;
     }>(
       `/api/posts/${postId}/comments/${commentId}/like`,
-      { method: 'POST', params: { user_id: userId } },
-    ),
-
-  unlikeComment: (postId: number, commentId: number, userId: number) =>
-    apiRequest<{
-      likes_count: number;
-      is_liked: boolean;
-      refund_amount: number;
-      refund_rate: string;
-    }>(
-      `/api/posts/${postId}/comments/${commentId}/like`,
-      { method: 'DELETE', params: { user_id: userId } },
+      { method: 'POST', params: { user_id: userId, quote_id: quoteId } },
     ),
 
   deleteComment: (commentId: number, userId: number) =>
@@ -588,12 +589,10 @@ export const api = {
   deletePost: (postId: number, userId: number) =>
     apiRequest<{
       status: string;
-      pending_likes_refunded: number;
       settled_likes: number;
       author_clawback: number;
-      comment_likes_refunded: number;
+      pool_forfeited: number;
       bounty_refunded: number;
-      total_refunded_to_likers: number;
     }>(
       `/api/posts/${postId}`,
       { method: 'DELETE', params: { author_id: userId } },
@@ -822,6 +821,12 @@ export const api = {
 
   getUserBalances: (userId: number) =>
     apiRequest<UserBalances>('/api/pay/user-balance', { params: { user_id: userId } }),
+
+  claimSat: (userId: number) =>
+    apiRequest<{ claimed: number; available_balance: number; message: string }>(
+      '/api/pay/claim-sat',
+      { method: 'POST', params: { user_id: userId } }
+    ),
 
   // Media
   uploadMedia: async (file: Blob, purpose: 'post' | 'chat'): Promise<MediaUploadResponse> => {

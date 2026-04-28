@@ -1,8 +1,8 @@
 """
-Settlement API - Background task endpoint for settling expired pending likes.
+Settlement API - Distributes accumulated liker earnings pools.
 
-This endpoint should be called by a cron job (e.g., every minute) to settle
-all expired pending likes (both post and comment) in the correct order.
+Called by cron every 60 seconds. For each post/comment with revenue_pool > 0,
+divides the pool equally among settled likers and credits their balances.
 """
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,86 +14,49 @@ router = APIRouter()
 
 
 @router.post('/settle-likes')
-async def settle_pending_likes(
+async def distribute_liker_earnings(
     batch_size: int = Query(100, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
 ):
-    """Settle all expired pending likes (posts and comments).
-    
-    Called by cron job every minute. Processes in batches to avoid overload.
-    Settles in created_at order to ensure fair revenue distribution.
+    """Distribute accumulated revenue pools to likers.
+
+    Called by cron job every 60 seconds. Processes posts and comments
+    with undistributed revenue in their pools.
     """
     service = DynamicLikeService(db)
-    
-    # Settle post likes
-    post_settled = await service.settle_expired_likes(post_id=None)
-    
-    # Settle comment likes
-    comment_settled = await service.settle_expired_comment_likes(comment_id=None)
-    
+    result = await service.distribute_pools(batch_size)
     await db.commit()
-    
-    total_settled = len(post_settled) + len(comment_settled)
-    
-    return {
-        'post_likes_settled': len(post_settled),
-        'comment_likes_settled': len(comment_settled),
-        'total_settled': total_settled,
-        'post_details': post_settled[:5] if len(post_settled) > 5 else post_settled,
-        'comment_details': comment_settled[:5] if len(comment_settled) > 5 else comment_settled,
-    }
+    return result
 
 
 @router.get('/pending-likes-count')
-async def get_pending_likes_count(
+async def get_pool_stats(
     db: AsyncSession = Depends(get_db),
 ):
-    """Get count of pending likes that need settlement (for monitoring)."""
-    from datetime import datetime
+    """Get stats on undistributed revenue pools (for monitoring)."""
     from sqlalchemy import select, func
-    from app.models.post import PostLike, CommentLike, InteractionStatus
-    
-    # Post likes
+    from app.models.post import Post, Comment
+
     post_result = await db.execute(
-        select(func.count(PostLike.id)).where(
-            PostLike.status == InteractionStatus.PENDING.value,
-            PostLike.locked_until < datetime.utcnow()
-        )
+        select(
+            func.count(Post.id),
+            func.coalesce(func.sum(Post.revenue_pool), 0)
+        ).where(Post.revenue_pool > 0)
     )
-    post_expired = post_result.scalar() or 0
-    
-    post_pending_result = await db.execute(
-        select(func.count(PostLike.id)).where(
-            PostLike.status == InteractionStatus.PENDING.value
-        )
-    )
-    post_total_pending = post_pending_result.scalar() or 0
-    
-    # Comment likes
+    post_row = post_result.one()
+
     comment_result = await db.execute(
-        select(func.count(CommentLike.id)).where(
-            CommentLike.status == InteractionStatus.PENDING.value,
-            CommentLike.locked_until < datetime.utcnow()
-        )
+        select(
+            func.count(Comment.id),
+            func.coalesce(func.sum(Comment.revenue_pool), 0)
+        ).where(Comment.revenue_pool > 0)
     )
-    comment_expired = comment_result.scalar() or 0
-    
-    comment_pending_result = await db.execute(
-        select(func.count(CommentLike.id)).where(
-            CommentLike.status == InteractionStatus.PENDING.value
-        )
-    )
-    comment_total_pending = comment_pending_result.scalar() or 0
-    
+    comment_row = comment_result.one()
+
     return {
-        'post_likes': {
-            'expired_pending': post_expired,
-            'total_pending': post_total_pending,
-        },
-        'comment_likes': {
-            'expired_pending': comment_expired,
-            'total_pending': comment_total_pending,
-        },
-        'total_expired': post_expired + comment_expired,
-        'total_pending': post_total_pending + comment_total_pending,
+        'posts_with_pool': post_row[0],
+        'post_pool_total': post_row[1],
+        'comments_with_pool': comment_row[0],
+        'comment_pool_total': comment_row[1],
+        'total_undistributed': post_row[1] + comment_row[1],
     }

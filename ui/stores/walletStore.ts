@@ -33,6 +33,7 @@ interface WalletState {
   chainFees: ChainFee[];
   stableBalance: number;
   satBalance: number;
+  unclaimedSat: number;
   isFirstExchangeEligible: boolean;
   isLoadingExchange: boolean;
   isConfirmingExchange: boolean;
@@ -49,6 +50,7 @@ interface WalletState {
   fetchExchangeQuota: () => Promise<void>;
   fetchChainFees: () => Promise<void>;
   fetchUserBalances: (userId: number) => Promise<void>;
+  claimSat: (userId: number) => Promise<{ claimed: number; message: string }>;
   createExchangePreview: (userId: number, amount: number, direction: string) => Promise<ExchangePreview>;
   confirmExchange: (userId: number, previewId: string) => Promise<void>;
   fetchExchangeHistory: (userId: number) => Promise<void>;
@@ -80,6 +82,7 @@ export const useWalletStore = create<WalletState>((set) => ({
   chainFees: [],
   stableBalance: 0,
   satBalance: 0,
+  unclaimedSat: 0,
   isFirstExchangeEligible: false,
   isLoadingExchange: false,
   isConfirmingExchange: false,
@@ -183,10 +186,28 @@ export const useWalletStore = create<WalletState>((set) => ({
       set({
         stableBalance: result.stable_balance,
         satBalance: result.sat_balance,
+        unclaimedSat: result.unclaimed_sat || 0,
         isFirstExchangeEligible: result.first_exchange_eligible,
       });
     } catch (error) {
       console.error('Failed to fetch user balances:', error);
+    }
+  },
+
+  claimSat: async (userId: number) => {
+    set({ isSubmitting: true, error: null });
+    try {
+      const result = await api.claimSat(userId);
+      set((state) => ({
+        satBalance: result.available_balance,
+        unclaimedSat: 0,
+        isSubmitting: false,
+      }));
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to claim SAT';
+      set({ error: message, isSubmitting: false });
+      throw error;
     }
   },
 
@@ -249,6 +270,7 @@ export const useWalletStore = create<WalletState>((set) => ({
       chainFees: [],
       stableBalance: 0,
       satBalance: 0,
+      unclaimedSat: 0,
       isFirstExchangeEligible: false,
       isLoadingExchange: false,
       isConfirmingExchange: false,

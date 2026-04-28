@@ -21,11 +21,11 @@ interface PostState {
   fetchPost: (postId: number, userId?: number) => Promise<void>;
   fetchComments: (postId: number, userId?: number) => Promise<void>;
   createPost: (authorId: number, content: string, postType: string, bounty?: number) => Promise<ApiPost>;
-  toggleLikePost: (postId: number, userId: number, isLiked: boolean) => Promise<void>;
+  likePost: (postId: number, userId: number, quoteId?: string) => Promise<void>;
   createComment: (postId: number, authorId: number, content: string, parentId?: number) => Promise<ApiComment>;
-  toggleLikeComment: (postId: number, commentId: number, userId: number, isLiked: boolean) => Promise<unknown>;
+  likeComment: (postId: number, commentId: number, userId: number, quoteId?: string) => Promise<unknown>;
   deleteComment: (commentId: number, postId: number, userId: number) => Promise<{ refunded: number; penalty: number }>;
-  deletePost: (postId: number, userId: number) => Promise<{ author_clawback: number; total_refunded_to_likers: number; bounty_refunded: number }>;
+  deletePost: (postId: number, userId: number) => Promise<{ author_clawback: number; pool_forfeited: number; bounty_refunded: number }>;
   clearCurrentPost: () => void;
 }
 
@@ -120,22 +120,14 @@ export const usePostStore = create<PostState>((set, get) => ({
     }
   },
 
-  toggleLikePost: async (postId, userId, isLiked) => {
-    const doToggle = isLiked ? api.unlikePost : api.likePost;
+  likePost: async (postId, userId, quoteId) => {
     try {
-      const result = await doToggle(postId, userId);
+      const result = await api.likePost(postId, userId, quoteId);
       const patch: Partial<ApiPost> = {
         likes_count: result.likes_count,
-        is_liked: result.is_liked,
+        is_liked: true,
+        like_status: result.like_status,
       };
-      
-      if ('like_status' in result) {
-        patch.like_status = result.like_status;
-        patch.locked_until = result.locked_until;
-      } else {
-        patch.like_status = null;
-        patch.locked_until = null;
-      }
 
       set((state) => ({
         posts: state.posts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
@@ -164,29 +156,21 @@ export const usePostStore = create<PostState>((set, get) => ({
     return comment;
   },
 
-  toggleLikeComment: async (postId, commentId, userId, isLiked) => {
-    const doToggle = isLiked ? api.unlikeComment : api.likeComment;
+  likeComment: async (postId, commentId, userId, quoteId) => {
     try {
-      const result = await doToggle(postId, commentId, userId);
+      const result = await api.likeComment(postId, commentId, userId, quoteId);
       const patch: Partial<ApiComment> = {
         likes_count: result.likes_count,
-        is_liked: result.is_liked,
+        is_liked: true,
+        like_status: result.like_status,
       };
-      
-      if ('like_status' in result) {
-        patch.like_status = result.like_status;
-        patch.like_locked_until = result.locked_until;
-      } else {
-        patch.like_status = null;
-        patch.like_locked_until = null;
-      }
-      
+
       set((state) => ({
         comments: state.comments.map((c) =>
           c.id === commentId ? { ...c, ...patch } : c,
         ),
       }));
-      
+
       return result;
     } catch (error) {
       throw error;
@@ -216,7 +200,7 @@ export const usePostStore = create<PostState>((set, get) => ({
     }));
     return {
       author_clawback: result.author_clawback,
-      total_refunded_to_likers: result.total_refunded_to_likers,
+      pool_forfeited: result.pool_forfeited,
       bounty_refunded: result.bounty_refunded,
     };
   },

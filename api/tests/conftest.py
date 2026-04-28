@@ -7,8 +7,8 @@ from app.db.database import Base, get_db
 from app.config import settings
 
 
-# Test database URL
-TEST_DATABASE_URL = settings.database_url.replace('/bitlink', '/bitlink_test')
+# Test database URL — only replace the database name (last path segment)
+TEST_DATABASE_URL = settings.database_url.rsplit('/bitlink', 1)[0] + '/bitlink_test'
 
 engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestSession = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

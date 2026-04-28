@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -270,18 +270,37 @@ async def get_ledger(
 
 @router.get('/{user_id}/costs')
 async def get_user_costs(user_id: int, db: AsyncSession = Depends(get_db)):
-    """Get action costs. Post is free, like costs are dynamic."""
+    """Get action costs. Ascending price curve for likes.
+    
+    Post: 3 free per day, then 10 sats.
+    Like: starts at 10 sats, increases as 10 * sqrt(1 + likes).
+    Comment like: starts at 3 sats, increases as 3 * sqrt(1 + likes).
+    """
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail='User not found')
 
+    # Check if daily reset is needed
+    today = date.today()
+    free_remaining = user.free_posts_remaining
+    if user.free_posts_reset_date is None or user.free_posts_reset_date < today:
+        free_remaining = 3
+
     return {
         'user_id': user.id,
+        'free_posts_remaining': free_remaining,
         'costs': {
-            'post': 0,
-            'comment': 20,
-            'reply': 10,
-            'like_post': 50,  # Average dynamic cost (actual varies 5-100)
-            'like_comment': 10,
+            'post': 0 if free_remaining > 0 else 10,
+            'comment': 5,
+            'reply': 1,
+            'like_post_min': 10,
+            'like_post_formula': '10 * sqrt(1 + likes)',
+            'like_comment_min': 3,
+            'like_comment_formula': '3 * sqrt(1 + likes)',
+        },
+        'revenue_split': {
+            'author_pct': 10,
+            'likers_pct': 85,
+            'platform_pct': 5,
         },
     }

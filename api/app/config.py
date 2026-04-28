@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     pay_service_url: str = 'http://pay:8000'
     pay_app_id: int = 1
 
+    # Like economics
+    platform_share_pct: int = 5
+
     # S3-compatible Object Storage (MinIO in dev, R2/S3 in prod)
     s3_endpoint: str = 'http://localhost:9000'
     s3_access_key: str = 'bitlink'

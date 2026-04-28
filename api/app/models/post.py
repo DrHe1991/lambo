@@ -66,6 +66,9 @@ class Post(Base):
     boost_amount: Mapped[int] = mapped_column(BigInteger, default=0)
     boost_remaining: Mapped[float] = mapped_column(Float, default=0.0)
 
+    # Undistributed liker earnings pool (distributed by cron)
+    revenue_pool: Mapped[int] = mapped_column(BigInteger, default=0)
+
     # AI evaluation results
     quality: Mapped[str | None] = mapped_column(String(20), default=None)
     tags: Mapped[list | None] = mapped_column(JSON, default=None)
@@ -104,6 +107,9 @@ class Comment(Base):
 
     # How much the author paid (comment=50, reply=20, answer=200)
     cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
+
+    # Undistributed liker earnings pool (distributed by cron)
+    revenue_pool: Mapped[int] = mapped_column(BigInteger, default=0)
 
     # 24h lock settlement fields
     interaction_status: Mapped[str] = mapped_column(
