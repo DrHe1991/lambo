@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" role="img" aria-label="BitLink">
+  <defs>
+    <linearGradient id="bitlink-icon-bg" x1="0" y1="0" x2="108" y2="108" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F97316" />
+      <stop offset="1" stop-color="#D97706" />
+    </linearGradient>
+  </defs>
+  <rect width="108" height="108" rx="24" fill="url(#bitlink-icon-bg)" />
+  <g transform="translate(24 22) scale(2.5)">
+    <path fill="#FFFFFF" d="M13,2 L3,14 L12,14 L11,22 L21,10 L12,10 L13,2 Z" />
+  </g>
+</svg>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { Keyboard } from '@capacitor/keyboard';
@@ -267,64 +268,151 @@ const App: React.FC = () => {
     lastScrollY.current = st;
   }, [activeTab]);
 
-  // Android back button / gesture handler
-  useEffect(() => {
-    const listener = CapApp.addListener('backButton', () => {
-      // Dismiss modals and overlays first
-      if (chatLightboxSrc) { setChatLightboxSrc(null); return; }
-      if (showLikeModal) { setShowLikeModal(false); return; }
-      if (showEmojiPicker) { setShowEmojiPicker(false); return; }
-      if (showChatActions) { setShowChatActions(false); return; }
-      if (selectedMessageId) { setSelectedMessageId(null); setMenuPosition(null); return; }
-      if (showReactorsFor) { setShowReactorsFor(null); return; }
-      if (showAttachmentPicker) { setShowAttachmentPicker(false); return; }
-      if (showDraftList) { setShowDraftList(false); return; }
-      if (showAddMembersModal) { setShowAddMembersModal(false); return; }
-      if (showInviteLinks) { setShowInviteLinks(false); return; }
-      if (showMemberActions !== null) { setShowMemberActions(null); return; }
-      if (inlineCommentPost) { setInlineCommentPost(null); return; }
-      if (publishPreview) { setPublishPreview(false); return; }
+  const goBack = useCallback(({ allowMinimize = false }: { allowMinimize?: boolean } = {}) => {
+    // Dismiss modals and overlays first
+    if (chatLightboxSrc) { setChatLightboxSrc(null); return true; }
+    if (showLikeModal) { setShowLikeModal(false); return true; }
+    if (showEmojiPicker) { setShowEmojiPicker(false); return true; }
+    if (showChatActions) { setShowChatActions(false); return true; }
+    if (selectedMessageId) { setSelectedMessageId(null); setMenuPosition(null); return true; }
+    if (showReactorsFor) { setShowReactorsFor(null); return true; }
+    if (showAttachmentPicker) { setShowAttachmentPicker(false); return true; }
+    if (showDraftList) { setShowDraftList(false); return true; }
+    if (showAddMembersModal) { setShowAddMembersModal(false); return true; }
+    if (showInviteLinks) { setShowInviteLinks(false); return true; }
+    if (showMemberActions !== null) { setShowMemberActions(null); return true; }
+    if (inlineCommentPost) { setInlineCommentPost(null); return true; }
+    if (publishPreview) { setPublishPreview(false); return true; }
 
-      // Close publisher
-      if (isPublishing) { setIsPublishing(false); return; }
+    // Close publisher
+    if (isPublishing) { setIsPublishing(false); return true; }
 
-      // Navigate back through view hierarchy
-      if (currentView === 'GROUP_INFO') { setCurrentView('CHAT_DETAIL'); return; }
-      if (currentView === 'FOLLOWERS_LIST' || currentView === 'FOLLOWING_LIST') { setCurrentView('USER_PROFILE'); return; }
-      if (currentView !== 'MAIN') {
-        setCurrentView('MAIN');
-        if (currentView === 'CHAT_DETAIL') {
-          setSelectedChat(null);
-          setSelectedMessageId(null);
-          setReplyingTo(null);
-        }
-        if (currentView === 'POST_DETAIL' || currentView === 'QA_DETAIL') {
-          usePostStore.getState().clearCurrentPost();
-        }
-        if (currentView === 'SEARCH') {
-          setFriendSearch('');
-          setFriendSearchResults([]);
-        }
-        if (currentView === 'JOIN_GROUP') {
-          setInvitePreview(null);
-          setInviteCodeInput('');
-        }
-        if (currentView === 'CHAT_DETAIL') {
-          setSelectedMessageId(null);
-          setReplyingTo(null);
-        }
-        return;
+    // Navigate back through view hierarchy
+    if (currentView === 'GROUP_INFO') { setCurrentView('CHAT_DETAIL'); return true; }
+    if (currentView === 'FOLLOWERS_LIST' || currentView === 'FOLLOWING_LIST') {
+      setCurrentView('USER_PROFILE');
+      return true;
+    }
+    if (currentView !== 'MAIN') {
+      setCurrentView('MAIN');
+      if (currentView === 'CHAT_DETAIL') {
+        setSelectedChat(null);
+        setSelectedMessageId(null);
+        setReplyingTo(null);
       }
+      if (currentView === 'POST_DETAIL' || currentView === 'QA_DETAIL') {
+        usePostStore.getState().clearCurrentPost();
+      }
+      if (currentView === 'SEARCH') {
+        setFriendSearch('');
+        setFriendSearchResults([]);
+      }
+      if (currentView === 'JOIN_GROUP') {
+        setInvitePreview(null);
+        setInviteCodeInput('');
+      }
+      if (currentView === 'CHAT_DETAIL') {
+        setSelectedMessageId(null);
+        setReplyingTo(null);
+      }
+      return true;
+    }
 
-      // At MAIN view, minimize the app
+    if (allowMinimize) {
       CapApp.minimizeApp();
-    });
-
-    return () => { listener.then(l => l.remove()); };
+      return true;
+    }
+    return false;
   }, [currentView, isPublishing, chatLightboxSrc, showLikeModal, showEmojiPicker,
       showChatActions, selectedMessageId, showReactorsFor, showAttachmentPicker,
       showDraftList, showAddMembersModal, showInviteLinks, showMemberActions,
       inlineCommentPost, publishPreview]);
+
+  // Android back button / gesture handler
+  useEffect(() => {
+    const listener = CapApp.addListener('backButton', () => {
+      goBack({ allowMinimize: true });
+    });
+
+    return () => { listener.then(l => l.remove()); };
+  }, [goBack]);
+
+  // PWA/browser back gesture: swipe right from the left edge.
+  useEffect(() => {
+    if (Capacitor.isNativePlatform()) return;
+
+    const EDGE_ZONE = 32;
+    const MIN_SWIPE_DISTANCE = 70;
+    const MAX_VERTICAL_DRIFT = 45;
+    const HORIZONTAL_LOCK_DISTANCE = 12;
+
+    let startX = 0;
+    let startY = 0;
+    let tracking = false;
+
+    const isBlockedTarget = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      return !!target.closest(
+        'input, textarea, select, button, a, [contenteditable="true"], [role="slider"], [data-no-swipe-back]'
+      );
+    };
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1 || isBlockedTarget(e.target)) {
+        tracking = false;
+        return;
+      }
+
+      const touch = e.touches[0];
+      startX = touch.clientX;
+      startY = touch.clientY;
+      tracking = startX <= EDGE_ZONE;
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!tracking || e.touches.length !== 1) return;
+
+      const touch = e.touches[0];
+      const dx = touch.clientX - startX;
+      const dy = Math.abs(touch.clientY - startY);
+
+      if (dx > HORIZONTAL_LOCK_DISTANCE && dx > dy) {
+        e.preventDefault();
+      }
+      if (dy > MAX_VERTICAL_DRIFT || dx < -HORIZONTAL_LOCK_DISTANCE) {
+        tracking = false;
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!tracking || e.changedTouches.length !== 1) return;
+
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - startX;
+      const dy = Math.abs(touch.clientY - startY);
+      tracking = false;
+
+      if (dx >= MIN_SWIPE_DISTANCE && dy <= MAX_VERTICAL_DRIFT) {
+        goBack({ allowMinimize: false });
+      }
+    };
+
+    const onTouchCancel = () => {
+      tracking = false;
+    };
+
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchmove', onTouchMove, { passive: false });
+    document.addEventListener('touchend', onTouchEnd, { passive: true });
+    document.addEventListener('touchcancel', onTouchCancel, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchmove', onTouchMove);
+      document.removeEventListener('touchend', onTouchEnd);
+      document.removeEventListener('touchcancel', onTouchCancel);
+    };
+  }, [goBack]);
 
   const scrollChatToBottom = useCallback((smooth = false) => {
     requestAnimationFrame(() => {
