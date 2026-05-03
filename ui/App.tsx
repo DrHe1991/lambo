@@ -5,6 +5,8 @@ import { Keyboard } from '@capacitor/keyboard';
 import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
+import { isPrivyConfigured } from './lib/privy';
+import { PrivyTokenSync } from './components/PrivyTokenSync';
 import { api, ApiComment, ApiMessage } from './api/client';
 import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload, RefreshCw, Sun, Moon, Globe, Info, Lock as LockIcon, ArrowDownLeft, ArrowUpRight, Sparkles, Banknote, TrendingUp, TrendingDown } from 'lucide-react';
 import { PostCard } from './components/PostCard';
@@ -19,8 +21,10 @@ import { ToastContainer, toast } from './components/Toast';
 import { ArticleEditor } from './components/ArticleEditor';
 import { ArticleRenderer } from './components/ArticleRenderer';
 import { DepositView } from './components/DepositView';
-import { WithdrawView } from './components/WithdrawView';
-import { ExchangeView } from './components/ExchangeView';
+import {
+  DelegatedActionsConsent,
+  hasDelegatedConsent,
+} from './components/DelegatedActionsConsent';
 import { BountySlider } from './components/BountySlider';
 // Trust theme removed - trust system simplified
 import { ApiUserCosts, ApiGroupDetail, ApiMemberInfo, ApiInviteLink, ApiJoinRequest, ApiDraft } from './api/client';
@@ -32,7 +36,7 @@ import { takePhoto } from './utils/camera';
 import ImageLightbox from './components/ImageLightbox';
 
 // Views
-type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT' | 'WITHDRAW' | 'EXCHANGE';
+type View = 'MAIN' | 'POST_DETAIL' | 'QA_DETAIL' | 'SEARCH' | 'USER_PROFILE' | 'CHAT_DETAIL' | 'TRANSACTIONS' | 'INVITE' | 'SETTINGS' | 'FOLLOWERS_LIST' | 'FOLLOWING_LIST' | 'MY_QR_CODE' | 'GROUP_CHAT' | 'SCAN' | 'GROUP_INFO' | 'JOIN_GROUP' | 'DEPOSIT';
 
 import { fixUrl, fixHtmlUrls } from './utils/urlFixer';
 
@@ -79,8 +83,9 @@ const App: React.FC = () => {
     fetchComments,
     createPost: createApiPost,
     createComment: createApiComment,
-    likePost: storelikePost,
-    likeComment: storeLikeComment,
+    fetchTipQuote,
+    confirmTip,
+    toggleCommentLike,
     deleteComment: deleteApiComment,
     deletePost: deleteApiPost,
   } = usePostStore();
@@ -104,7 +109,14 @@ const App: React.FC = () => {
     unclaimedSat,
     fetchUserBalances,
     claimSat,
+    usdcBalanceMicro,
+    refreshBalance,
+    isRefreshingBalance,
+    address: walletAddress,
+    setAddress: setWalletAddress,
   } = useWalletStore();
+
+  const [showDelegatedConsent, setShowDelegatedConsent] = useState(false);
 
   // Convert API data to UI format (no mock fallbacks)
   const posts: Post[] = apiPosts.map(apiPostToPost);
@@ -477,7 +489,7 @@ const App: React.FC = () => {
     setRemovedFromSessions(prev => new Set(prev).add(event.session_id));
     // Refresh messages to get the "You were removed" message
     if (selectedChat && Number(selectedChat.id) === event.session_id) {
-      loadChatMessages(event.session_id);
+      void fetchMessages(event.session_id, currentUser?.id ?? 0);
     }
     // Refresh sessions list
     if (currentUser) {
@@ -531,16 +543,13 @@ const App: React.FC = () => {
   const [isFollowingProfile, setIsFollowingProfile] = useState(false);
   const [isLoadingProfile, setIsLoadingProfile] = useState(false);
 
-  // Fetch dynamic costs (trust system removed)
-  const fetchUserCosts = async (userId: number) => {
+  // Fetch free-post quota (replaces the old SAT cost lookup).
+  const fetchUserCosts = async (_userId?: number) => {
     try {
-      const costs = await api.getUserCosts(userId);
-      setUserCosts(costs);
+      const quota = await api.getFreeQuota();
+      setUserCosts(quota);
     } catch { /* silent */ }
   };
-
-
-
 
 
   // Handle challenge action (simplified in minimal system)
@@ -551,8 +560,8 @@ const App: React.FC = () => {
   const handleChallengeComplete = () => {
     // Challenge system removed in minimal system
     if (currentUser) {
-      fetchBalance(currentUser.id);
-      fetchPosts({ user_id: currentUser.id });
+      void refreshBalance();
+      fetchPosts({ author_id: currentUser.id });
     }
   };
 
@@ -567,20 +576,16 @@ const App: React.FC = () => {
     setShowPostMenu(false);
     const wasInDetail = currentView === 'POST_DETAIL' || currentView === 'QA_DETAIL';
     try {
-      const result = await deleteApiPost(Number(selectedPost.id), currentUser.id);
+      await deleteApiPost(Number(selectedPost.id));
       if (wasInDetail) {
         setCurrentView('MAIN');
         usePostStore.getState().clearCurrentPost();
       }
       setSelectedPost(null);
-      fetchBalance(currentUser.id);
-      const parts: string[] = ['Post deleted'];
-      if (result.total_refunded_to_likers > 0) parts.push(`${result.total_refunded_to_likers} sat refunded to likers`);
-      if (result.author_clawback > 0) parts.push(`${result.author_clawback} sat clawed back`);
-      if (result.bounty_refunded > 0) parts.push(`${result.bounty_refunded} sat bounty refunded`);
-      toast.success(parts.join('. '));
-      if (activeTab === 'Feed') fetchFeed(currentUser.id);
-      else fetchPosts({ user_id: currentUser.id });
+      // Tips already received are on-chain — nothing to claw back.
+      toast.success('Post deleted');
+      if (activeTab === 'Feed') fetchFeed();
+      else fetchPosts({ author_id: currentUser.id });
     } catch (err) {
       toast.error((err as Error).message || 'Failed to delete post');
     }
@@ -589,94 +594,43 @@ const App: React.FC = () => {
   const handleLikeToggle = async (post: Post) => {
     if (!currentUser) return;
     const isLiked = likedPosts.has(String(post.id)) || post.isLiked;
-
-    // Likes are permanent — already liked means no action
     if (isLiked) return;
-
-    // Quick like mode: skip modal, get quote and confirm immediately
-    if (quickLikeMode) {
-      try {
-        const quote = await api.createLikeQuote(Number(post.id), currentUser.id);
-        if (!quote.has_balance) {
-          toast.error(`Insufficient balance (${quote.available_balance} sat)`);
-          return;
-        }
-        await storelikePost(Number(post.id), currentUser.id, quote.quote_id);
-        setLikedPosts(prev => new Set([...prev, String(post.id)]));
-        if (selectedPost && String(selectedPost.id) === String(post.id)) {
-          setSelectedPost({
-            ...selectedPost,
-            isLiked: true,
-            likeStatus: 'settled',
-            likes: selectedPost.likes + 1,
-          });
-        }
-        toast.success(`Liked! ${quote.cost} sat`);
-        fetchBalance(currentUser.id);
-      } catch (err) {
-        toast.error((err as Error).message);
-      }
-      return;
-    }
-
-    // Normal mode: open the confirm modal with quote system
+    // Tipping is always confirmed in-modal (one-tap signing handled by Privy
+    // delegated actions). Free comment-likes are toggled inline.
     setLikeTargetPost(post);
+    setLikeTargetComment(null);
     setShowLikeModal(true);
   };
 
-  const handleLikeWithQuote = async (quoteId: string) => {
-    if (!currentUser) return;
-
-    if (likeTargetComment) {
-      await storeLikeComment(likeTargetComment.postId, likeTargetComment.commentId, currentUser.id, quoteId);
-      toast.success('Liked!');
-      fetchBalance(currentUser.id);
-      setLikeTargetComment(null);
-      return;
-    }
-
+  const handleTipSent = (txHash: string) => {
     if (likeTargetPost) {
-      await storelikePost(Number(likeTargetPost.id), currentUser.id, quoteId);
-      setLikedPosts(prev => new Set([...prev, String(likeTargetPost.id)]));
-      if (selectedPost && String(selectedPost.id) === String(likeTargetPost.id)) {
+      const id = String(likeTargetPost.id);
+      setLikedPosts((prev) => new Set([...prev, id]));
+      if (selectedPost && String(selectedPost.id) === id) {
         setSelectedPost({
           ...selectedPost,
           isLiked: true,
-          likeStatus: 'settled',
           likes: selectedPost.likes + 1,
         });
       }
-      toast.success('Liked!');
-      fetchBalance(currentUser.id);
+      toast.success('Tip sent on Base');
     }
+    setLikeTargetPost(null);
+    setLikeTargetComment(null);
+    void refreshBalance();
+    void txHash; // tx hash is recorded server-side via /api/tips/confirm
   };
 
-  const handleCommentLikeToggle = async (postId: number, comment: { id: number; is_liked: boolean; like_status?: string | null }) => {
+  const handleCommentLikeToggle = async (
+    postId: number,
+    comment: { id: number; is_liked: boolean },
+  ) => {
     if (!currentUser) return;
-
-    // Likes are permanent — already liked means no action
-    if (comment.is_liked) return;
-
-    // Quick like mode: skip modal
-    if (quickLikeMode) {
-      try {
-        const quote = await api.createCommentLikeQuote(postId, comment.id, currentUser.id);
-        if (!quote.has_balance) {
-          toast.error(`Insufficient balance (${quote.available_balance} sat)`);
-          return;
-        }
-        await storeLikeComment(postId, comment.id, currentUser.id, quote.quote_id);
-        toast.success(`Liked! ${quote.cost} sat`);
-        fetchBalance(currentUser.id);
-      } catch (err) {
-        toast.error((err as Error).message);
-      }
-      return;
+    try {
+      await toggleCommentLike(postId, comment.id, comment.is_liked);
+    } catch (err) {
+      toast.error((err as Error).message);
     }
-
-    // Normal mode: open the confirm modal
-    setLikeTargetComment({ postId, commentId: comment.id });
-    setShowLikeModal(true);
   };
 
   // Legacy — keep for compatibility
@@ -700,7 +654,7 @@ const App: React.FC = () => {
           minWait,
         ]);
       } else {
-        await Promise.all([fetchFeed(currentUser.id), minWait]);
+        await Promise.all([fetchFeed(), minWait]);
       }
     } finally {
       setIsRefreshing(false);
@@ -779,6 +733,21 @@ const App: React.FC = () => {
     loadFromStorage();
   }, []);
 
+  // Sync Privy embedded wallet -> walletStore. Source of truth for address.
+  useEffect(() => {
+    if (!currentUser) return;
+    const addr =
+      (currentUser.embedded_wallet_address as `0x${string}` | null | undefined) ?? null;
+    setWalletAddress(addr);
+  }, [currentUser?.id, currentUser?.embedded_wallet_address, setWalletAddress]);
+
+  // First-time delegated-actions consent: DISABLED.
+  // Privy v3 embedded wallets run in TEE execution, so the legacy
+  // `useDelegatedActions` hook no longer works. Re-enabling one-tap tipping
+  // requires `useSessionSigners` + a server-side signer keypair, which is
+  // tracked as P1 work. For now users sign each tip via the Privy prompt.
+  // (Removed) auto-prompt for delegated consent.
+
   // Handle invite deep links
   useEffect(() => {
     const path = window.location.pathname;
@@ -801,10 +770,10 @@ const App: React.FC = () => {
   // Fetch posts and chats when logged in
   useEffect(() => {
     if (isLoggedIn && currentUser) {
-      fetchPosts({ user_id: currentUser.id });
-      fetchFeed(currentUser.id);
+      fetchPosts({ author_id: currentUser.id });
+      fetchFeed();
       fetchSessions(currentUser.id);
-      fetchUserCosts(currentUser.id);
+      fetchUserCosts();
     }
   }, [isLoggedIn, currentUser?.id]);
 
@@ -832,7 +801,7 @@ const App: React.FC = () => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries[0].isIntersecting) {
-          loadMoreFeed(currentUser.id);
+          loadMoreFeed();
         }
       },
       { rootMargin: '200px' },
@@ -847,7 +816,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (isPublishing && currentUser) {
       setCurrentDraftId(null);
-      api.getDrafts(currentUser.id).then(setDrafts).catch(() => {});
+      api.getDrafts().then(setDrafts).catch(() => {});
     }
   }, [isPublishing, currentUser?.id]);
 
@@ -864,9 +833,9 @@ const App: React.FC = () => {
         };
         try {
           if (currentDraftId) {
-            await api.updateDraft(currentDraftId, currentUser.id, draftData);
+            await api.updateDraft(currentDraftId, draftData);
           } else {
-            const draft = await api.createDraft(currentUser.id, draftData);
+            const draft = await api.createDraft(draftData);
             setCurrentDraftId(draft.id);
           }
         } catch (err) {
@@ -940,7 +909,7 @@ const App: React.FC = () => {
       setIsLoadingProfile(true);
       Promise.all([
         api.checkMessagePermission(currentUser.id, profileUserId),
-        api.getUser(profileUserId, currentUser.id),
+        api.getUser(profileUserId),
       ]).then(([perm, user]) => {
         setProfileMsgPermission(perm);
         setIsFollowingProfile(user.is_following || false);
@@ -1078,7 +1047,7 @@ const App: React.FC = () => {
             onClick={(p) => {
               setSelectedPost(p);
               setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
-              fetchComments(Number(p.id), currentUser?.id);
+              fetchComments(Number(p.id));
             }}
             onUserClick={(id) => {
               const user = feedPostsConverted.find(p => String(p.author.id) === String(id))?.author;
@@ -1126,7 +1095,7 @@ const App: React.FC = () => {
               onClick={(p) => {
                 setSelectedPost(p);
                 setCurrentView(p.type === 'Question' ? 'QA_DETAIL' : 'POST_DETAIL');
-                fetchComments(Number(p.id), currentUser?.id);
+                fetchComments(Number(p.id));
               }}
               onUserClick={(id) => {
                 const user = followingPosts.find(p => String(p.author.id) === String(id))?.author;
@@ -1520,30 +1489,18 @@ const App: React.FC = () => {
       </div>
 
       <div data-testid="balance-card" className="bg-stone-900 border border-stone-800 p-5 rounded-2xl mb-3 post-card">
-        <div className="flex items-start justify-between mb-1">
-          <button
-            className="text-left active:opacity-70 transition-opacity"
-            onClick={() => { if (currentUser) fetchLedger(currentUser.id); setCurrentView('TRANSACTIONS'); }}
-          >
-            <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">Balance</span>
-            <div className="flex items-baseline gap-1">
-              <span data-testid="balance-amount" className="text-2xl font-bold text-stone-100 leading-none">{(satBalance || availableBalance).toLocaleString()}</span>
-              <span className="text-orange-500 text-xs font-bold">sat</span>
-            </div>
-            {change24h !== 0 && (
-              <span className={`text-[11px] font-bold mt-1 block ${change24h > 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {change24h > 0 ? '+' : ''}{change24h.toLocaleString()} today
-              </span>
-            )}
-          </button>
-          <button
-            className="text-right active:opacity-70 transition-opacity"
-            onClick={() => setCurrentView('EXCHANGE')}
-          >
-            <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">USDT</span>
-            <span className="text-lg font-bold text-stone-100 leading-none">${(stableBalance / 1_000_000).toFixed(2)}</span>
-          </button>
-        </div>
+        <button
+          className="w-full text-left active:opacity-70 transition-opacity"
+          onClick={() => { fetchLedger(); setCurrentView('TRANSACTIONS'); }}
+        >
+          <span className="text-stone-500 text-[10px] font-bold uppercase tracking-wider block mb-1.5">USDC on Base</span>
+          <div className="flex items-baseline gap-1.5">
+            <span data-testid="balance-amount" className="text-3xl font-bold text-stone-100 leading-none tabular-nums">
+              ${(Number(usdcBalanceMicro) / 1_000_000).toFixed(2)}
+            </span>
+            <span className="text-stone-500 text-xs font-semibold">USDC</span>
+          </div>
+        </button>
         <div className="flex items-center justify-around pt-4 mt-3 border-t border-stone-800/60">
           <button
             onClick={() => setCurrentView('DEPOSIT')}
@@ -1555,22 +1512,23 @@ const App: React.FC = () => {
             <span className="text-[11px] font-semibold text-stone-400">Deposit</span>
           </button>
           <button
-            onClick={() => setCurrentView('EXCHANGE')}
+            onClick={() => refreshBalance()}
             className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
+            disabled={isRefreshingBalance}
           >
             <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
-              <RefreshCw size={18} className="text-orange-500" />
+              <RefreshCw size={18} className={`text-orange-500 ${isRefreshingBalance ? 'animate-spin' : ''}`} />
             </div>
-            <span className="text-[11px] font-semibold text-stone-400">Exchange</span>
+            <span className="text-[11px] font-semibold text-stone-400">Refresh</span>
           </button>
           <button
-            onClick={() => setCurrentView('WITHDRAW')}
+            onClick={() => { fetchLedger(); setCurrentView('TRANSACTIONS'); }}
             className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
           >
             <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
-              <Upload size={18} className="text-orange-500" />
+              <Zap size={18} className="text-orange-500" />
             </div>
-            <span className="text-[11px] font-semibold text-stone-400">Withdraw</span>
+            <span className="text-[11px] font-semibold text-stone-400">Activity</span>
           </button>
         </div>
       </div>
@@ -1711,17 +1669,14 @@ const App: React.FC = () => {
     );
   };
 
-  // Get comment heart color: pending=red, settled=orange, not liked=gray
-  const getCommentHeartColor = (c: ApiComment) => {
-    if (!c.is_liked) return 'text-stone-500';
-    if (c.like_status === 'pending') return 'text-red-500';
-    return 'text-orange-400';  // settled or legacy
-  };
+  // Comment heart color is binary now (free social signal, no economic state).
+  const getCommentHeartColor = (c: ApiComment) =>
+    c.is_liked ? 'text-orange-400' : 'text-stone-500';
 
   // Shared comment-list component used by Post Detail & QA Detail
   const renderCommentItem = (c: ApiComment) => {
     const isLiked = c.is_liked;
-    const canDelete = currentUser && c.author.id === currentUser.id && c.interaction_status === 'pending';
+    const canDelete = currentUser && c.author.id === currentUser.id;
     const heartColor = getCommentHeartColor(c);
 
     return (
@@ -1765,11 +1720,10 @@ const App: React.FC = () => {
                 className="text-xs font-bold text-stone-500 hover:text-stone-400 flex items-center gap-1"
                 onClick={async () => {
                   if (!currentUser || !selectedPost) return;
-                  if (!confirm('Delete this comment? You will get 70% refund, 30% penalty.')) return;
+                  if (!confirm('Delete this comment?')) return;
                   try {
-                    const result = await deleteApiComment(c.id, Number(selectedPost.id), currentUser.id);
-                    toast.success(`Refunded ${result.refunded} sat`);
-                    fetchBalance(currentUser.id);
+                    await deleteApiComment(c.id, Number(selectedPost.id));
+                    toast.success('Comment deleted');
                   } catch (err) {
                     toast.warning((err as Error).message);
                   }
@@ -1784,22 +1738,18 @@ const App: React.FC = () => {
     );
   };
 
-  // Submit comment or reply (shared)
+  // Submit comment or reply (shared) — comments are free in the new model.
   const handleSubmitComment = async () => {
     if (!commentDraft.trim() || !selectedPost || !currentUser) return;
     const parentId = replyTarget ? Number(replyTarget.id) : undefined;
-    const cost = parentId ? 1 : 5;  // Reply = 1 sat, Comment = 5 sat
     try {
-      await createApiComment(Number(selectedPost.id), currentUser.id, commentDraft.trim(), parentId);
+      await createApiComment(Number(selectedPost.id), commentDraft.trim(), parentId);
       setCommentDraft('');
       setReplyTarget(null);
-      fetchBalance(currentUser.id);
-      toast.success(`Comment posted (${cost} sat)`);
+      toast.success('Comment posted');
     } catch (err) {
       const msg = (err as Error).message;
-      if (msg.includes('402') || msg.includes('Insufficient')) {
-        toast.error(`Insufficient balance. Need ${cost} sat.`);
-      } else if (msg.includes('429') || msg.includes('Rate limit')) {
+      if (msg.includes('429') || msg.includes('Rate limit')) {
         toast.warning('Too many comments. Please wait.');
       } else {
         toast.warning(msg);
@@ -1811,16 +1761,13 @@ const App: React.FC = () => {
   const handleInlineComment = async () => {
     if (!inlineCommentDraft.trim() || !inlineCommentPost || !currentUser) return;
     try {
-      await createApiComment(Number(inlineCommentPost.id), currentUser.id, inlineCommentDraft.trim());
+      await createApiComment(Number(inlineCommentPost.id), inlineCommentDraft.trim());
       setInlineCommentDraft('');
       setInlineCommentPost(null);
-      fetchBalance(currentUser.id);
-      toast.success('Comment posted (5 sat)');
+      toast.success('Comment posted');
     } catch (err) {
       const msg = (err as Error).message;
-      if (msg.includes('402') || msg.includes('Insufficient')) {
-        toast.error('Insufficient balance for comment');
-      } else if (msg.includes('429') || msg.includes('Rate limit')) {
+      if (msg.includes('429') || msg.includes('Rate limit')) {
         toast.warning('Too many comments. Please wait.');
       } else {
         toast.warning(msg);
@@ -1830,7 +1777,6 @@ const App: React.FC = () => {
 
   const renderInlineCommentSheet = () => {
     if (!inlineCommentPost) return null;
-    const cost = '5 sat';  // Comment cost
     return (
       <div className="fixed inset-0 z-[70] flex flex-col justify-end" onClick={() => setInlineCommentPost(null)}>
         <div className="absolute inset-0 overlay-dim-60" />
@@ -1858,12 +1804,8 @@ const App: React.FC = () => {
     );
   };
 
-  // Determine comment input cost label
-  const commentCostLabel = () => {
-    if (!selectedPost) return '';
-    if (replyTarget) return '1 sat';  // Reply to comment
-    return '5 sat';  // Comment on post
-  };
+  // Comments are free in the new model — no cost label.
+  const commentCostLabel = () => '';
 
   const renderPostDetail = () => {
     if (!selectedPost) return null;
@@ -2098,17 +2040,15 @@ const App: React.FC = () => {
   const renderTransactions = () => {
     const actionLabel = (t: string) => {
       const map: Record<string, string> = {
-        free_post: 'Free Post', reward_post: 'Post Reward', reward_comment: 'Comment Reward',
-        spend_post: 'Post', spend_question: 'Question', spend_answer: 'Answer',
-        spend_comment: 'Comment', spend_reply: 'Reply', spend_like: 'Like',
-        spend_comment_like: 'Comment Like', spend_boost: 'Boost', fine: 'Fine',
-        challenge_fee: 'Challenge Fee', challenge_refund: 'Challenge Refund',
-        challenge_reward: 'Challenge Reward', deposit: 'Deposit', withdraw: 'Withdrawal',
-        exchange_buy_sat: 'USDT \u2192 sat', exchange_sell_sat: 'sat \u2192 USDT',
-        exchange_bonus: 'Exchange Bonus',
+        tip_sent: 'Tip sent',
+        tip_received: 'Tip received',
+        free_post_used: 'Free post',
+        moderation_penalty: 'Moderation',
       };
       return map[t] || t;
     };
+
+    const formatUsd = (micro: number) => `$${(Math.abs(micro) / 1_000_000).toFixed(2)}`;
 
     // Group by date
     const grouped = ledgerEntries.reduce<Record<string, typeof ledgerEntries>>((acc, tx) => {
@@ -2124,9 +2064,6 @@ const App: React.FC = () => {
       return acc;
     }, {});
 
-    const totalIn = ledgerEntries.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
-    const totalOut = ledgerEntries.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
-
     return (
       <div className="fixed inset-0 z-[60] bg-black overflow-y-auto sub-view">
         <div className="sticky top-0 z-10 bg-stone-950/95 backdrop-blur-xl px-5 py-1.5 flex items-center justify-between top-nav">
@@ -2139,42 +2076,21 @@ const App: React.FC = () => {
         <div className="p-4 space-y-6">
           {/* Balance */}
           <div className="pt-2 pb-1">
-            <span className="text-[11px] font-bold text-stone-600 uppercase tracking-widest">Balance</span>
+            <span className="text-[11px] font-bold text-stone-600 uppercase tracking-widest">USDC on Base</span>
             <div className="flex items-baseline gap-2 mt-1">
-              <span className="text-4xl font-bold text-stone-100 tabular-nums">{(satBalance || availableBalance).toLocaleString()}</span>
-              <span className="text-sm font-bold text-orange-500">sat</span>
+              <span className="text-4xl font-bold text-stone-100 tabular-nums">
+                ${(Number(usdcBalanceMicro) / 1_000_000).toFixed(2)}
+              </span>
+              <span className="text-sm font-bold text-stone-500">USDC</span>
             </div>
-            <div className="flex items-center gap-4 mt-3 text-xs tabular-nums">
-              <span className="text-stone-500"><span className="text-orange-500 font-semibold">+{totalIn.toLocaleString()}</span> earned</span>
-              <span className="text-stone-600">&#183;</span>
-              <span className="text-stone-500"><span className="text-stone-400 font-semibold">{totalOut.toLocaleString()}</span> spent</span>
-            </div>
+            <button
+              onClick={() => refreshBalance()}
+              className="text-[11px] text-stone-500 mt-3 underline-offset-2 hover:underline"
+              disabled={isRefreshingBalance}
+            >
+              {isRefreshingBalance ? 'Refreshing…' : 'Refresh from chain'}
+            </button>
           </div>
-
-          {/* Unclaimed SAT banner */}
-          {unclaimedSat > 0 && (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 flex items-center justify-between">
-              <div>
-                <p className="text-amber-400 font-semibold text-sm">{unclaimedSat.toLocaleString()} SAT unclaimed</p>
-                <p className="text-amber-400/70 text-xs mt-0.5">From your pay wallet - claim to use for likes</p>
-              </div>
-              <button
-                className="bg-amber-500 hover:bg-amber-600 text-black font-bold px-4 py-2 rounded-lg text-sm transition-colors"
-                onClick={async () => {
-                  if (!currentUser) return;
-                  try {
-                    const result = await claimSat(currentUser.id);
-                    toast.success(result.message);
-                    fetchBalance(currentUser.id);
-                  } catch (err) {
-                    toast.error((err as Error).message);
-                  }
-                }}
-              >
-                Claim
-              </button>
-            </div>
-          )}
 
           {/* Transactions */}
           {ledgerEntries.length === 0 ? (
@@ -2187,7 +2103,7 @@ const App: React.FC = () => {
                 <h3 className="text-[11px] font-bold text-stone-600 uppercase tracking-widest mb-2 px-1">{dateLabel}</h3>
                 <div className="bg-stone-900/40 rounded-2xl overflow-hidden">
                   {txs.map((tx, idx) => {
-                    const isPositive = tx.amount > 0;
+                    const isPositive = tx.amount_usdc_micro > 0;
                     const label = tx.note || actionLabel(tx.action_type);
                     return (
                       <div
@@ -2201,7 +2117,7 @@ const App: React.FC = () => {
                           </span>
                         </div>
                         <span className={`text-[13px] font-semibold tabular-nums shrink-0 ml-4 ${isPositive ? 'text-orange-500' : 'text-stone-500'}`}>
-                          {isPositive ? '+' : '\u2212'}{Math.abs(tx.amount).toLocaleString()}
+                          {tx.amount_usdc_micro === 0 ? '\u2014' : `${isPositive ? '+' : '\u2212'}${formatUsd(tx.amount_usdc_micro)}`}
                         </span>
                       </div>
                     );
@@ -2276,8 +2192,8 @@ const App: React.FC = () => {
                 <span className="text-stone-500 text-xs block">Invited</span>
               </div>
               <div>
-                <span className="text-2xl font-bold text-orange-500">1,500</span>
-                <span className="text-stone-500 text-xs block">Earned</span>
+                <span className="text-2xl font-bold text-orange-500">$0</span>
+                <span className="text-stone-500 text-xs block">Tipped to you</span>
               </div>
             </div>
           </div>
@@ -2316,7 +2232,7 @@ const App: React.FC = () => {
       if (!files?.length) return;
       setIsUploadingImage(true);
       try {
-        for (const file of Array.from(files)) {
+        for (const file of Array.from(files) as File[]) {
           if (publishImages.length >= 9) break;
           const compressed = await compressImage(file);
           const result = await api.uploadMedia(compressed, 'post');
@@ -2361,9 +2277,9 @@ const App: React.FC = () => {
 
       try {
         if (currentDraftId) {
-          await api.updateDraft(currentDraftId, currentUser.id, draftData);
+          await api.updateDraft(currentDraftId, draftData);
         } else {
-          const draft = await api.createDraft(currentUser.id, draftData);
+          const draft = await api.createDraft(draftData);
           setCurrentDraftId(draft.id);
         }
         toast.success('Draft saved');
@@ -2385,7 +2301,7 @@ const App: React.FC = () => {
     const handleDeleteDraft = async (draftId: number) => {
       if (!currentUser) return;
       try {
-        await api.deleteDraft(draftId, currentUser.id);
+        await api.deleteDraft(draftId);
         setDrafts(prev => prev.filter(d => d.id !== draftId));
         if (currentDraftId === draftId) {
           setCurrentDraftId(null);
@@ -2420,7 +2336,7 @@ const App: React.FC = () => {
           setPublishProgress(prev => Math.min(prev + 6, 90));
         }, 400);
 
-        const newPost = await api.createPost(currentUser.id, {
+        const newPost = await api.createPost({
           content: publishContent || ' ',
           post_type: postType,
           title: hasTitle ? publishTitle : undefined,
@@ -2441,7 +2357,7 @@ const App: React.FC = () => {
         setPublishProgress(100);
         
         if (currentDraftId) {
-          api.deleteDraft(currentDraftId, currentUser.id).catch(() => {});
+          api.deleteDraft(currentDraftId).catch(() => {});
         }
 
         await new Promise(r => setTimeout(r, 400));
@@ -2455,10 +2371,10 @@ const App: React.FC = () => {
           feedPosts: [newPost, ...state.feedPosts],
           posts: [newPost, ...state.posts],
         }));
-        fetchFeed(currentUser.id);
+        fetchFeed();
         if (currentUser) {
-          fetchBalance(currentUser.id);
-          fetchLedger(currentUser.id);
+          void refreshBalance();
+          fetchLedger();
         }
       } catch (err) {
         setPublishStage('');
@@ -3262,13 +3178,13 @@ const App: React.FC = () => {
                     {/* Reactions display */}
                     {msg.reactions && msg.reactions.length > 0 && (
                     <div className="flex gap-1 flex-wrap relative">
-                      {Object.entries(
+                      {(Object.entries(
                         msg.reactions.reduce((acc, r) => {
                           if (!acc[r.emoji]) acc[r.emoji] = [];
                           acc[r.emoji].push({ user_id: Number(r.user_id), user_name: r.user_name });
                           return acc;
                         }, {} as Record<string, Array<{user_id: number; user_name: string}>>)
-                      ).map(([emoji, reactors]) => {
+                      ) as Array<[string, Array<{user_id: number; user_name: string}>]>).map(([emoji, reactors]) => {
                         const hasMyReaction = currentUser ? reactors.some(r => Number(r.user_id) === Number(currentUser.id)) : false;
                         return (
                           <button
@@ -3502,11 +3418,11 @@ const App: React.FC = () => {
     if (!currentUser || !profileUserId) return;
     try {
       if (isFollowingProfile) {
-        await api.unfollowUser(profileUserId, currentUser.id);
+        await api.unfollowUser(profileUserId);
         setIsFollowingProfile(false);
         toast.success('Unfollowed');
       } else {
-        await api.followUser(profileUserId, currentUser.id);
+        await api.followUser(profileUserId);
         setIsFollowingProfile(true);
         toast.success('Followed!');
       }
@@ -4417,7 +4333,7 @@ const App: React.FC = () => {
         {/* Footer — fills dead space with brand */}
         <div className="p-6 pb-8 text-center space-y-1">
           <p className="text-sm font-display font-bold text-stone-600 tracking-wide">BitLink</p>
-          <p className="text-[11px] text-stone-700">Where liking = investing</p>
+          <p className="text-[11px] text-stone-700">Tip creators in stablecoins</p>
         </div>
       </div>
     );
@@ -4460,48 +4376,36 @@ const App: React.FC = () => {
       {currentView === 'FOLLOWERS_LIST' && renderFollowersList()}
       {currentView === 'FOLLOWING_LIST' && renderFollowingList()}
       {currentView === 'MY_QR_CODE' && renderMyQRCode()}
+      {currentView === 'DEPOSIT' && (
+        <DepositView
+          walletAddress={walletAddress}
+          onBack={() => setCurrentView('MAIN')}
+        />
+      )}
       {currentView === 'GROUP_CHAT' && renderGroupChat()}
       {currentView === 'SCAN' && renderScan()}
       {currentView === 'SETTINGS' && renderSettings()}
-      {currentView === 'DEPOSIT' && <DepositView onBack={() => {
-        setCurrentView('MAIN');
-        if (currentUser) {
-          fetchCryptoBalance(currentUser.id).catch(() => {});
-          fetchUserBalances(currentUser.id).catch(() => {});
-        }
-      }} />}
-      {currentView === 'WITHDRAW' && <WithdrawView onBack={() => setCurrentView('MAIN')} />}
-      {currentView === 'EXCHANGE' && <ExchangeView onBack={() => {
-        setCurrentView('MAIN');
-        if (currentUser) {
-          fetchCryptoBalance(currentUser.id).catch(() => {});
-          fetchUserBalances(currentUser.id).catch(() => {});
-        }
-      }} />}
       
       {/* Inline Comment Sheet */}
       {renderInlineCommentSheet()}
 
       {/* Challenge Modal removed in minimal system */}
 
-      {/* Like Confirm Modal with Quote System */}
-      {currentUser && (likeTargetPost || likeTargetComment) && (
+      {/* Tip flow modal — replaces the old like / stake confirmation. */}
+      {currentUser && likeTargetPost && (
         <LikeConfirmModal
           isOpen={showLikeModal}
           onClose={() => {
             setShowLikeModal(false);
             setLikeTargetPost(null);
-            setLikeTargetComment(null);
           }}
-          onConfirm={handleLikeWithQuote}
-          postId={likeTargetComment ? likeTargetComment.postId : Number(likeTargetPost!.id)}
-          userId={currentUser.id}
-          isComment={!!likeTargetComment}
-          commentId={likeTargetComment?.commentId}
-          onEnableQuickMode={quickLikeMode ? undefined : () => {
-            toggleQuickLikeMode(true);
-            toast.success('Quick Like Mode enabled!');
+          onTipped={handleTipSent}
+          onAddFunds={() => {
+            setShowLikeModal(false);
+            setLikeTargetPost(null);
+            setCurrentView('DEPOSIT');
           }}
+          postId={Number(likeTargetPost.id)}
         />
       )}
 
@@ -4517,11 +4421,8 @@ const App: React.FC = () => {
           Delete this {selectedPost?.type === 'Question' ? 'question' : 'post'}?
         </h3>
         <p className="text-stone-500 text-sm text-center mb-6">
-          {selectedPost?.bounty
-            ? `Your ${selectedPost.bounty} sat bounty will be refunded. `
-            : ''}
           {selectedPost && selectedPost.likes > 0
-            ? 'Pending likes will be refunded. Earnings will be clawed back. '
+            ? 'Tips already received are kept by you (they were on-chain). '
             : ''}
           This cannot be undone.
         </p>
@@ -4539,6 +4440,18 @@ const App: React.FC = () => {
       {/* Modals */}
       {renderPublishOverlay()}
       {renderBottomNav()}
+
+      {isPrivyConfigured() && <PrivyTokenSync />}
+
+      <DelegatedActionsConsent
+        isOpen={showDelegatedConsent}
+        onClose={() => setShowDelegatedConsent(false)}
+        onCompleted={() => {
+          void refreshBalance();
+          toast.success('One-tap tipping enabled');
+        }}
+      />
+
       <ToastContainer />
     </div>
   );

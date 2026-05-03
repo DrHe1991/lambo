@@ -1,5 +1,14 @@
+/**
+ * Post store — non-custodial tipping model.
+ *
+ * `likePost` is the entry point for the tip flow. It:
+ *   1. Calls /api/tips/quote to fetch creator's wallet + chain params.
+ *   2. Returns the quote to the caller (LikeConfirmModal) which signs + broadcasts
+ *      via Privy delegated actions.
+ *   3. Caller then calls confirmTip(postId, txHash) to finalize.
+ */
 import { create } from 'zustand';
-import { api, ApiPost, ApiComment } from '../api/client';
+import { api, type ApiPost, type ApiComment, type TipQuote, type TipConfirmResult } from '../api/client';
 
 const FEED_PAGE_SIZE = 30;
 
@@ -14,19 +23,39 @@ interface PostState {
   isLoading: boolean;
   error: string | null;
 
-  // Actions
-  fetchPosts: (filters?: { post_type?: string; author_id?: number; user_id?: number }) => Promise<void>;
-  fetchFeed: (userId: number) => Promise<void>;
-  loadMoreFeed: (userId: number) => Promise<void>;
-  fetchPost: (postId: number, userId?: number) => Promise<void>;
-  fetchComments: (postId: number, userId?: number) => Promise<void>;
-  createPost: (authorId: number, content: string, postType: string, bounty?: number) => Promise<ApiPost>;
-  likePost: (postId: number, userId: number, quoteId?: string) => Promise<void>;
-  createComment: (postId: number, authorId: number, content: string, parentId?: number) => Promise<ApiComment>;
-  likeComment: (postId: number, commentId: number, userId: number, quoteId?: string) => Promise<unknown>;
-  deleteComment: (commentId: number, postId: number, userId: number) => Promise<{ refunded: number; penalty: number }>;
-  deletePost: (postId: number, userId: number) => Promise<{ author_clawback: number; pool_forfeited: number; bounty_refunded: number }>;
+  fetchPosts: (filters?: { post_type?: string; author_id?: number }) => Promise<void>;
+  fetchFeed: () => Promise<void>;
+  loadMoreFeed: () => Promise<void>;
+  fetchPost: (postId: number) => Promise<void>;
+  fetchComments: (postId: number) => Promise<void>;
+  createPost: (
+    content: string,
+    postType: string,
+    bounty?: number,
+    title?: string,
+    contentFormat?: string,
+    mediaUrls?: string[],
+  ) => Promise<ApiPost>;
+
+  // Tip flow
+  fetchTipQuote: (postId: number, amountUsdcMicro: number) => Promise<TipQuote>;
+  confirmTip: (postId: number, txHash: string) => Promise<TipConfirmResult>;
+
+  // Comments
+  createComment: (postId: number, content: string, parentId?: number) => Promise<ApiComment>;
+  toggleCommentLike: (postId: number, commentId: number, currentlyLiked: boolean) => Promise<void>;
+  deleteComment: (commentId: number, postId: number) => Promise<void>;
+  deletePost: (postId: number) => Promise<void>;
   clearCurrentPost: () => void;
+}
+
+function patchPost(state: PostState, postId: number, patch: Partial<ApiPost>) {
+  return {
+    posts: state.posts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
+    feedPosts: state.feedPosts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
+    currentPost:
+      state.currentPost?.id === postId ? { ...state.currentPost, ...patch } : state.currentPost,
+  };
 }
 
 export const usePostStore = create<PostState>((set, get) => ({
@@ -50,10 +79,10 @@ export const usePostStore = create<PostState>((set, get) => ({
     }
   },
 
-  fetchFeed: async (userId) => {
+  fetchFeed: async () => {
     set({ feedLoading: true, error: null });
     try {
-      const feedPosts = await api.getFeed(userId, FEED_PAGE_SIZE, 0);
+      const feedPosts = await api.getFeed(FEED_PAGE_SIZE, 0);
       set({
         feedPosts,
         feedOffset: FEED_PAGE_SIZE,
@@ -65,54 +94,54 @@ export const usePostStore = create<PostState>((set, get) => ({
     }
   },
 
-  loadMoreFeed: async (userId) => {
+  loadMoreFeed: async () => {
     const { feedLoading, feedHasMore, feedOffset } = get();
     if (feedLoading || !feedHasMore) return;
     set({ feedLoading: true });
     try {
-      const more = await api.getFeed(userId, FEED_PAGE_SIZE, feedOffset);
+      const more = await api.getFeed(FEED_PAGE_SIZE, feedOffset);
       set((state) => ({
         feedPosts: [...state.feedPosts, ...more],
         feedOffset: state.feedOffset + FEED_PAGE_SIZE,
         feedHasMore: more.length >= FEED_PAGE_SIZE,
         feedLoading: false,
       }));
-    } catch (error) {
+    } catch {
       set({ feedLoading: false });
     }
   },
 
-  fetchPost: async (postId, userId) => {
+  fetchPost: async (postId) => {
     set({ isLoading: true, error: null });
     try {
-      const post = await api.getPost(postId, userId);
+      const post = await api.getPost(postId);
       set({ currentPost: post, isLoading: false });
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
     }
   },
 
-  fetchComments: async (postId, userId) => {
+  fetchComments: async (postId) => {
     try {
-      const comments = await api.getComments(postId, userId);
+      const comments = await api.getComments(postId);
       set({ comments });
     } catch (error) {
       console.error('Failed to fetch comments:', error);
     }
   },
 
-  createPost: async (authorId, content, postType, bounty) => {
+  createPost: async (content, postType, bounty, title, contentFormat, mediaUrls) => {
     set({ isLoading: true, error: null });
     try {
-      const post = await api.createPost(authorId, {
+      const post = await api.createPost({
         content,
         post_type: postType,
+        title,
+        content_format: contentFormat,
         bounty,
+        media_urls: mediaUrls,
       });
-      set((state) => ({
-        posts: [post, ...state.posts],
-        isLoading: false,
-      }));
+      set((state) => ({ posts: [post, ...state.posts], isLoading: false }));
       return post;
     } catch (error) {
       set({ error: (error as Error).message, isLoading: false });
@@ -120,89 +149,73 @@ export const usePostStore = create<PostState>((set, get) => ({
     }
   },
 
-  likePost: async (postId, userId, quoteId) => {
-    try {
-      const result = await api.likePost(postId, userId, quoteId);
-      const patch: Partial<ApiPost> = {
-        likes_count: result.likes_count,
-        is_liked: true,
-        like_status: result.like_status,
-      };
-
-      set((state) => ({
-        posts: state.posts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
-        feedPosts: state.feedPosts.map((p) => (p.id === postId ? { ...p, ...patch } : p)),
-        currentPost: state.currentPost?.id === postId
-          ? { ...state.currentPost, ...patch }
-          : state.currentPost,
-      }));
-    } catch (error) {
-      throw error;
-    }
+  fetchTipQuote: async (postId, amountUsdcMicro) => {
+    return api.tipQuote(postId, amountUsdcMicro);
   },
 
-  createComment: async (postId, authorId, content, parentId) => {
-    const comment = await api.createComment(postId, authorId, { content, parent_id: parentId });
+  confirmTip: async (postId, txHash) => {
+    const result = await api.tipConfirm(postId, txHash);
+    set((state) =>
+      patchPost(state, postId, {
+        is_liked: true,
+        likes_count: result.post_likes_count,
+        tip_count: result.post_likes_count,
+        tip_total_usdc_micro: result.post_tip_total_usdc_micro,
+      }),
+    );
+    return result;
+  },
+
+  createComment: async (postId, content, parentId) => {
+    const comment = await api.createComment(postId, { content, parent_id: parentId });
     set((state) => ({
       comments: [...state.comments, comment],
-      // Update comment count on the post
-      posts: state.posts.map((p) =>
-        p.id === postId ? { ...p, comments_count: p.comments_count + 1 } : p,
-      ),
-      currentPost: state.currentPost?.id === postId
-        ? { ...state.currentPost, comments_count: state.currentPost.comments_count + 1 }
-        : state.currentPost,
+      ...patchPost(state, postId, {
+        comments_count:
+          (state.posts.find((p) => p.id === postId)?.comments_count ??
+            state.feedPosts.find((p) => p.id === postId)?.comments_count ??
+            state.currentPost?.comments_count ??
+            0) + 1,
+      }),
     }));
     return comment;
   },
 
-  likeComment: async (postId, commentId, userId, quoteId) => {
-    try {
-      const result = await api.likeComment(postId, commentId, userId, quoteId);
-      const patch: Partial<ApiComment> = {
-        likes_count: result.likes_count,
-        is_liked: true,
-        like_status: result.like_status,
-      };
-
-      set((state) => ({
-        comments: state.comments.map((c) =>
-          c.id === commentId ? { ...c, ...patch } : c,
-        ),
-      }));
-
-      return result;
-    } catch (error) {
-      throw error;
-    }
+  toggleCommentLike: async (postId, commentId, currentlyLiked) => {
+    const result = currentlyLiked
+      ? await api.unlikeComment(postId, commentId)
+      : await api.likeComment(postId, commentId);
+    set((state) => ({
+      comments: state.comments.map((c) =>
+        c.id === commentId
+          ? { ...c, is_liked: result.is_liked, likes_count: result.likes_count }
+          : c,
+      ),
+    }));
   },
 
-  deleteComment: async (commentId, postId, userId) => {
-    const result = await api.deleteComment(commentId, userId);
+  deleteComment: async (commentId, postId) => {
+    await api.deleteComment(commentId);
     set((state) => ({
       comments: state.comments.filter((c) => c.id !== commentId),
-      posts: state.posts.map((p) =>
-        p.id === postId ? { ...p, comments_count: Math.max(0, p.comments_count - 1) } : p,
-      ),
-      currentPost: state.currentPost?.id === postId
-        ? { ...state.currentPost, comments_count: Math.max(0, state.currentPost.comments_count - 1) }
-        : state.currentPost,
+      ...patchPost(state, postId, {
+        comments_count: Math.max(
+          0,
+          (state.currentPost?.id === postId
+            ? state.currentPost.comments_count
+            : state.posts.find((p) => p.id === postId)?.comments_count ?? 0) - 1,
+        ),
+      }),
     }));
-    return { refunded: result.refunded, penalty: result.penalty };
   },
 
-  deletePost: async (postId, userId) => {
-    const result = await api.deletePost(postId, userId);
+  deletePost: async (postId) => {
+    await api.deletePost(postId);
     set((state) => ({
       posts: state.posts.filter((p) => p.id !== postId),
       feedPosts: state.feedPosts.filter((p) => p.id !== postId),
       currentPost: state.currentPost?.id === postId ? null : state.currentPost,
     }));
-    return {
-      author_clawback: result.author_clawback,
-      pool_forfeited: result.pool_forfeited,
-      bounty_refunded: result.bounty_refunded,
-    };
   },
 
   clearCurrentPost: () => set({ currentPost: null, comments: [] }),

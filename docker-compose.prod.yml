@@ -80,8 +80,10 @@ services:
       ENV: production
       DEBUG: 'false'
       SECRET_KEY: ${SECRET_KEY}
-      PAY_SERVICE_URL: http://pay:8000
-      PAY_APP_ID: '1'
+      PRIVY_APP_ID: ${PRIVY_APP_ID}
+      PRIVY_APP_SECRET: ${PRIVY_APP_SECRET}
+      BASE_RPC_URL: ${BASE_RPC_URL:-https://mainnet.base.org}
+      USDC_ADDRESS: ${USDC_ADDRESS:-0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
@@ -94,49 +96,7 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      pay:
-        condition: service_started
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
-
-  # Web3 Payment Gateway
-  pay:
-    build:
-      context: ./pay
-      dockerfile: Dockerfile
-    container_name: bitlink-pay
-    restart: unless-stopped
-    environment:
-      DATABASE_URL: postgresql+asyncpg://${DB_USER}:${DB_PASSWORD}@postgres:5432/${DB_NAME}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
-      ENV: production
-      DEBUG: 'false'
-      TRON_NETWORK: ${TRON_NETWORK:-shasta}
-      TRON_XPUB: ${TRON_XPUB:-}
-      TRON_API_KEY: ${TRON_API_KEY:-}
-      BINANCE_API_KEY: ${BINANCE_API_KEY:-}
-      BINANCE_API_SECRET: ${BINANCE_API_SECRET:-}
-      BINANCE_TESTNET: ${BINANCE_TESTNET:-false}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
-
-  # Settlement Cron Job
-  cron:
-    image: curlimages/curl:8.5.0
-    container_name: bitlink-cron
-    restart: unless-stopped
-    user: root
-    depends_on:
-      - api
-    entrypoint: /bin/sh
-    command: >
-      -c "while true; do
-            sleep 60;
-            curl -s -X POST http://api:8000/api/settlement/settle-likes?batch_size=100;
-          done"
 
 volumes:
   postgres_data:

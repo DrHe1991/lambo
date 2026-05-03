@@ -1,9 +1,8 @@
 from app.models.user import User, Follow
+from app.models.auth import UserAuthProvider
 from app.models.post import Post, Comment, PostLike, CommentLike
 from app.models.chat import ChatSession, ChatMember, Message
 from app.models.ledger import Ledger
-from app.models.reward import InteractionLog
-from app.models.revenue import PlatformRevenue
 from app.models.draft import Draft
 from app.models.ai_usage import AIUsage
 from app.models.report import Report
@@ -11,6 +10,7 @@ from app.models.report import Report
 __all__ = [
     'User',
     'Follow',
+    'UserAuthProvider',
     'Post',
     'Comment',
     'PostLike',
@@ -19,8 +19,6 @@ __all__ = [
     'ChatMember',
     'Message',
     'Ledger',
-    'InteractionLog',
-    'PlatformRevenue',
     'Draft',
     'AIUsage',
     'Report',

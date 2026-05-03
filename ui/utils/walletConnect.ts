@@ -55,11 +55,13 @@ export async function connectWallet(wallet: WalletType): Promise<{ address: stri
   provider = await EthereumProvider.init({
     projectId: WC_PROJECT_ID,
     chains: config.chains,
-    optionalChains: config.optionalChains,
+    // The provider's typing requires `optionalChains` to be a non-empty tuple;
+    // we widen at the boundary because the values come from a config map.
+    optionalChains: config.optionalChains as unknown as [number, ...number[]],
     showQrModal: !Capacitor.isNativePlatform(),
     metadata: {
       name: 'BitLink',
-      description: 'Like. Invest. Earn.',
+      description: 'Tip creators in stablecoins.',
       url: 'https://bit-link.app',
       icons: ['https://bit-link.app/icon.png'],
     },

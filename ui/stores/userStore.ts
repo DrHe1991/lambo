@@ -1,30 +1,32 @@
 import { create } from 'zustand';
-import { api, ApiUser, ApiLedgerEntry } from '../api/client';
+import { api, type ApiUser, type ApiLedgerEntry, type LinkWalletPayload } from '../api/client';
+import { runPrivyLogout } from '../lib/privy';
 
 interface UserState {
   currentUser: ApiUser | null;
   availableUsers: ApiUser[];
   isLoggedIn: boolean;
   isLoading: boolean;
-  availableBalance: number;
-  change24h: number;
   ledgerEntries: ApiLedgerEntry[];
   needsOnboarding: boolean;
 
-  // Actions
   setCurrentUser: (user: ApiUser | null) => void;
   fetchUsers: () => Promise<void>;
-  selectUser: (userId: number) => Promise<void>;
-  createUser: (name: string, handle: string) => Promise<void>;
   logout: () => void;
-  fetchBalance: (userId: number) => Promise<void>;
-  fetchLedger: (userId: number) => Promise<void>;
+  fetchLedger: (userId?: number) => Promise<void>;
   loadFromStorage: () => Promise<void>;
 
-  // Auth actions
+  // Privy first-time link (called after Privy login completes)
+  linkPrivyWallet: (payload: LinkWalletPayload) => Promise<ApiUser>;
+
+  // Legacy local-JWT login (kept for dev quick-login + dev Google flow)
   loginWithGoogle: (idToken: string) => Promise<void>;
-  loginWithWallet: (address: string, chain: string, signature: string, nonce: string) => Promise<void>;
   refreshAccessToken: () => Promise<boolean>;
+
+  // --- Deprecated compat shims (the SAT balance is gone; on-chain USDC is the new truth) ---
+  availableBalance: number;
+  change24h: number;
+  fetchBalance: (userId?: number) => Promise<void>;
 }
 
 function storeTokens(accessToken: string, refreshToken: string) {
@@ -44,8 +46,6 @@ export const useUserStore = create<UserState>((set, get) => ({
   availableUsers: [],
   isLoggedIn: false,
   isLoading: false,
-  availableBalance: 0,
-  change24h: 0,
   ledgerEntries: [],
   needsOnboarding: false,
 
@@ -62,55 +62,17 @@ export const useUserStore = create<UserState>((set, get) => ({
     }
   },
 
-  selectUser: async (userId: number) => {
-    set({ isLoading: true });
-    try {
-      const [user, bal] = await Promise.all([
-        api.getUser(userId),
-        api.getBalance(userId),
-      ]);
-      localStorage.setItem('bitlink_user_id', String(user.id));
-      localStorage.setItem('bitlink_logged_in', 'true');
-      set({
-        currentUser: user,
-        isLoggedIn: true,
-        availableBalance: bal.available_balance,
-        change24h: bal.change_24h,
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('Failed to select user:', error);
-      set({ isLoading: false });
-      throw error;
-    }
-  },
-
-  createUser: async (name, handle) => {
-    set({ isLoading: true });
-    try {
-      const user = await api.createUser({ name, handle });
-      localStorage.setItem('bitlink_user_id', String(user.id));
-      localStorage.setItem('bitlink_logged_in', 'true');
-      const fullUser = await api.getUser(user.id);
-      set({
-        currentUser: fullUser,
-        isLoggedIn: true,
-        availableBalance: fullUser.available_balance ?? 0,
-        change24h: 0,
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('Failed to create user:', error);
-      set({ isLoading: false });
-      throw error;
-    }
-  },
-
   logout: () => {
+    // Drop Privy's session FIRST. Without this, the still-authenticated Privy
+    // session would re-link the wallet on the next LoginPage render and you'd
+    // be re-logged-in immediately. We don't await this — clearing local state
+    // is what flips the UI to the login screen, and runPrivyLogout resolves
+    // shortly after.
+    void runPrivyLogout();
+
     const refreshToken = localStorage.getItem('bitlink_refresh_token');
-    if (refreshToken) {
-      api.authLogout(refreshToken).catch(() => {});
-    }
+    if (refreshToken) api.authLogout(refreshToken).catch(() => {});
+
     import('@capacitor/core')
       .then(({ Capacitor }) => {
         if (!Capacitor.isNativePlatform()) return;
@@ -119,36 +81,19 @@ export const useUserStore = create<UserState>((set, get) => ({
           .catch(() => {});
       })
       .catch(() => {});
+
     clearTokens();
     set({
       currentUser: null,
       isLoggedIn: false,
-      availableBalance: 0,
-      change24h: 0,
       ledgerEntries: [],
       needsOnboarding: false,
     });
   },
 
-  fetchBalance: async (userId: number) => {
+  fetchLedger: async () => {
     try {
-      const [user, bal] = await Promise.all([
-        api.getUser(userId),
-        api.getBalance(userId),
-      ]);
-      set({
-        currentUser: user,
-        availableBalance: bal.available_balance,
-        change24h: bal.change_24h,
-      });
-    } catch (error) {
-      console.error('Failed to fetch balance:', error);
-    }
-  },
-
-  fetchLedger: async (userId: number) => {
-    try {
-      const entries = await api.getLedger(userId);
+      const entries = await api.getMyLedger();
       set({ ledgerEntries: entries });
     } catch (error) {
       console.error('Failed to fetch ledger:', error);
@@ -156,79 +101,65 @@ export const useUserStore = create<UserState>((set, get) => ({
   },
 
   loadFromStorage: async () => {
-    get().fetchUsers();
+    void get().fetchUsers();
 
-    // Try JWT-based auth first
     const accessToken = localStorage.getItem('bitlink_access_token');
     const refreshToken = localStorage.getItem('bitlink_refresh_token');
+    if (!accessToken && !refreshToken) return;
 
-    if (accessToken || refreshToken) {
-      set({ isLoading: true });
-      try {
-        // If access token exists, try /me. If it fails, the client auto-refreshes.
-        const user = await api.getMe();
-        const bal = await api.getBalance(user.id);
-        localStorage.setItem('bitlink_user_id', String(user.id));
-        localStorage.setItem('bitlink_logged_in', 'true');
-        set({
-          currentUser: user,
-          isLoggedIn: true,
-          availableBalance: bal.available_balance,
-          change24h: bal.change_24h,
-          isLoading: false,
-        });
-        return;
-      } catch {
-        // Token invalid and refresh failed — clear and fall through
-        clearTokens();
-        set({ isLoading: false });
-      }
-    }
-
-    // Legacy: load from user_id in localStorage (dev mode)
-    const userId = localStorage.getItem('bitlink_user_id');
-    const loggedIn = localStorage.getItem('bitlink_logged_in');
-
-    if (userId && loggedIn === 'true') {
-      set({ isLoading: true });
-      try {
-        const id = parseInt(userId);
-        const [user, bal] = await Promise.all([
-          api.getUser(id),
-          api.getBalance(id),
-        ]);
-        set({
-          currentUser: user,
-          isLoggedIn: true,
-          availableBalance: bal.available_balance,
-          change24h: bal.change_24h,
-          isLoading: false,
-        });
-      } catch (error) {
-        console.error('Failed to load user:', error);
-        clearTokens();
-        set({ isLoading: false });
-      }
+    set({ isLoading: true });
+    try {
+      const user = await api.getMe();
+      localStorage.setItem('bitlink_user_id', String(user.id));
+      localStorage.setItem('bitlink_logged_in', 'true');
+      set({ currentUser: user, isLoggedIn: true, isLoading: false });
+    } catch {
+      clearTokens();
+      set({ isLoading: false });
     }
   },
 
-  // Auth actions
-  loginWithGoogle: async (idToken: string) => {
+  linkPrivyWallet: async (payload) => {
+    set({ isLoading: true });
+    try {
+      const result = await api.linkWallet(payload);
+      const user = await api.getMe().catch(() =>
+        api.getUser(result.user_id).catch(() => null),
+      );
+      const finalUser: ApiUser =
+        user ?? {
+          id: result.user_id,
+          name: payload.name ?? result.handle,
+          handle: result.handle,
+          avatar: payload.avatar ?? null,
+          embedded_wallet_address: result.embedded_wallet_address,
+        };
+      localStorage.setItem('bitlink_user_id', String(finalUser.id));
+      localStorage.setItem('bitlink_logged_in', 'true');
+      set({
+        currentUser: finalUser,
+        isLoggedIn: true,
+        needsOnboarding: result.is_new && !payload.handle,
+        isLoading: false,
+      });
+      return finalUser;
+    } catch (error) {
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  loginWithGoogle: async (idToken) => {
     set({ isLoading: true });
     try {
       const result = await api.googleLogin(idToken);
       storeTokens(result.access_token, result.refresh_token);
-
       const user = await api.getMe();
-      const bal = await api.getBalance(user.id);
       localStorage.setItem('bitlink_user_id', String(user.id));
       localStorage.setItem('bitlink_logged_in', 'true');
-
       set({
         currentUser: user,
         isLoggedIn: true,
-        availableBalance: bal.available_balance,
-        change24h: bal.change_24h,
         needsOnboarding: result.needs_onboarding,
         isLoading: false,
       });
@@ -239,36 +170,9 @@ export const useUserStore = create<UserState>((set, get) => ({
     }
   },
 
-  loginWithWallet: async (address: string, chain: string, signature: string, nonce: string) => {
-    set({ isLoading: true });
-    try {
-      const result = await api.web3Login({ address, chain, signature, nonce });
-      storeTokens(result.access_token, result.refresh_token);
-
-      const user = await api.getMe();
-      const bal = await api.getBalance(user.id);
-      localStorage.setItem('bitlink_user_id', String(user.id));
-      localStorage.setItem('bitlink_logged_in', 'true');
-
-      set({
-        currentUser: user,
-        isLoggedIn: true,
-        availableBalance: bal.available_balance,
-        change24h: bal.change_24h,
-        needsOnboarding: result.needs_onboarding,
-        isLoading: false,
-      });
-    } catch (error) {
-      console.error('Wallet login failed:', error);
-      set({ isLoading: false });
-      throw error;
-    }
-  },
-
   refreshAccessToken: async () => {
     const refreshToken = localStorage.getItem('bitlink_refresh_token');
     if (!refreshToken) return false;
-
     try {
       const result = await api.refreshTokens(refreshToken);
       storeTokens(result.access_token, result.refresh_token);
@@ -279,4 +183,9 @@ export const useUserStore = create<UserState>((set, get) => ({
       return false;
     }
   },
+
+  // --- Deprecated compat shims ---
+  availableBalance: 0,
+  change24h: 0,
+  fetchBalance: async () => {},
 }));

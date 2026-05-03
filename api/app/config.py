@@ -22,21 +22,29 @@ class Settings(BaseSettings):
     google_client_id: str = ''
     google_client_secret: str = ''
 
+    # Privy — embedded non-custodial wallets
+    # Get from https://dashboard.privy.io
+    privy_app_id: str = ''
+    privy_app_secret: str = ''
+    privy_jwks_url: str = 'https://auth.privy.io/api/v1/apps/{app_id}/jwks.json'
+
+    # Base mainnet on-chain config
+    base_rpc_url: str = 'https://mainnet.base.org'
+    base_chain_id: int = 8453
+    usdc_address: str = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+    usdc_decimals: int = 6
+
+    # Tip economics
+    min_tip_micro: int = 10_000          # $0.01
+    default_tip_micro: int = 100_000     # $0.10
+    max_tip_micro: int = 100_000_000     # $100.00
+    tip_confirmation_blocks: int = 1     # how many block confirmations to require
+
     # AI (Bank of AI — OpenAI-compatible LLM gateway)
     bankofai_api_key: str = ''
     bankofai_model: str = 'gpt-5.4-mini'
     bankofai_base_url: str = 'https://api.bankofai.io/v1'
     ai_enabled: bool = True
-
-    # Platform ops wallet (pay service wallet ID for operational expenses like AI)
-    platform_wallet_id: int = 0
-
-    # Pay Service
-    pay_service_url: str = 'http://pay:8000'
-    pay_app_id: int = 1
-
-    # Like economics
-    platform_share_pct: int = 5
 
     # S3-compatible Object Storage (MinIO in dev, R2/S3 in prod)
     s3_endpoint: str = 'http://localhost:9000'
@@ -45,6 +53,9 @@ class Settings(BaseSettings):
     s3_bucket_posts: str = 'posts'
     s3_bucket_chat: str = 'chat'
     s3_public_url: str = 'http://localhost:9000'
+
+    # Free post quota (daily)
+    free_posts_per_day: int = 3
 
     class Config:
         env_file = '.env'

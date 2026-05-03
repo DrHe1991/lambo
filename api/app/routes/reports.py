@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.dependencies import get_current_user
 from app.db.database import get_db
 from app.models.user import User
 from app.models.post import Post, PostStatus
@@ -20,13 +21,11 @@ RISK_SCORE_PENALTY = 10
 @router.post('', response_model=ReportResponse, status_code=status.HTTP_201_CREATED)
 async def create_report(
     data: ReportCreate,
-    reporter_id: int = Query(...),
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """Report a post. AI judges the report and may auto-hide the post."""
-    reporter = await db.get(User, reporter_id)
-    if not reporter:
-        raise HTTPException(status_code=404, detail='User not found')
+    reporter_id = current_user.id
 
     post = await db.get(Post, data.post_id)
     if not post or post.status == PostStatus.DELETED.value:

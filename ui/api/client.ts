@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8003';
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -7,7 +7,6 @@ interface RequestOptions {
   skipAuth?: boolean;
 }
 
-// Single in-flight refresh promise to prevent concurrent refresh races
 let refreshPromise: Promise<void> | null = null;
 
 async function tryRefreshToken(): Promise<boolean> {
@@ -21,7 +20,6 @@ async function tryRefreshToken(): Promise<boolean> {
       body: JSON.stringify({ refresh_token: refreshToken }),
     });
     if (!response.ok) return false;
-
     const data = await response.json();
     localStorage.setItem('bitlink_access_token', data.access_token);
     localStorage.setItem('bitlink_refresh_token', data.refresh_token);
@@ -35,29 +33,19 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
   const { method = 'GET', body, params, skipAuth } = options;
 
   let url = `${API_BASE}${endpoint}`;
-
   if (params) {
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined) {
-        searchParams.append(key, String(value));
-      }
+      if (value !== undefined) searchParams.append(key, String(value));
     });
-    const queryString = searchParams.toString();
-    if (queryString) {
-      url += `?${queryString}`;
-    }
+    const qs = searchParams.toString();
+    if (qs) url += `?${qs}`;
   }
 
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-  };
-
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (!skipAuth) {
     const token = localStorage.getItem('bitlink_access_token');
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
+    if (token) headers['Authorization'] = `Bearer ${token}`;
   }
 
   let response = await fetch(url, {
@@ -66,7 +54,6 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
     body: body ? JSON.stringify(body) : undefined,
   });
 
-  // Auto-refresh on 401
   if (response.status === 401 && !skipAuth) {
     if (!refreshPromise) {
       refreshPromise = tryRefreshToken().then((ok) => {
@@ -76,18 +63,15 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
     }
     try {
       await refreshPromise;
-      // Retry with new token
       const newToken = localStorage.getItem('bitlink_access_token');
-      if (newToken) {
-        headers['Authorization'] = `Bearer ${newToken}`;
-      }
+      if (newToken) headers['Authorization'] = `Bearer ${newToken}`;
       response = await fetch(url, {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
       });
     } catch {
-      // Refresh failed — let the 401 fall through
+      // Fall through with the original 401
     }
   }
 
@@ -95,13 +79,10 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
     const error = await response.json().catch(() => ({ detail: 'Request failed' }));
     let message = `HTTP ${response.status}`;
     if (error.detail) {
-      if (typeof error.detail === 'string') {
-        message = error.detail;
-      } else if (Array.isArray(error.detail)) {
+      if (typeof error.detail === 'string') message = error.detail;
+      else if (Array.isArray(error.detail))
         message = error.detail.map((d: { msg?: string }) => d.msg || JSON.stringify(d)).join(', ');
-      } else {
-        message = JSON.stringify(error.detail);
-      }
+      else message = JSON.stringify(error.detail);
     }
     throw new Error(message);
   }
@@ -109,47 +90,43 @@ export async function apiRequest<T>(endpoint: string, options: RequestOptions = 
   return response.json();
 }
 
-// API response types (matching backend schemas)
+// ===========================================================================
+// Response types
+// ===========================================================================
+
 export interface ApiUser {
   id: number;
   name: string;
   handle: string;
   avatar: string | null;
   bio?: string | null;
+  embedded_wallet_address?: string | null;
+  trust_score?: number;
+  free_posts_remaining?: number;
   created_at?: string;
-  available_balance?: number;
   followers_count?: number;
   following_count?: number;
   is_following?: boolean;
-}
-
-export interface ApiUserCosts {
-  user_id: number;
-  costs: {
-    post: number;
-    comment: number;
-    reply: number;
-    like_post: number;
-    like_comment: number;
-  };
+  // Deprecated — kept optional for legacy UI code paths during migration cleanup.
+  available_balance?: number;
 }
 
 export interface ApiLedgerEntry {
   id: number;
   user_id: number;
-  amount: number;
-  balance_after: number;
+  amount_usdc_micro: number;
   action_type: string;
   ref_type: string;
   ref_id: number | null;
+  tx_hash: string | null;
   note: string | null;
   created_at: string;
 }
 
-export interface ApiBalanceResponse {
+export interface ApiWallet {
   user_id: number;
-  available_balance: number;
-  change_24h: number;
+  embedded_wallet_address: string | null;
+  delegated_actions_enabled: boolean;
 }
 
 export interface ApiPost {
@@ -163,23 +140,17 @@ export interface ApiPost {
   likes_count: number;
   comments_count: number;
   bounty: number | null;
-  cost_paid: number;
+  tip_count: number;
+  tip_total_usdc_micro: number;
   media_urls: string[];
   is_ai: boolean;
+  quality?: string | null;
+  tags?: string[] | null;
+  ai_summary?: string | null;
   created_at: string;
   is_liked: boolean;
-  like_status?: 'pending' | 'settled' | null;
-  locked_until?: string | null;
-  boost_amount?: number;
-  boost_remaining?: number;
-}
-
-export interface ApiCostEstimate {
-  base_cost: number;
-  length_cost: number;
-  fee_paid: number;
-  total: number;
-  content_limits: { min: number; max: number };
+  // Deprecated — kept optional for legacy UI code paths
+  cost_paid?: number;
 }
 
 export interface ApiComment {
@@ -189,14 +160,68 @@ export interface ApiComment {
   content: string;
   parent_id: number | null;
   likes_count: number;
-  cost_paid: number;
   is_liked: boolean;
-  like_status?: 'pending' | 'settled' | null;
-  like_locked_until?: string | null;
   created_at: string;
-  interaction_status?: 'pending' | 'settled' | 'cancelled';
-  locked_until?: string | null;
+  // Deprecated — kept optional
+  cost_paid?: number;
 }
+
+// --- Tip flow ---
+
+export interface TipQuote {
+  post_id: number;
+  creator_user_id: number;
+  creator_handle: string;
+  creator_wallet: string;
+  amount_usdc_micro: number;
+  usdc_token_address: string;
+  chain_id: number;
+  min_tip_micro: number;
+  max_tip_micro: number;
+  already_tipped: boolean;
+}
+
+export interface TipConfirmResult {
+  tip_id: number;
+  post_id: number;
+  creator_user_id: number;
+  amount_usdc_micro: number;
+  tx_hash: string;
+  confirmed_at: string;
+  post_likes_count: number;
+  post_tip_total_usdc_micro: number;
+}
+
+export interface TipHistoryItem {
+  id: number;
+  direction: 'sent' | 'received';
+  amount_usdc_micro: number;
+  counterparty_handle: string | null;
+  post_id: number | null;
+  tx_hash: string | null;
+  created_at: string;
+}
+
+// --- Wallet link (Privy first-time) ---
+
+export interface LinkWalletPayload {
+  embedded_wallet_address: string;
+  delegated_actions_enabled?: boolean;
+  name?: string;
+  handle?: string;
+  avatar?: string;
+  email?: string;
+}
+
+export interface LinkWalletResult {
+  user_id: number;
+  handle: string;
+  embedded_wallet_address: string;
+  delegated_actions_enabled: boolean;
+  is_new: boolean;
+}
+
+// --- Chat (unchanged shapes) ---
 
 export interface ApiChatSession {
   id: number;
@@ -300,8 +325,6 @@ export interface MediaUploadResponse {
   media_type: string;
 }
 
-// Reward, Challenge, and Boost types removed in minimal system
-
 export interface ApiDraft {
   id: number;
   post_type: 'note' | 'article' | 'question';
@@ -313,165 +336,34 @@ export interface ApiDraft {
   updated_at: string;
 }
 
-// Crypto/Pay types
-export interface CryptoBalance {
-  token_symbol: string;
-  balance: number;
-  balance_formatted: string;
+// --- Free post quota ---
+
+export interface FreeQuotaResponse {
+  free_posts_remaining: number;
+  daily_quota: number;
+  message: string;
 }
 
-export interface CryptoBalanceResponse {
-  balances: CryptoBalance[];
-}
+// ===========================================================================
+// API
+// ===========================================================================
 
-export interface DepositAddress {
-  chain: string;
-  address: string;
-}
-
-export interface CryptoDeposit {
-  id: number;
-  chain: string;
-  tx_hash: string;
-  token_symbol: string;
-  amount: number;
-  amount_formatted: string;
-  status: string;
-  confirmations: number;
-  created_at: string;
-}
-
-export interface CryptoDepositsResponse {
-  deposits: CryptoDeposit[];
-}
-
-export interface CryptoWithdrawal {
-  id: number;
-  chain: string;
-  to_address: string;
-  token_symbol: string;
-  amount: number;
-  amount_formatted: string;
-  status: string;
-  tx_hash: string | null;
-  created_at: string;
-}
-
-export interface CryptoWithdrawalsResponse {
-  withdrawals: CryptoWithdrawal[];
-}
-
-export interface WithdrawalRequest {
-  to_address: string;
-  amount: number;
-  chain?: string;
-  token_symbol?: string;
-}
-
-// Exchange types
-export interface ExchangeQuota {
-  btc_price: number;
-  buy_sat: {
-    initial: number;
-    remaining: number;
-    remaining_usd: number;
-  };
-  sell_sat: {
-    initial: number;
-    remaining: number;
-    remaining_usd: number;
-  };
-}
-
-export interface ChainFee {
-  chain: string;
-  min_deposit: number;
-  network_fee: number;
-  enabled: boolean;
-  receive_amount: number;
-}
-
-export interface ExchangePreview {
-  preview_id: string;
-  wallet_id: number;
-  direction: string;
-  amount_in: number;
-  amount_out: number;
-  btc_price: number;
-  buffer_rate: number;
-  bonus_sat: number;
-  total_out: number;
-  expires_in_seconds: number;
-}
-
-export interface ExchangeResult {
-  id: number;
-  wallet_id: number;
-  direction: string;
-  amount_in: number;
-  amount_out: number;
-  btc_price: number;
-  buffer_fee: number;
-  bonus_sat: number;
-  created_at: string;
-}
-
-export interface ExchangeHistoryItem {
-  id: number;
-  direction: string;
-  amount_in: number;
-  amount_out: number;
-  btc_price: number;
-  buffer_fee: number;
-  bonus_sat: number;
-  created_at: string;
-}
-
-export interface UserBalances {
-  sat_balance: number;
-  stable_balance: number;
-  stable_formatted: string;
-  first_exchange_eligible: boolean;
-  unclaimed_sat?: number;
-}
-
-export interface LikeQuote {
-  quote_id: string;
-  cost: number;
-  likes_count: number;
-  your_position: number;
-  break_even_at: number;
-  likes_needed: number;
-  expires_in_seconds: number;
-  has_balance: boolean;
-  available_balance: number;
-}
-
-// API methods
 export const api = {
-  // Users
+  // --- Users ---
   listUsers: () => apiRequest<ApiUser[]>('/api/users'),
 
-  createUser: (data: { name: string; handle: string }) =>
-    apiRequest<ApiUser>('/api/users', { method: 'POST', body: data }),
+  getMe: () => apiRequest<ApiUser>('/api/users/me'),
 
-  getUser: (userId: number, currentUserId?: number) =>
-    apiRequest<ApiUser>(`/api/users/${userId}`, { params: { current_user_id: currentUserId } }),
+  getUser: (userId: number) => apiRequest<ApiUser>(`/api/users/${userId}`),
 
-  updateUser: (userId: number, data: { name?: string; bio?: string; avatar?: string }) =>
-    apiRequest<ApiUser>(`/api/users/${userId}`, { method: 'PATCH', body: data }),
+  updateMe: (data: { name?: string; bio?: string; avatar?: string }) =>
+    apiRequest<ApiUser>('/api/users/me', { method: 'PATCH', body: data }),
 
-  followUser: (userId: number, followerId: number) =>
-    apiRequest<{ status: string }>(`/api/users/${userId}/follow`, {
-      method: 'POST',
-      params: { follower_id: followerId },
-    }),
+  followUser: (userId: number) =>
+    apiRequest<{ status: string }>(`/api/users/${userId}/follow`, { method: 'POST' }),
 
-  unfollowUser: (userId: number, followerId: number) =>
-    apiRequest<{ status: string }>(`/api/users/${userId}/follow`, {
-      method: 'DELETE',
-      params: { follower_id: followerId },
-    }),
+  unfollowUser: (userId: number) =>
+    apiRequest<{ status: string }>(`/api/users/${userId}/follow`, { method: 'DELETE' }),
 
   getFollowers: (userId: number) => apiRequest<ApiUser[]>(`/api/users/${userId}/followers`),
 
@@ -480,125 +372,80 @@ export const api = {
   searchUsers: (query: string, limit = 10) =>
     apiRequest<ApiUser[]>('/api/users/search', { params: { q: query, limit } }),
 
-  getUserByHandle: (handle: string, currentUserId?: number) =>
-    apiRequest<ApiUser>(`/api/users/handle/${handle}`, { params: currentUserId ? { current_user_id: currentUserId } : {} }),
+  getUserByHandle: (handle: string) =>
+    apiRequest<ApiUser>(`/api/users/handle/${handle}`),
 
-  checkMessagePermission: (senderId: number, recipientId: number) =>
-    apiRequest<{ permission: string; reason: string; can_message: boolean }>(
-      '/api/chat/permission',
-      { params: { sender_id: senderId, recipient_id: recipientId } }
-    ),
+  getMyLedger: (limit = 50, offset = 0) =>
+    apiRequest<ApiLedgerEntry[]>('/api/users/me/ledger', { params: { limit, offset } }),
 
-  getBalance: (userId: number) => apiRequest<ApiBalanceResponse>(`/api/users/${userId}/balance`),
+  getMyWallet: () => apiRequest<ApiWallet>('/api/users/me/wallet'),
 
-  getLedger: (userId: number, limit = 50, offset = 0) =>
-    apiRequest<ApiLedgerEntry[]>(`/api/users/${userId}/ledger`, { params: { limit, offset } }),
+  // --- Posts ---
+  getFreeQuota: () => apiRequest<FreeQuotaResponse>('/api/posts/free-quota'),
 
-  getUserCosts: (userId: number) =>
-    apiRequest<ApiUserCosts>(`/api/users/${userId}/costs`),
-
-  // Posts
-  createPost: (authorId: number, data: {
+  createPost: (data: {
     content: string;
     post_type: string;
     title?: string;
     content_format?: string;
     bounty?: number;
     media_urls?: string[];
-  }) =>
-    apiRequest<ApiPost>('/api/posts', { method: 'POST', body: data, params: { author_id: authorId } }),
+  }) => apiRequest<ApiPost>('/api/posts', { method: 'POST', body: data }),
 
-  estimatePostCost: (authorId: number, contentLength: number, postType = 'article') =>
-    apiRequest<ApiCostEstimate>('/api/posts/estimate-cost', {
-      method: 'POST',
-      body: { content_length: contentLength, post_type: postType },
-      params: { author_id: authorId },
-    }),
-
-  getPosts: (filters?: { post_type?: string; author_id?: number; user_id?: number; limit?: number; offset?: number }) =>
+  getPosts: (filters?: { post_type?: string; author_id?: number; limit?: number; offset?: number }) =>
     apiRequest<ApiPost[]>('/api/posts', { params: filters }),
 
-  getFeed: (userId: number, limit = 30, offset = 0) =>
-    apiRequest<ApiPost[]>('/api/posts/feed', { params: { user_id: userId, limit, offset } }),
+  getFeed: (limit = 30, offset = 0) =>
+    apiRequest<ApiPost[]>('/api/posts/feed', { params: { limit, offset } }),
 
-  getPost: (postId: number, userId?: number) =>
-    apiRequest<ApiPost>(`/api/posts/${postId}`, { params: { user_id: userId } }),
+  getPost: (postId: number) => apiRequest<ApiPost>(`/api/posts/${postId}`),
 
-  getLikeCost: (postId: number) =>
-    apiRequest<{ post_id: number; cost: number; likes_count: number }>(`/api/posts/${postId}/like-cost`),
+  deletePost: (postId: number) =>
+    apiRequest<{ status: string }>(`/api/posts/${postId}`, { method: 'DELETE' }),
 
-  createLikeQuote: (postId: number, userId: number) =>
-    apiRequest<LikeQuote>(`/api/posts/${postId}/like-quote`, {
-      method: 'POST',
-      params: { user_id: userId },
-    }),
+  // --- Comments ---
+  getComments: (postId: number) =>
+    apiRequest<ApiComment[]>(`/api/posts/${postId}/comments`),
 
-  likePost: (postId: number, userId: number, quoteId?: string) =>
-    apiRequest<{
-      likes_count: number;
-      is_liked: boolean;
-      like_status: 'settled';
-      cost: number;
-      your_weight: number;
-      like_rank: number;
-    }>(`/api/posts/${postId}/like`, {
-      method: 'POST',
-      params: { user_id: userId, quote_id: quoteId },
-    }),
+  createComment: (postId: number, data: { content: string; parent_id?: number }) =>
+    apiRequest<ApiComment>(`/api/posts/${postId}/comments`, { method: 'POST', body: data }),
 
-  getPostLikers: (postId: number) =>
-    apiRequest<{ likers: { user_id: number; username: string; cost_paid: number; weight: number; created_at: string }[] }>(`/api/posts/${postId}/likers`),
+  deleteComment: (commentId: number) =>
+    apiRequest<{ status: string }>(`/api/posts/comments/${commentId}`, { method: 'DELETE' }),
 
-  getComments: (postId: number, userId?: number) =>
-    apiRequest<ApiComment[]>(`/api/posts/${postId}/comments`, {
-      params: { user_id: userId },
-    }),
-
-  createComment: (postId: number, authorId: number, data: { content: string; parent_id?: number }) =>
-    apiRequest<ApiComment>(`/api/posts/${postId}/comments`, {
-      method: 'POST',
-      body: data,
-      params: { author_id: authorId },
-    }),
-
-  createCommentLikeQuote: (postId: number, commentId: number, userId: number) =>
-    apiRequest<LikeQuote>(`/api/posts/${postId}/comments/${commentId}/like-quote`, {
-      method: 'POST',
-      params: { user_id: userId },
-    }),
-
-  likeComment: (postId: number, commentId: number, userId: number, quoteId?: string) =>
-    apiRequest<{
-      likes_count: number;
-      is_liked: boolean;
-      like_status: 'settled';
-      cost: number;
-      your_weight: number;
-      like_rank: number;
-    }>(
+  likeComment: (postId: number, commentId: number) =>
+    apiRequest<{ is_liked: boolean; likes_count: number }>(
       `/api/posts/${postId}/comments/${commentId}/like`,
-      { method: 'POST', params: { user_id: userId, quote_id: quoteId } },
+      { method: 'POST' },
     ),
 
-  deleteComment: (commentId: number, userId: number) =>
-    apiRequest<{ status: string; refunded: number; penalty: number }>(
-      `/api/posts/comments/${commentId}`,
-      { method: 'DELETE', params: { user_id: userId } },
+  unlikeComment: (postId: number, commentId: number) =>
+    apiRequest<{ is_liked: boolean; likes_count: number }>(
+      `/api/posts/${postId}/comments/${commentId}/like`,
+      { method: 'DELETE' },
     ),
 
-  deletePost: (postId: number, userId: number) =>
-    apiRequest<{
-      status: string;
-      settled_likes: number;
-      author_clawback: number;
-      pool_forfeited: number;
-      bounty_refunded: number;
-    }>(
-      `/api/posts/${postId}`,
-      { method: 'DELETE', params: { author_id: userId } },
-    ),
+  // --- Tips (replaces post-likes economic flow) ---
+  tipQuote: (post_id: number, amount_usdc_micro: number) =>
+    apiRequest<TipQuote>('/api/tips/quote', {
+      method: 'POST',
+      body: { post_id, amount_usdc_micro },
+    }),
 
-  // Chat
+  tipConfirm: (post_id: number, tx_hash: string) =>
+    apiRequest<TipConfirmResult>('/api/tips/confirm', {
+      method: 'POST',
+      body: { post_id, tx_hash },
+    }),
+
+  getTipHistory: (limit = 50, offset = 0) =>
+    apiRequest<TipHistoryItem[]>('/api/tips/history', { params: { limit, offset } }),
+
+  // --- Wallet ---
+  linkWallet: (payload: LinkWalletPayload) =>
+    apiRequest<LinkWalletResult>('/api/wallet/link', { method: 'POST', body: payload }),
+
+  // --- Chat (still uses ?user_id= legacy; deferred refactor) ---
   createChatSession: (creatorId: number, data: { member_ids: number[]; name?: string; is_group?: boolean }) =>
     apiRequest<ApiChatSession>('/api/chat/sessions', {
       method: 'POST',
@@ -625,11 +472,10 @@ export const api = {
     }),
 
   addReaction: (messageId: number, userId: number, emoji: string) =>
-    apiRequest<{ id: number; message_id: number; user_id: number; emoji: string }>(`/api/chat/messages/${messageId}/reactions`, {
-      method: 'POST',
-      body: { emoji },
-      params: { user_id: userId },
-    }),
+    apiRequest<{ id: number; message_id: number; user_id: number; emoji: string }>(
+      `/api/chat/messages/${messageId}/reactions`,
+      { method: 'POST', body: { emoji }, params: { user_id: userId } },
+    ),
 
   removeReaction: (messageId: number, userId: number, emoji: string) =>
     apiRequest<{ status: string }>(`/api/chat/messages/${messageId}/reactions`, {
@@ -637,19 +483,10 @@ export const api = {
       params: { user_id: userId, emoji },
     }),
 
-  // Group management
   getGroupDetail: (sessionId: number, userId: number) =>
     apiRequest<ApiGroupDetail>(`/api/chat/sessions/${sessionId}/detail`, { params: { user_id: userId } }),
 
-  updateGroup: (sessionId: number, userId: number, data: {
-    name?: string;
-    avatar?: string;
-    description?: string;
-    who_can_send?: string;
-    who_can_add?: string;
-    join_approval?: boolean;
-    member_limit?: number;
-  }) =>
+  updateGroup: (sessionId: number, userId: number, data: Record<string, unknown>) =>
     apiRequest<ApiChatSession>(`/api/chat/sessions/${sessionId}`, {
       method: 'PATCH',
       body: data,
@@ -682,18 +519,16 @@ export const api = {
     }),
 
   updateMemberRole: (sessionId: number, userId: number, targetUserId: number, role: 'admin' | 'member') =>
-    apiRequest<{ status: string; role: string }>(`/api/chat/sessions/${sessionId}/members/${targetUserId}/role`, {
-      method: 'PATCH',
-      body: { role },
-      params: { user_id: userId },
-    }),
+    apiRequest<{ status: string; role: string }>(
+      `/api/chat/sessions/${sessionId}/members/${targetUserId}/role`,
+      { method: 'PATCH', body: { role }, params: { user_id: userId } },
+    ),
 
   muteMember: (sessionId: number, userId: number, targetUserId: number, isMuted: boolean, durationHours?: number) =>
-    apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}/members/${targetUserId}/mute`, {
-      method: 'PATCH',
-      body: { is_muted: isMuted, duration_hours: durationHours },
-      params: { user_id: userId },
-    }),
+    apiRequest<{ status: string }>(
+      `/api/chat/sessions/${sessionId}/members/${targetUserId}/mute`,
+      { method: 'PATCH', body: { is_muted: isMuted, duration_hours: durationHours }, params: { user_id: userId } },
+    ),
 
   transferOwnership: (sessionId: number, userId: number, newOwnerId: number) =>
     apiRequest<{ status: string }>(`/api/chat/sessions/${sessionId}/transfer`, {
@@ -702,7 +537,6 @@ export const api = {
       params: { user_id: userId },
     }),
 
-  // Invite links
   createInviteLink: (sessionId: number, userId: number, expiresInDays?: number, maxUses?: number) =>
     apiRequest<ApiInviteLink>(`/api/chat/sessions/${sessionId}/invite-link`, {
       method: 'POST',
@@ -730,7 +564,6 @@ export const api = {
       params: { user_id: userId },
     }),
 
-  // Join requests
   getJoinRequests: (sessionId: number, userId: number) =>
     apiRequest<ApiJoinRequest[]>(`/api/chat/sessions/${sessionId}/join-requests`, {
       params: { user_id: userId },
@@ -743,92 +576,35 @@ export const api = {
       params: { user_id: userId },
     }),
 
-  // Rewards, Challenges, and Boost removed in minimal system
+  checkMessagePermission: (senderId: number, recipientId: number) =>
+    apiRequest<{ permission: string; reason: string; can_message: boolean }>(
+      '/api/chat/permission',
+      { params: { sender_id: senderId, recipient_id: recipientId } },
+    ),
 
-  // Drafts
-  getDrafts: (userId: number) =>
-    apiRequest<ApiDraft[]>('/api/drafts', { params: { user_id: userId } }),
+  // --- Drafts ---
+  getDrafts: () => apiRequest<ApiDraft[]>('/api/drafts'),
 
-  createDraft: (userId: number, data: {
+  createDraft: (data: {
     post_type: string;
     title?: string;
     content: string;
     bounty?: number;
     has_title: boolean;
-  }) =>
-    apiRequest<ApiDraft>('/api/drafts', { method: 'POST', body: data, params: { user_id: userId } }),
+  }) => apiRequest<ApiDraft>('/api/drafts', { method: 'POST', body: data }),
 
-  updateDraft: (draftId: number, userId: number, data: {
+  updateDraft: (draftId: number, data: {
     post_type?: string;
     title?: string;
     content?: string;
     bounty?: number;
     has_title?: boolean;
-  }) =>
-    apiRequest<ApiDraft>(`/api/drafts/${draftId}`, { method: 'PUT', body: data, params: { user_id: userId } }),
+  }) => apiRequest<ApiDraft>(`/api/drafts/${draftId}`, { method: 'PUT', body: data }),
 
-  deleteDraft: (draftId: number, userId: number) =>
-    apiRequest<void>(`/api/drafts/${draftId}`, { method: 'DELETE', params: { user_id: userId } }),
+  deleteDraft: (draftId: number) =>
+    apiRequest<void>(`/api/drafts/${draftId}`, { method: 'DELETE' }),
 
-  // Pay / Crypto
-  getDepositAddress: (userId: number, chain = 'tron') =>
-    apiRequest<DepositAddress>('/api/pay/address', { params: { user_id: userId, chain } }),
-
-  getCryptoBalance: (userId: number) =>
-    apiRequest<CryptoBalanceResponse>('/api/pay/balance', { params: { user_id: userId } }),
-
-  getCryptoDeposits: (userId: number, limit = 50, offset = 0) =>
-    apiRequest<CryptoDepositsResponse>('/api/pay/deposits', { params: { user_id: userId, limit, offset } }),
-
-  requestWithdrawal: (userId: number, data: WithdrawalRequest) =>
-    apiRequest<CryptoWithdrawal>('/api/pay/withdraw', {
-      method: 'POST',
-      body: data,
-      params: { user_id: userId },
-    }),
-
-  getCryptoWithdrawals: (userId: number, limit = 50, offset = 0) =>
-    apiRequest<CryptoWithdrawalsResponse>('/api/pay/withdrawals', { params: { user_id: userId, limit, offset } }),
-
-  // Exchange
-  getBtcPrice: () =>
-    apiRequest<{ btc_price: number }>('/api/pay/exchange/price'),
-
-  getExchangeQuota: () =>
-    apiRequest<ExchangeQuota>('/api/pay/exchange/quota'),
-
-  getChainFees: () =>
-    apiRequest<ChainFee[]>('/api/pay/exchange/chain-fees'),
-
-  createExchangePreview: (userId: number, amount: number, direction: string) =>
-    apiRequest<ExchangePreview>('/api/pay/exchange/preview', {
-      method: 'POST',
-      body: { amount, direction },
-      params: { user_id: userId },
-    }),
-
-  confirmExchange: (userId: number, previewId: string) =>
-    apiRequest<ExchangeResult>('/api/pay/exchange/confirm', {
-      method: 'POST',
-      body: { preview_id: previewId },
-      params: { user_id: userId },
-    }),
-
-  getExchangeHistory: (userId: number, limit = 20, offset = 0) =>
-    apiRequest<{ exchanges: ExchangeHistoryItem[] }>('/api/pay/exchange/history', {
-      params: { user_id: userId, limit, offset },
-    }),
-
-  getUserBalances: (userId: number) =>
-    apiRequest<UserBalances>('/api/pay/user-balance', { params: { user_id: userId } }),
-
-  claimSat: (userId: number) =>
-    apiRequest<{ claimed: number; available_balance: number; message: string }>(
-      '/api/pay/claim-sat',
-      { method: 'POST', params: { user_id: userId } }
-    ),
-
-  // Media
+  // --- Media ---
   uploadMedia: async (file: Blob, purpose: 'post' | 'chat'): Promise<MediaUploadResponse> => {
     const formData = new FormData();
     formData.append('file', file, 'image.webp');
@@ -843,36 +619,25 @@ export const api = {
     return response.json();
   },
 
-  // Auth
+  // --- Auth (legacy local JWT path — kept for dev; new path is /api/wallet/link) ---
   googleLogin: (idToken: string) =>
     apiRequest<{ access_token: string; refresh_token: string; needs_onboarding: boolean }>(
-      '/api/auth/google', { method: 'POST', body: { id_token: idToken }, skipAuth: true }
-    ),
-
-  getWeb3Nonce: (address: string, chain: string) =>
-    apiRequest<{ nonce: string; message: string }>(
-      '/api/auth/web3/nonce', { method: 'POST', body: { address, chain }, skipAuth: true }
-    ),
-
-  web3Login: (data: { address: string; chain: string; signature: string; nonce: string }) =>
-    apiRequest<{ access_token: string; refresh_token: string; needs_onboarding: boolean }>(
-      '/api/auth/web3/verify', { method: 'POST', body: data, skipAuth: true }
+      '/api/auth/google',
+      { method: 'POST', body: { id_token: idToken }, skipAuth: true },
     ),
 
   refreshTokens: (refreshToken: string) =>
     apiRequest<{ access_token: string; refresh_token: string }>(
-      '/api/auth/refresh', { method: 'POST', body: { refresh_token: refreshToken }, skipAuth: true }
+      '/api/auth/refresh',
+      { method: 'POST', body: { refresh_token: refreshToken }, skipAuth: true },
     ),
 
   authLogout: (refreshToken: string) =>
     apiRequest<void>('/api/auth/logout', { method: 'POST', body: { refresh_token: refreshToken } }),
 
-  getMe: () =>
-    apiRequest<ApiUser>('/api/auth/me'),
-
-  linkGoogle: (idToken: string) =>
-    apiRequest<{ status: string }>('/api/auth/link/google', { method: 'POST', body: { id_token: idToken } }),
-
-  linkWeb3: (data: { address: string; chain: string; signature: string; nonce: string }) =>
-    apiRequest<{ status: string }>('/api/auth/link/web3', { method: 'POST', body: data }),
+  authMe: () => apiRequest<ApiUser>('/api/auth/me'),
 };
+
+// Compatibility helper kept so older callsites compile during migration.
+// Returns the user's free post quota — formerly used to compute SAT cost.
+export type ApiUserCosts = FreeQuotaResponse;

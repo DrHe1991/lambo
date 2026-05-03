@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { Post } from '../types';
 import { Heart, MessageSquare, Cpu, TrendingUp, MoreHorizontal, Trash2, Flag } from 'lucide-react';
 import { Badge } from './ui/Badge';
 import ImageGrid from './ImageGrid';
 
-function linkifyText(text: string): (string | JSX.Element)[] {
+function linkifyText(text: string): (string | ReactElement)[] {
   const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)/g;
   const parts = text.split(urlRegex);
   return parts.map((part, i) => {
@@ -28,7 +28,7 @@ function linkifyText(text: string): (string | JSX.Element)[] {
   });
 }
 
-function renderHtmlLinks(html: string, maxLength: number): JSX.Element {
+function renderHtmlLinks(html: string, maxLength: number): ReactElement {
   const linkRegex = /<a[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/gi;
   let stripped = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
   if (stripped.length > maxLength) {
@@ -50,7 +50,7 @@ function renderHtmlLinks(html: string, maxLength: number): JSX.Element {
   }
 
   let result = stripped;
-  const elements: (string | JSX.Element)[] = [];
+  const elements: (string | ReactElement)[] = [];
   let lastIndex = 0;
 
   for (const link of links) {

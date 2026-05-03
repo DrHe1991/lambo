@@ -1,3 +1,4 @@
+import os
 import secrets
 import re
 
@@ -12,6 +13,7 @@ from app.auth.jwt import (
     rotate_refresh_token,
     revoke_refresh_token,
 )
+from app.config import settings
 from app.auth.google import verify_google_id_token
 from app.auth.web3 import create_nonce, verify_and_consume_nonce, recover_eth_signer, verify_solana_signature, SIGN_MESSAGE_TEMPLATE
 from app.auth.dependencies import get_current_user
@@ -203,6 +205,34 @@ async def verify_wallet(body: Web3VerifyRequest, db: AsyncSession = Depends(get_
     )
 
 
+@router.post('/dev-login', response_model=AuthResponse)
+async def dev_login(user_id: int, db: AsyncSession = Depends(get_db)):
+    """Mint a session for a seeded user. **Development only.**
+
+    Gated behind `DEV_QUICK_LOGIN=1` (or `ENV=development`) so this can never
+    be hit in production. Used by the LoginPage's Quick Login row and by E2E
+    tests to skip Privy / Google flows.
+    """
+    quick_login_enabled = (
+        os.getenv('DEV_QUICK_LOGIN') == '1' or settings.env == 'development'
+    )
+    if not quick_login_enabled:
+        raise HTTPException(status_code=404, detail='Not found')
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    access_token = create_access_token(user.id)
+    refresh_token = create_refresh_token()
+    await store_refresh_token(user.id, refresh_token, db)
+    return AuthResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        needs_onboarding=False,
+    )
+
+
 @router.post('/refresh', response_model=AuthResponse)
 async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """Exchange a refresh token for a new token pair."""
@@ -222,15 +252,15 @@ async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
 
 @router.get('/me')
 async def get_me(current_user: User = Depends(get_current_user)):
-    """Get the current authenticated user."""
+    """Get the current authenticated user (legacy local-JWT path)."""
     return {
         'id': current_user.id,
         'name': current_user.name,
         'handle': current_user.handle,
         'avatar': current_user.avatar,
         'email': current_user.email,
-        'available_balance': current_user.available_balance,
-        'stable_balance': current_user.stable_balance,
+        'embedded_wallet_address': current_user.embedded_wallet_address,
+        'free_posts_remaining': current_user.free_posts_remaining,
     }
 
 

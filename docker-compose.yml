@@ -67,8 +67,10 @@ services:
       REDIS_URL: redis://redis:6379/0
       ENV: development
       DEBUG: 'false'
-      PAY_SERVICE_URL: http://pay:8000
-      PAY_APP_ID: '1'
+      PRIVY_APP_ID: ${PRIVY_APP_ID:-}
+      PRIVY_APP_SECRET: ${PRIVY_APP_SECRET:-}
+      BASE_RPC_URL: ${BASE_RPC_URL:-https://mainnet.base.org}
+      USDC_ADDRESS: ${USDC_ADDRESS:-0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: bitlink
       S3_SECRET_KEY: bitlink_dev_password
@@ -88,8 +90,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      pay:
-        condition: service_started
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # React UI
@@ -105,52 +105,17 @@ services:
       VITE_API_URL: http://localhost:8003
       VITE_WC_PROJECT_ID: '76b9cd0936b1b074a6c42d5efd4ea8e2'
       VITE_GOOGLE_CLIENT_ID: '292172431256-hotp58doi02m8do3kg64qq2qn9qjil9f.apps.googleusercontent.com'
+      # Privy + Base — required for the new tipping flow.
+      VITE_PRIVY_APP_ID: ${VITE_PRIVY_APP_ID:-}
+      VITE_BASE_RPC_URL: ${VITE_BASE_RPC_URL:-https://mainnet.base.org}
+      VITE_USDC_ADDRESS: ${VITE_USDC_ADDRESS:-0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913}
+      VITE_DEFAULT_TIP_MICRO: ${VITE_DEFAULT_TIP_MICRO:-100000}
+      VITE_DEV_QUICK_LOGIN: ${VITE_DEV_QUICK_LOGIN:-true}
     volumes:
       - ./ui:/app
       - /app/node_modules
     depends_on:
       - api
-
-  # Settlement Cron Job - settles expired pending likes every minute
-  cron:
-    image: curlimages/curl:8.5.0
-    container_name: bitlink-cron
-    restart: unless-stopped
-    user: root
-    depends_on:
-      - api
-    entrypoint: /bin/sh
-    command: >
-      -c "while true; do
-            sleep 60;
-            curl -s -X POST http://api:8000/api/settlement/settle-likes?batch_size=100;
-          done"
-
-  # Web3 Payment Gateway
-  pay:
-    build:
-      context: ./pay
-      dockerfile: Dockerfile
-    container_name: bitlink-pay
-    restart: unless-stopped
-    ports:
-      - '8005:8000'
-    environment:
-      DATABASE_URL: postgresql+asyncpg://bitlink:bitlink_dev_password@postgres:5432/bitlink
-      REDIS_URL: redis://redis:6379/1
-      ENV: development
-      DEBUG: 'true'
-      TRON_NETWORK: shasta
-      TRON_XPUB: ${TRON_XPUB:-}
-      TRON_API_KEY: ${TRON_API_KEY:-}
-    volumes:
-      - ./pay:/app
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:
   postgres_data:

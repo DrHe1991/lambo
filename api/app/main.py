@@ -4,7 +4,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.routes import posts, users, chat, drafts, pay, settlement, media, auth, reports, ai_admin
+from app.routes import (
+    ai_admin,
+    auth,
+    chat,
+    drafts,
+    media,
+    posts,
+    reports,
+    tips,
+    users,
+    wallet,
+)
 from app.services.media import media_service
 
 
@@ -18,8 +29,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title='BitLink API',
-    description='Backend API for BitLink social platform',
-    version='0.1.0',
+    description='Backend API for BitLink — non-custodial social tipping',
+    version='0.2.0',
     lifespan=lifespan,
 )
 
@@ -32,14 +43,14 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
-# Routes - Minimal system (rewards and challenges removed)
+# Routes
 app.include_router(auth.router, prefix='/api/auth', tags=['auth'])
+app.include_router(wallet.router, prefix='/api/wallet', tags=['wallet'])
+app.include_router(tips.router, prefix='/api/tips', tags=['tips'])
 app.include_router(users.router, prefix='/api/users', tags=['users'])
 app.include_router(posts.router, prefix='/api/posts', tags=['posts'])
 app.include_router(chat.router, prefix='/api/chat', tags=['chat'])
 app.include_router(drafts.router, prefix='/api/drafts', tags=['drafts'])
-app.include_router(pay.router, prefix='/api/pay', tags=['pay'])
-app.include_router(settlement.router, prefix='/api/settlement', tags=['settlement'])
 app.include_router(media.router, prefix='/api/media', tags=['media'])
 app.include_router(reports.router, prefix='/api/reports', tags=['reports'])
 app.include_router(ai_admin.router, prefix='/api/ai', tags=['ai'])

@@ -1,5 +1,10 @@
 """Seed script — wipe all data and create fresh test accounts ready for testing.
 
+In the post-pivot model, users own their funds on-chain. This seed gives them
+a placeholder embedded_wallet_address (a known dev EOA) so other endpoints
+that require linked wallets work in dev. To actually tip in dev you must
+fund those addresses with USDC on Base — or use the staging Privy app.
+
 Usage (from inside the api container):
     python seed.py
 
@@ -7,36 +12,37 @@ Usage (from host, via docker):
     docker compose exec api python seed.py
 """
 import asyncio
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.database import engine, async_session
+from app.db.database import async_session, engine
 from app.models.user import User
-from app.models.auth import UserAuthProvider  # noqa: F401 — needed for relationship resolution
-from app.models.ledger import Ledger, ActionType, RefType
+from app.models.auth import UserAuthProvider  # noqa: F401 — relationship resolution
 
 
-# Test accounts to create
+# Test accounts. Wallet addresses are deterministic dev EOAs (NOT real funds).
 TEST_USERS = [
     {
         'name': 'Alice',
         'handle': 'alice',
-        'bio': 'Test user — content creator',
-        'deposit': 50_000,
+        'bio': 'Test creator',
+        'privy_user_id': 'did:privy:dev_alice',
+        'embedded_wallet_address': '0x00000000000000000000000000000000000A11CE',
     },
     {
         'name': 'Bob',
         'handle': 'bob',
-        'bio': 'Test user — curator & commenter',
-        'deposit': 50_000,
+        'bio': 'Test commenter / tipper',
+        'privy_user_id': 'did:privy:dev_bob',
+        'embedded_wallet_address': '0x00000000000000000000000000000000000B0B00',
     },
     {
         'name': 'Eve',
         'handle': 'eve',
-        'bio': 'Test user — challenger & reporter',
-        'deposit': 50_000,
+        'bio': 'Test reporter',
+        'privy_user_id': 'did:privy:dev_eve',
+        'embedded_wallet_address': '0x000000000000000000000000000000000000EE0E',
     },
 ]
 
@@ -44,8 +50,6 @@ TEST_USERS = [
 async def wipe_all(db: AsyncSession):
     """Truncate all tables in dependency-safe order."""
     tables = [
-        'interaction_logs',
-        'platform_revenue',
         'ledger',
         'comment_likes',
         'post_likes',
@@ -63,37 +67,26 @@ async def wipe_all(db: AsyncSession):
         try:
             await db.execute(text(f'TRUNCATE TABLE {table} RESTART IDENTITY CASCADE'))
         except Exception:
-            pass  # Table may not exist
+            pass
     await db.commit()
     print('✓ All tables wiped')
 
 
 async def create_users(db: AsyncSession):
-    """Create test users with initial deposits."""
+    """Create test users with placeholder Privy wallets."""
     for u in TEST_USERS:
         user = User(
             name=u['name'],
             handle=u['handle'],
             bio=u['bio'],
-            available_balance=u['deposit'],
-            free_posts_remaining=1,
+            privy_user_id=u['privy_user_id'],
+            embedded_wallet_address=u['embedded_wallet_address'],
+            free_posts_remaining=3,
         )
         db.add(user)
         await db.flush()
         await db.refresh(user)
-
-        # Record deposit in ledger
-        entry = Ledger(
-            user_id=user.id,
-            amount=u['deposit'],
-            balance_after=u['deposit'],
-            action_type=ActionType.DEPOSIT.value,
-            ref_type=RefType.NONE.value,
-            note=f'Seed deposit ({u["deposit"]} sat)',
-        )
-        db.add(entry)
-
-        print(f'  ✓ {u["name"]} (@{u["handle"]}) — {u["deposit"]} sat, id={user.id}')
+        print(f'  ✓ {u["name"]} (@{u["handle"]}) wallet={u["embedded_wallet_address"]} id={user.id}')
 
     await db.commit()
 
@@ -101,7 +94,7 @@ async def create_users(db: AsyncSession):
 async def main():
     print()
     print('=' * 50)
-    print('  BitLink Seed Script')
+    print('  BitLink Seed Script (post-compliance-pivot)')
     print('=' * 50)
     print()
 
@@ -117,10 +110,11 @@ async def main():
     print()
     print('Done! Ready for testing.')
     print()
-    print('  Users:')
     for u in TEST_USERS:
-        print(f'    @{u["handle"]}  —  {u["deposit"]:,} sat  —  1 free post')
+        print(f'    @{u["handle"]}  —  wallet {u["embedded_wallet_address"][:10]}…')
     print()
+    print('Note: dev wallets above are NOT funded. To run a real tip end-to-end,')
+    print('use the Privy SDK from the UI (which creates a real Base address).')
 
 
 if __name__ == '__main__':

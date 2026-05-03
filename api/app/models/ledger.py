@@ -1,58 +1,18 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Index
+from sqlalchemy import String, BigInteger, ForeignKey, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
 
 
 class ActionType(str, Enum):
-    """All possible ledger action types."""
-    # Free actions
-    FREE_POST = 'free_post'
-
-    # Income
-    REWARD_POST = 'reward_post'
-    REWARD_COMMENT = 'reward_comment'
-    CHALLENGE_REFUND = 'challenge_refund'
-    CHALLENGE_REWARD = 'challenge_reward'
-    DEPOSIT = 'deposit'
-    # Direct income from likes/comments (80% split)
-    EARN_LIKE = 'earn_like'
-    EARN_COMMENT = 'earn_comment'
-    EARN_SUBSIDY = 'earn_subsidy'
-
-    # Spending
-    SPEND_POST = 'spend_post'
-    SPEND_QUESTION = 'spend_question'
-    SPEND_ANSWER = 'spend_answer'
-    SPEND_COMMENT = 'spend_comment'
-    SPEND_REPLY = 'spend_reply'
-    SPEND_LIKE = 'spend_like'
-    SPEND_COMMENT_LIKE = 'spend_comment_like'
-    SPEND_BOOST = 'spend_boost'
-
-    # Penalties & fees
-    FINE = 'fine'
-    CHALLENGE_FEE = 'challenge_fee'
-    WITHDRAW = 'withdraw'
-    CABAL_PENALTY = 'cabal_penalty'
-
-    # Jury system
-    JURY_REWARD = 'jury_reward'
-
-    # 24h lock settlement
-    LOCK_LIKE = 'lock_like'          # Lock funds when liking
-    LOCK_COMMENT = 'lock_comment'    # Lock funds when commenting
-    SETTLE_AUTHOR = 'settle_author'  # Settle 80% to author after 24h
-    SETTLE_PLATFORM = 'settle_platform'  # Settle 20% to platform after 24h
-    REFUND_CANCEL = 'refund_cancel'  # Refund 70% on cancel
-    PENALTY_CANCEL = 'penalty_cancel'  # 30% penalty on cancel
-
-    # Exchange actions (USDT <-> sat)
-    EXCHANGE_BUY_SAT = 'exchange_buy_sat'    # USDT -> sat
-    EXCHANGE_SELL_SAT = 'exchange_sell_sat'  # sat -> USDT
-    EXCHANGE_BONUS = 'exchange_bonus'        # First exchange bonus
+    """Off-chain ledger actions. Money movement is on-chain (USDC on Base);
+    this ledger only records denormalized aggregates and non-monetary events."""
+    TIP_SENT = 'tip_sent'              # User tipped a creator (mirrors on-chain)
+    TIP_RECEIVED = 'tip_received'      # Creator received a tip (mirrors on-chain)
+    FREE_POST_USED = 'free_post_used'  # Daily free post quota consumed
+    MODERATION_PENALTY = 'moderation_penalty'  # Mod action (e.g., post hidden)
 
 
 class RefType(str, Enum):
@@ -60,15 +20,16 @@ class RefType(str, Enum):
     NONE = 'none'
     POST = 'post'
     COMMENT = 'comment'
-    CHALLENGE = 'challenge'
-    BOOST = 'boost'
     USER = 'user'
-    POST_LIKE = 'post_like'
-    COMMENT_LIKE = 'comment_like'
 
 
 class Ledger(Base):
-    """Transaction log — every sat movement is recorded here."""
+    """Off-chain activity log.
+
+    NOTE: Authoritative balance lives on-chain (USDC on Base). This table is
+    a denormalized event stream for the Transactions view. amount_usdc_micro
+    is positive for inflows (TIP_RECEIVED) and negative for outflows (TIP_SENT).
+    """
 
     __tablename__ = 'ledger'
 
@@ -77,13 +38,14 @@ class Ledger(Base):
         ForeignKey('users.id', ondelete='CASCADE'), index=True
     )
 
-    # +amount = earn, -amount = spend
-    amount: Mapped[int] = mapped_column(BigInteger)
-    balance_after: Mapped[int] = mapped_column(BigInteger)
+    amount_usdc_micro: Mapped[int] = mapped_column(BigInteger, default=0)
 
     action_type: Mapped[str] = mapped_column(String(30))
     ref_type: Mapped[str] = mapped_column(String(20), default=RefType.NONE.value)
-    ref_id: Mapped[int | None] = mapped_column(Integer, default=None)
+    ref_id: Mapped[int | None] = mapped_column(BigInteger, default=None)
+
+    # On-chain reference for tip rows
+    tx_hash: Mapped[str | None] = mapped_column(String(66), default=None)
 
     note: Mapped[str | None] = mapped_column(String(200), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

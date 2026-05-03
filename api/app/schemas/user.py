@@ -10,7 +10,7 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    """Schema for creating a user (no password - dev mode)."""
+    """Schema for creating a user."""
     avatar: str | None = None
 
 
@@ -27,7 +27,8 @@ class UserBrief(BaseModel):
     name: str
     handle: str
     avatar: str | None
-    available_balance: int = 0
+    embedded_wallet_address: str | None = None
+    trust_score: int = 135
 
     class Config:
         from_attributes = True
@@ -40,6 +41,7 @@ class UserResponse(UserBrief):
     followers_count: int = 0
     following_count: int = 0
     is_following: bool = False
+    free_posts_remaining: int = 3
 
     class Config:
         from_attributes = True

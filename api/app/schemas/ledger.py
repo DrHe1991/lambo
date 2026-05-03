@@ -6,11 +6,11 @@ class LedgerEntry(BaseModel):
     """Single ledger entry response."""
     id: int
     user_id: int
-    amount: int
-    balance_after: int
+    amount_usdc_micro: int
     action_type: str
     ref_type: str
     ref_id: int | None
+    tx_hash: str | None = None
     note: str | None
     created_at: datetime
 
@@ -18,8 +18,8 @@ class LedgerEntry(BaseModel):
         from_attributes = True
 
 
-class BalanceResponse(BaseModel):
-    """User balance summary."""
+class WalletResponse(BaseModel):
+    """User wallet info — balance lives on chain, this just returns the address."""
     user_id: int
-    available_balance: int
-    change_24h: int = 0
+    embedded_wallet_address: str | None
+    delegated_actions_enabled: bool = False

@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum
-from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Text, UniqueConstraint, Float, Boolean, JSON
+from sqlalchemy import String, Integer, BigInteger, ForeignKey, DateTime, Text, UniqueConstraint, JSON, Boolean
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -26,15 +26,8 @@ class PostStatus(str, Enum):
     CHALLENGED = 'challenged'
 
 
-class InteractionStatus(str, Enum):
-    """Status of a like/comment interaction for 24h lock settlement."""
-    PENDING = 'pending'      # Locked, awaiting settlement
-    SETTLED = 'settled'      # Settled to author
-    CANCELLED = 'cancelled'  # User cancelled, 30% penalty applied
-
-
 class Post(Base):
-    """Post model - supports both notes and questions."""
+    """Post model — supports notes, articles, questions. No economic state on row."""
 
     __tablename__ = 'posts'
 
@@ -50,26 +43,20 @@ class Post(Base):
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
     comments_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    # For questions - bounty amount
-    bounty: Mapped[int | None] = mapped_column(Integer, default=None)
+    # For questions — bounty in micro-USDC (1_000_000 = $1.00)
+    bounty: Mapped[int | None] = mapped_column(BigInteger, default=None)
 
-    # How much the author paid to publish (0 = free post)
-    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
+    # Cached tip aggregates (refreshed on each /tip/confirm)
+    tip_count: Mapped[int] = mapped_column(Integer, default=0)
+    tip_total_usdc_micro: Mapped[int] = mapped_column(BigInteger, default=0)
 
     # Attached media URLs (images)
     media_urls: Mapped[list] = mapped_column(JSON, default=list)
 
     # AI-generated content flag
-    is_ai: Mapped[bool] = mapped_column(default=False)
+    is_ai: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Boost (paid promotion)
-    boost_amount: Mapped[int] = mapped_column(BigInteger, default=0)
-    boost_remaining: Mapped[float] = mapped_column(Float, default=0.0)
-
-    # Undistributed liker earnings pool (distributed by cron)
-    revenue_pool: Mapped[int] = mapped_column(BigInteger, default=0)
-
-    # AI evaluation results
+    # AI evaluation results (used for ranking/moderation, not money)
     quality: Mapped[str | None] = mapped_column(String(20), default=None)
     tags: Mapped[list | None] = mapped_column(JSON, default=None)
     ai_summary: Mapped[str | None] = mapped_column(Text, default=None)
@@ -88,7 +75,7 @@ class Post(Base):
 
 
 class Comment(Base):
-    """Comment on a post. Also used as answers for questions."""
+    """Comment on a post. Free, no economic state."""
 
     __tablename__ = 'comments'
 
@@ -97,36 +84,19 @@ class Comment(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     content: Mapped[str] = mapped_column(Text)
 
-    # For nested replies
     parent_id: Mapped[int | None] = mapped_column(
         ForeignKey('comments.id', ondelete='CASCADE'), default=None
     )
 
-    # Engagement
     likes_count: Mapped[int] = mapped_column(Integer, default=0)
 
-    # How much the author paid (comment=50, reply=20, answer=200)
-    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
+    # Soft-delete flag
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Undistributed liker earnings pool (distributed by cron)
-    revenue_pool: Mapped[int] = mapped_column(BigInteger, default=0)
-
-    # 24h lock settlement fields
-    interaction_status: Mapped[str] = mapped_column(
-        String(20), default=InteractionStatus.SETTLED.value
-    )
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
-    recipient_id: Mapped[int | None] = mapped_column(
-        ForeignKey('users.id', ondelete='SET NULL'), default=None
-    )
-
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    # Relationships
     post: Mapped['Post'] = relationship('Post', back_populates='comments')
     author: Mapped['User'] = relationship('User', back_populates='comments', foreign_keys=[author_id])
-    recipient: Mapped['User | None'] = relationship('User', foreign_keys=[recipient_id])
     replies: Mapped[list['Comment']] = relationship(
         'Comment', back_populates='parent', cascade='all, delete-orphan'
     )
@@ -136,7 +106,12 @@ class Comment(Base):
 
 
 class PostLike(Base):
-    """Tracks who liked which post with full weight components."""
+    """A like on a post. Each like corresponds to a tip transaction on Base.
+
+    The tx_hash is set after on-chain verification via /tip/confirm.
+    Until then the like is treated as 'pending' from the client's perspective
+    but the row is created optimistically when the user submits the tip.
+    """
 
     __tablename__ = 'post_likes'
 
@@ -145,32 +120,10 @@ class PostLike(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    # Weight components (S9) - stored at creation time
-    w_trust: Mapped[float] = mapped_column(Float, default=1.0)        # Liker trust tier weight
-    n_novelty: Mapped[float] = mapped_column(Float, default=1.0)      # Interaction freshness
-    s_source: Mapped[float] = mapped_column(Float, default=1.0)       # Stranger vs follower
-    ce_entropy: Mapped[float] = mapped_column(Float, default=1.0)     # Consensus diversity
-    cross_circle: Mapped[float] = mapped_column(Float, default=1.0)   # Cross-circle bonus
-    cabal_penalty: Mapped[float] = mapped_column(Float, default=1.0)  # Cabal member penalty
-
-    # Computed total weight
-    total_weight: Mapped[float] = mapped_column(Float, default=1.0)
-
-    # Is this a cross-circle like? (liker not following author)
-    is_cross_circle: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Total earnings from early supporter revenue sharing (minimal system)
-    earnings: Mapped[int] = mapped_column(BigInteger, default=0)
-
-    # 24h lock settlement fields
-    status: Mapped[str] = mapped_column(
-        String(20), default=InteractionStatus.SETTLED.value
-    )
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
-    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
-    recipient_id: Mapped[int | None] = mapped_column(
-        ForeignKey('users.id', ondelete='SET NULL'), default=None
-    )
+    # On-chain reference (Base mainnet USDC transfer)
+    tx_hash: Mapped[str | None] = mapped_column(String(66), unique=True, default=None)
+    amount_usdc_micro: Mapped[int] = mapped_column(BigInteger, default=0)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
 
     __table_args__ = (
         UniqueConstraint('post_id', 'user_id', name='uq_post_like'),
@@ -178,7 +131,7 @@ class PostLike(Base):
 
 
 class CommentLike(Base):
-    """Tracks who liked which comment."""
+    """A like on a comment. Free social signal, no on-chain side-effect."""
 
     __tablename__ = 'comment_likes'
 
@@ -186,16 +139,6 @@ class CommentLike(Base):
     comment_id: Mapped[int] = mapped_column(ForeignKey('comments.id', ondelete='CASCADE'))
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-    # 24h lock settlement fields
-    status: Mapped[str] = mapped_column(
-        String(20), default=InteractionStatus.SETTLED.value
-    )
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime, default=None)
-    cost_paid: Mapped[int] = mapped_column(BigInteger, default=0)
-    recipient_id: Mapped[int | None] = mapped_column(
-        ForeignKey('users.id', ondelete='SET NULL'), default=None
-    )
 
     __table_args__ = (
         UniqueConstraint('comment_id', 'user_id', name='uq_comment_like'),

@@ -14,7 +14,7 @@ class PostCreate(PostBase):
     """Schema for creating a post."""
     title: str | None = Field(None, max_length=200)
     content_format: str = Field(default='plain', pattern=r'^(plain|markdown)$')
-    bounty: int | None = Field(None, ge=0)
+    bounty: int | None = Field(None, ge=0, description='Bounty for questions, in micro-USDC')
     media_urls: list[str] = Field(default_factory=list, max_length=9)
 
 
@@ -24,7 +24,7 @@ class PostUpdate(BaseModel):
 
 
 class PostResponse(BaseModel):
-    """Post response with author info."""
+    """Post response with author info and tip aggregates."""
     id: int
     author: UserBrief
     title: str | None = None
@@ -34,8 +34,9 @@ class PostResponse(BaseModel):
     status: str
     likes_count: int
     comments_count: int
-    bounty: int | None
-    cost_paid: int = 0
+    bounty: int | None = None
+    tip_count: int = 0
+    tip_total_usdc_micro: int = 0
     media_urls: list[str] = []
     is_ai: bool
     quality: str | None = None
@@ -43,8 +44,6 @@ class PostResponse(BaseModel):
     ai_summary: str | None = None
     created_at: datetime
     is_liked: bool = False
-    like_status: str | None = None
-    locked_until: str | None = None
 
     class Config:
         from_attributes = True
@@ -68,13 +67,8 @@ class CommentResponse(BaseModel):
     content: str
     parent_id: int | None
     likes_count: int
-    cost_paid: int = 0
     is_liked: bool = False
-    like_status: str | None = None
-    like_locked_until: str | None = None
     created_at: datetime
-    interaction_status: str = 'settled'
-    locked_until: datetime | None = None
 
     class Config:
         from_attributes = True

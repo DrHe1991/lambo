@@ -22,6 +22,7 @@
     "@capacitor/keyboard": "^8.0.2",
     "@capacitor/status-bar": "^8.0.2",
     "@capawesome/capacitor-google-sign-in": "^0.1.2",
+    "@privy-io/react-auth": "^3.22.2",
     "@solana/wallet-adapter-base": "^0.9.27",
     "@solana/wallet-adapter-phantom": "^0.9.28",
     "@solana/wallet-adapter-react": "^0.15.39",

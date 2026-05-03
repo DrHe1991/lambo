@@ -57,13 +57,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   sendMessage: async (sessionId, senderId, content) => {
     try {
-      const message = await api.sendMessage(sessionId, senderId, content);
+      const result = await api.sendMessage(sessionId, senderId, content);
+      // sendMessage may return either a single message or an array (server batches);
+      // normalise to a flat list and use the most recent timestamp for the session.
+      const newMessages: ApiMessage[] = Array.isArray(result) ? result : [result];
+      const lastTimestamp =
+        newMessages[newMessages.length - 1]?.created_at ?? new Date().toISOString();
       set((state) => ({
-        messages: [...state.messages, message],
+        messages: [...state.messages, ...newMessages],
         sessions: state.sessions.map((s) =>
           s.id === sessionId
-            ? { ...s, last_message: content, last_message_at: message.created_at }
-            : s
+            ? { ...s, last_message: content, last_message_at: lastTimestamp }
+            : s,
         ),
       }));
     } catch (error) {

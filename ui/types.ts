@@ -11,6 +11,7 @@ export interface User {
   bio?: string | null;
   followers_count?: number;
   following_count?: number;
+  walletAddress?: string | null;
 }
 
 export interface Post {
@@ -19,22 +20,17 @@ export interface Post {
   title?: string | null;
   content: string;
   contentFormat?: 'plain' | 'markdown' | 'html';
-  stakedSats?: number;
   likes: number;
   comments: number;
   timestamp: string;
   isAI?: boolean;
-  isPromoted?: boolean;
-  isBoosted?: boolean;
-  boostMultiplier?: number;
-  boostRemaining?: number;
   type: 'Note' | 'Article' | 'Question';
   bounty?: number;
   status?: string;
   mediaUrls?: string[];
   isLiked?: boolean;
-  likeStatus?: 'pending' | 'settled' | null;
-  lockedUntil?: string | null;
+  tipCount?: number;
+  tipTotalUsdcMicro?: number;
 }
 
 export interface Comment {
@@ -44,11 +40,8 @@ export interface Comment {
   content: string;
   parentId?: string | number | null;
   likesCount: number;
-  costPaid: number;
   isLiked?: boolean;
   timestamp: string;
-  interactionStatus?: 'pending' | 'settled' | 'cancelled';
-  lockedUntil?: string | null;
 }
 
 export interface ChatMessage {
@@ -69,15 +62,6 @@ export interface ChatSession {
   userHasLeft?: boolean;
 }
 
-export interface JuryCase {
-  id: string;
-  content: string;
-  reason: string;
-  reporter: string;
-  expiresAt: string;
-  originalStaked: number;
-}
-
 // Helper to convert API user to UI user
 export function apiUserToUser(apiUser: {
   id: number;
@@ -88,6 +72,7 @@ export function apiUserToUser(apiUser: {
   bio?: string | null;
   followers_count?: number;
   following_count?: number;
+  embedded_wallet_address?: string | null;
 }): User {
   return {
     id: apiUser.id,
@@ -98,6 +83,7 @@ export function apiUserToUser(apiUser: {
     bio: apiUser.bio,
     followers_count: apiUser.followers_count,
     following_count: apiUser.following_count,
+    walletAddress: apiUser.embedded_wallet_address ?? null,
   };
 }
 
@@ -109,7 +95,7 @@ export function apiPostToPost(apiPost: {
     name: string;
     handle: string;
     avatar: string | null;
-    trust_score?: number;
+    embedded_wallet_address?: string | null;
   };
   title?: string | null;
   content: string;
@@ -119,19 +105,13 @@ export function apiPostToPost(apiPost: {
   likes_count: number;
   comments_count: number;
   bounty: number | null;
+  tip_count?: number;
+  tip_total_usdc_micro?: number;
   is_ai: boolean;
   created_at: string;
   media_urls?: string[];
   is_liked: boolean;
-  like_status?: 'pending' | 'settled' | null;
-  locked_until?: string | null;
-  boost_amount?: number;
-  boost_remaining?: number;
 }): Post {
-  const boostRemaining = apiPost.boost_remaining ?? 0;
-  const isBoosted = boostRemaining > 0.01;
-  const boostMultiplier = Math.min(5.0, 1.0 + boostRemaining);
-
   const typeMap: Record<string, 'Note' | 'Article' | 'Question'> = {
     note: 'Note',
     article: 'Article',
@@ -153,15 +133,11 @@ export function apiPostToPost(apiPost: {
     status: apiPost.status,
     mediaUrls: (apiPost.media_urls || []).map(fixUrl),
     isLiked: apiPost.is_liked,
-    likeStatus: apiPost.like_status,
-    lockedUntil: apiPost.locked_until,
-    isBoosted,
-    boostMultiplier: isBoosted ? boostMultiplier : undefined,
-    boostRemaining: isBoosted ? boostRemaining : undefined,
+    tipCount: apiPost.tip_count ?? 0,
+    tipTotalUsdcMicro: apiPost.tip_total_usdc_micro ?? 0,
   };
 }
 
-// Helper to convert API chat session to UI format
 export function apiSessionToSession(apiSession: {
   id: number;
   name: string | null;
@@ -171,7 +147,6 @@ export function apiSessionToSession(apiSession: {
     name: string;
     handle: string;
     avatar: string | null;
-    trust_score: number;
   }>;
   last_message: string | null;
   last_message_at: string | null;
@@ -185,7 +160,9 @@ export function apiSessionToSession(apiSession: {
     isGroup: apiSession.is_group,
     participants: apiSession.members.map(apiUserToUser),
     lastMessage: apiSession.last_message || '',
-    timestamp: apiSession.last_message_at ? formatTimestamp(apiSession.last_message_at) : formatTimestamp(apiSession.created_at),
+    timestamp: apiSession.last_message_at
+      ? formatTimestamp(apiSession.last_message_at)
+      : formatTimestamp(apiSession.created_at),
     unreadCount: apiSession.unread_count,
     userHasLeft: apiSession.user_has_left ?? false,
   };
@@ -215,16 +192,12 @@ export function apiCommentToComment(apiComment: {
     name: string;
     handle: string;
     avatar: string | null;
-    trust_score: number;
   };
   content: string;
   parent_id: number | null;
   likes_count: number;
-  cost_paid: number;
   is_liked: boolean;
   created_at: string;
-  interaction_status?: string;
-  locked_until?: string | null;
 }): Comment {
   return {
     id: apiComment.id,
@@ -233,24 +206,7 @@ export function apiCommentToComment(apiComment: {
     content: apiComment.content,
     parentId: apiComment.parent_id,
     likesCount: apiComment.likes_count,
-    costPaid: apiComment.cost_paid,
     isLiked: apiComment.is_liked,
     timestamp: formatTimestamp(apiComment.created_at),
-    interactionStatus: (apiComment.interaction_status as 'pending' | 'settled' | 'cancelled') || 'settled',
-    lockedUntil: apiComment.locked_until,
   };
-}
-
-export function getRemainingLockTime(lockedUntil: string | null | undefined): string | null {
-  if (!lockedUntil) return null;
-  const lockTime = new Date(lockedUntil);
-  const now = new Date();
-  const diffMs = lockTime.getTime() - now.getTime();
-  if (diffMs <= 0) return null;
-
-  const hours = Math.floor(diffMs / 3600000);
-  const mins = Math.floor((diffMs % 3600000) / 60000);
-
-  if (hours > 0) return `${hours}h ${mins}m`;
-  return `${mins}m`;
 }
