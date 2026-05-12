@@ -20,6 +20,7 @@ interface GroupEvent {
 
 type WebSocketMessage = 
   | { type: 'new_message'; message: ApiMessage }
+  | { type: 'transfer_updated'; message: ApiMessage }
   | { type: 'reaction_added'; message_id: number; user_id: number; user_name: string; emoji: string }
   | { type: 'reaction_removed'; message_id: number; user_id: number; emoji: string }
   | { type: 'member_removed'; session_id: number; user_id: number }
@@ -29,6 +30,7 @@ type WebSocketMessage =
 interface UseChatWebSocketOptions {
   userId: number | null;
   onMessage: (message: ApiMessage) => void;
+  onTransferUpdated?: (message: ApiMessage) => void;
   onReactionAdded?: (event: ReactionEvent) => void;
   onReactionRemoved?: (event: ReactionEvent) => void;
   onMemberRemoved?: (event: GroupEvent) => void;
@@ -40,6 +42,7 @@ interface UseChatWebSocketOptions {
 export function useChatWebSocket({ 
   userId, 
   onMessage, 
+  onTransferUpdated,
   onReactionAdded, 
   onReactionRemoved,
   onMemberRemoved,
@@ -53,6 +56,7 @@ export function useChatWebSocket({
   const isCleaningUpRef = useRef(false);
   
   const onMessageRef = useRef(onMessage);
+  const onTransferUpdatedRef = useRef(onTransferUpdated);
   const onReactionAddedRef = useRef(onReactionAdded);
   const onReactionRemovedRef = useRef(onReactionRemoved);
   const onMemberRemovedRef = useRef(onMemberRemoved);
@@ -62,6 +66,7 @@ export function useChatWebSocket({
   const userIdRef = useRef(userId);
   
   onMessageRef.current = onMessage;
+  onTransferUpdatedRef.current = onTransferUpdated;
   onReactionAddedRef.current = onReactionAdded;
   onReactionRemovedRef.current = onReactionRemoved;
   onMemberRemovedRef.current = onMemberRemoved;
@@ -116,6 +121,8 @@ export function useChatWebSocket({
           const data: WebSocketMessage = JSON.parse(event.data);
           if (data.type === 'new_message') {
             onMessageRef.current(data.message);
+          } else if (data.type === 'transfer_updated' && onTransferUpdatedRef.current) {
+            onTransferUpdatedRef.current(data.message);
           } else if (data.type === 'reaction_added' && onReactionAddedRef.current) {
             onReactionAddedRef.current({
               message_id: data.message_id,

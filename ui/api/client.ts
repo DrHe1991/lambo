@@ -280,6 +280,16 @@ export interface ApiReplyInfo {
   sender_name: string;
 }
 
+export interface ApiTransferInfo {
+  amount: number;
+  note: string | null;
+  status: 'pending' | 'accepted' | 'refunded';
+  sender_id: number;
+  recipient_id: number;
+  accepted_at: string | null;
+  refunded_at: string | null;
+}
+
 export interface ApiMessage {
   id: number;
   session_id: number;
@@ -291,6 +301,7 @@ export interface ApiMessage {
   status: 'sent' | 'pending';
   reply_to: ApiReplyInfo | null;
   reactions: ApiReaction[];
+  transfer?: ApiTransferInfo | null;
   created_at: string;
 }
 
@@ -629,6 +640,18 @@ export const api = {
       method: 'POST',
       body: { amount, note: note || null },
       params: { sender_id: senderId },
+    }),
+
+  acceptSatTransfer: (messageId: number, userId: number) =>
+    apiRequest<ApiMessage>(`/api/chat/messages/${messageId}/accept-transfer`, {
+      method: 'POST',
+      params: { user_id: userId },
+    }),
+
+  declineSatTransfer: (messageId: number, userId: number) =>
+    apiRequest<ApiMessage>(`/api/chat/messages/${messageId}/decline-transfer`, {
+      method: 'POST',
+      params: { user_id: userId },
     }),
 
   addReaction: (messageId: number, userId: number, emoji: string) =>

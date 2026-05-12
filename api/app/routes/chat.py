@@ -10,13 +10,14 @@ from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
 from app.models.user import User, Follow
-from app.models.chat import ChatSession, ChatMember, Message, MessageReaction, GroupInviteLink, JoinRequest
+from app.models.chat import ChatSession, ChatMember, Message, MessageReaction, GroupInviteLink, JoinRequest, MessageTransfer
 from app.models.ledger import ActionType, RefType
 from app.schemas.chat import (
     ChatSessionCreate, ChatSessionResponse, ChatSessionUpdate, MessageCreate, MessageResponse,
     ReactionCreate, ReactionResponse, ReactionInfo, ReplyInfo, GroupDetailResponse, MemberInfo,
     AddMembersRequest, UpdateRoleRequest, MuteRequest, TransferOwnershipRequest,
-    InviteLinkCreate, InviteLinkResponse, InvitePreviewResponse, JoinRequestResponse, JoinRequestAction
+    InviteLinkCreate, InviteLinkResponse, InvitePreviewResponse, JoinRequestResponse, JoinRequestAction,
+    TransferInfo,
 )
 from app.schemas.user import UserBrief
 from app.services.chat_service import ChatService, MessagePermission
@@ -102,6 +103,46 @@ async def create_system_message(db: AsyncSession, session_id: int, content: str,
         }
     )
     return msg
+
+def _preview_text(msg: Message | None) -> str | None:
+    """Friendly chat-list preview text for the latest message in a session."""
+    if msg is None:
+        return None
+    if msg.message_type == 'image':
+        return 'Photo'
+    if msg.message_type == 'transfer':
+        try:
+            payload = json.loads(msg.content or '{}')
+            amount = int(payload.get('amount', 0))
+            return f'[Transfer] {amount:,} sat'
+        except (ValueError, TypeError):
+            return '[Transfer]'
+    return msg.content or ''
+
+
+async def _load_transfer_map(db: AsyncSession, message_ids: list[int]) -> dict[int, MessageTransfer]:
+    """Bulk-load transfer rows for a set of message ids."""
+    if not message_ids:
+        return {}
+    result = await db.execute(
+        select(MessageTransfer).where(MessageTransfer.message_id.in_(message_ids))
+    )
+    return {t.message_id: t for t in result.scalars().all()}
+
+
+def _transfer_info(t: MessageTransfer | None) -> TransferInfo | None:
+    if t is None:
+        return None
+    return TransferInfo(
+        amount=t.amount,
+        note=t.note,
+        status=t.status,
+        sender_id=t.sender_id,
+        recipient_id=t.recipient_id,
+        accepted_at=t.accepted_at,
+        refunded_at=t.refunded_at,
+    )
+
 
 router = APIRouter()
 
@@ -200,7 +241,7 @@ async def get_sessions(
         .where(
             and_(
                 Message.session_id == ChatSession.id,
-                Message.message_type.in_(['text', 'image']),
+                Message.message_type.in_(['text', 'image', 'transfer']),
                 Message.status == 'sent',
             )
         )
@@ -298,7 +339,7 @@ async def get_session(
             .where(
                 and_(
                     Message.session_id == session_id,
-                    Message.message_type.in_(['text', 'image']),
+                    Message.message_type.in_(['text', 'image', 'transfer']),
                     Message.status == 'sent',
                     (Message.visible_to == None) | (Message.visible_to == user_id)
                 )
@@ -308,12 +349,12 @@ async def get_session(
         )
         last_msg = last_msg_result.scalar_one_or_none()
 
-        # Get unread count (text + image messages visible to this user, exclude system msgs and own)
+        # Get unread count (text + image + transfer messages visible to this user)
         user_membership = next((m for m in session.members if m.user_id == user_id and m.left_at is None), None)
         unread_count = 0
         visibility_filter = and_(
             Message.session_id == session_id,
-            Message.message_type.in_(['text', 'image']),
+            Message.message_type.in_(['text', 'image', 'transfer']),
             Message.status == 'sent',
             Message.sender_id != user_id,
             (Message.visible_to == None) | (Message.visible_to == user_id)
@@ -352,7 +393,7 @@ async def get_session(
             )
             for m in members
         ],
-        last_message=(last_msg.content or ('Photo' if last_msg.message_type == 'image' else '')) if last_msg else None,
+        last_message=_preview_text(last_msg) if last_msg else None,
         last_message_at=last_msg.created_at if last_msg else None,
         unread_count=unread_count,
         who_can_send=session.who_can_send,
@@ -613,31 +654,22 @@ async def send_sat_transfer(
 
     note = (body.note or '').strip() or None
     ledger = LedgerService(db)
-    ledger_note = f'transfer to {recipient.name or recipient.handle or recipient_id}'
+    ledger_note = f'pending transfer to {recipient.name or recipient.handle or recipient_id}'
     if note:
         ledger_note = f'{ledger_note}: {note[:80]}'
 
+    # Escrow: deduct from sender now; recipient is credited only on accept.
     try:
         await ledger.spend(
             sender_id,
             body.amount,
             ActionType.TRANSFER_OUT,
-            ref_type=RefType.USER,
-            ref_id=recipient_id,
+            ref_type=RefType.MESSAGE,
+            ref_id=None,
             note=ledger_note,
         )
     except InsufficientBalance as e:
         raise HTTPException(status_code=400, detail=str(e))
-
-    await ledger.earn(
-        recipient_id,
-        body.amount,
-        ActionType.TRANSFER_IN,
-        ref_type=RefType.USER,
-        ref_id=sender_id,
-        note=f'transfer from {sender.name or sender.handle or sender_id}'
-        + (f': {note[:80]}' if note else ''),
-    )
 
     payload = {
         'amount': body.amount,
@@ -657,9 +689,21 @@ async def send_sat_transfer(
     await db.flush()
     await db.refresh(message)
 
+    transfer = MessageTransfer(
+        message_id=message.id,
+        sender_id=sender_id,
+        recipient_id=recipient_id,
+        amount=body.amount,
+        note=note,
+        status='pending',
+    )
+    db.add(transfer)
+    await db.flush()
+
     session.updated_at = dt.utcnow()
     await db.commit()
     await db.refresh(message)
+    await db.refresh(transfer)
 
     response = MessageResponse(
         id=message.id,
@@ -677,6 +721,7 @@ async def send_sat_transfer(
         message_type=message.message_type,
         status=message.status,
         reply_to=None,
+        transfer=_transfer_info(transfer),
         created_at=message.created_at,
     )
 
@@ -687,6 +732,179 @@ async def send_sat_transfer(
     )
 
     return response
+
+
+async def _broadcast_transfer_update(
+    db: AsyncSession,
+    session_id: int,
+    message: Message,
+    transfer: MessageTransfer,
+    sender: User,
+):
+    """Send a `transfer_updated` event to both participants of the chat."""
+    members_result = await db.execute(
+        select(ChatMember).where(
+            and_(ChatMember.session_id == session_id, ChatMember.left_at == None)
+        )
+    )
+    member_ids = [m.user_id for m in members_result.scalars().all()]
+    payload = MessageResponse(
+        id=message.id,
+        session_id=message.session_id,
+        sender_id=message.sender_id,
+        sender=UserBrief(
+            id=sender.id,
+            name=sender.name,
+            handle=sender.handle,
+            avatar=sender.avatar,
+            trust_score=sender.trust_score,
+        ),
+        content=message.content,
+        media_url=None,
+        message_type=message.message_type,
+        status=message.status,
+        reply_to=None,
+        transfer=_transfer_info(transfer),
+        created_at=message.created_at,
+    ).model_dump(mode='json')
+    await manager.broadcast_to_session(
+        member_ids,
+        {'type': 'transfer_updated', 'message': payload},
+    )
+
+
+@router.post('/messages/{message_id}/accept-transfer', response_model=MessageResponse)
+async def accept_sat_transfer(
+    message_id: int,
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recipient accepts a pending SAT transfer; credits their balance."""
+    message = await db.get(Message, message_id)
+    if not message or message.message_type != 'transfer':
+        raise HTTPException(status_code=404, detail='Transfer not found')
+
+    transfer_result = await db.execute(
+        select(MessageTransfer).where(MessageTransfer.message_id == message_id)
+    )
+    transfer = transfer_result.scalar_one_or_none()
+    if not transfer:
+        raise HTTPException(status_code=404, detail='Transfer record not found')
+
+    if transfer.recipient_id != user_id:
+        raise HTTPException(status_code=403, detail='Only the recipient can accept this transfer')
+    if transfer.status != 'pending':
+        raise HTTPException(status_code=400, detail=f'Transfer is already {transfer.status}')
+
+    sender = await db.get(User, transfer.sender_id)
+    recipient = await db.get(User, transfer.recipient_id)
+
+    ledger = LedgerService(db)
+    note = f'transfer from {sender.name or sender.handle or sender.id}' if sender else 'transfer in'
+    if transfer.note:
+        note = f'{note}: {transfer.note[:80]}'
+    await ledger.earn(
+        transfer.recipient_id,
+        transfer.amount,
+        ActionType.TRANSFER_IN,
+        ref_type=RefType.MESSAGE,
+        ref_id=message_id,
+        note=note,
+    )
+
+    transfer.status = 'accepted'
+    transfer.accepted_at = dt.utcnow()
+    await db.flush()
+    await db.commit()
+    await db.refresh(transfer)
+
+    await _broadcast_transfer_update(db, message.session_id, message, transfer, sender)
+
+    return MessageResponse(
+        id=message.id,
+        session_id=message.session_id,
+        sender_id=message.sender_id,
+        sender=UserBrief(
+            id=sender.id,
+            name=sender.name,
+            handle=sender.handle,
+            avatar=sender.avatar,
+            trust_score=sender.trust_score,
+        ),
+        content=message.content,
+        media_url=None,
+        message_type=message.message_type,
+        status=message.status,
+        reply_to=None,
+        transfer=_transfer_info(transfer),
+        created_at=message.created_at,
+    )
+
+
+@router.post('/messages/{message_id}/decline-transfer', response_model=MessageResponse)
+async def decline_sat_transfer(
+    message_id: int,
+    user_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recipient declines a pending SAT transfer; refunds the sender."""
+    message = await db.get(Message, message_id)
+    if not message or message.message_type != 'transfer':
+        raise HTTPException(status_code=404, detail='Transfer not found')
+
+    transfer_result = await db.execute(
+        select(MessageTransfer).where(MessageTransfer.message_id == message_id)
+    )
+    transfer = transfer_result.scalar_one_or_none()
+    if not transfer:
+        raise HTTPException(status_code=404, detail='Transfer record not found')
+
+    if transfer.recipient_id != user_id:
+        raise HTTPException(status_code=403, detail='Only the recipient can decline this transfer')
+    if transfer.status != 'pending':
+        raise HTTPException(status_code=400, detail=f'Transfer is already {transfer.status}')
+
+    sender = await db.get(User, transfer.sender_id)
+    recipient = await db.get(User, transfer.recipient_id)
+
+    ledger = LedgerService(db)
+    refund_note = f'refund from {recipient.name or recipient.handle or recipient.id}' if recipient else 'transfer refund'
+    await ledger.earn(
+        transfer.sender_id,
+        transfer.amount,
+        ActionType.TRANSFER_OUT,  # negative spend already recorded; refund logged with same code
+        ref_type=RefType.MESSAGE,
+        ref_id=message_id,
+        note=f'(refund) {refund_note}',
+    )
+
+    transfer.status = 'refunded'
+    transfer.refunded_at = dt.utcnow()
+    await db.flush()
+    await db.commit()
+    await db.refresh(transfer)
+
+    await _broadcast_transfer_update(db, message.session_id, message, transfer, sender)
+
+    return MessageResponse(
+        id=message.id,
+        session_id=message.session_id,
+        sender_id=message.sender_id,
+        sender=UserBrief(
+            id=sender.id,
+            name=sender.name,
+            handle=sender.handle,
+            avatar=sender.avatar,
+            trust_score=sender.trust_score,
+        ),
+        content=message.content,
+        media_url=None,
+        message_type=message.message_type,
+        status=message.status,
+        reply_to=None,
+        transfer=_transfer_info(transfer),
+        created_at=message.created_at,
+    )
 
 
 @router.get('/sessions/{session_id}/messages', response_model=list[MessageResponse])
@@ -753,8 +971,8 @@ async def get_messages(
     senders_result = await db.execute(select(User).where(User.id.in_(sender_ids)))
     senders = {u.id: u for u in senders_result.scalars().all()}
 
-    # Mark as read (update last_read_message_id) - count sent text/image messages
-    sent_messages = [m for m in messages if m.status == 'sent' and m.message_type in ('text', 'image')]
+    # Mark as read (update last_read_message_id) - count sent text/image/transfer messages
+    sent_messages = [m for m in messages if m.status == 'sent' and m.message_type in ('text', 'image', 'transfer')]
     if sent_messages:
         latest_id = max(m.id for m in sent_messages)
         if not membership.last_read_message_id or latest_id > membership.last_read_message_id:
@@ -799,6 +1017,10 @@ async def get_messages(
                 sender_name=reply_sender.name,
             )
 
+    # Bulk-load transfer state for any 'transfer'-typed messages
+    transfer_msg_ids = [m.id for m in messages if m.message_type == 'transfer']
+    transfer_map = await _load_transfer_map(db, transfer_msg_ids)
+
     return [
         MessageResponse(
             id=m.id,
@@ -817,6 +1039,7 @@ async def get_messages(
             status=m.status,
             reply_to=replies_by_id.get(m.reply_to_id) if m.reply_to_id else None,
             reactions=reactions_by_msg.get(m.id, []),
+            transfer=_transfer_info(transfer_map.get(m.id)),
             created_at=m.created_at,
         )
         for m in messages

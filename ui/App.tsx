@@ -6,7 +6,7 @@ import { Keyboard } from '@capacitor/keyboard';
 import { Tab, Post, User, ChatSession, apiPostToPost, apiUserToUser, apiSessionToSession } from './types';
 import { MOCK_ME } from './constants';
 import { useUserStore, usePostStore, useChatStore, useWalletStore } from './stores';
-import { api, ApiComment, ApiMessage } from './api/client';
+import { api, ApiComment, ApiMessage, ApiTransferInfo } from './api/client';
 import { Search, Bell, Plus, Home, Users, MessageCircle, User as UserIcon, X, SlidersHorizontal, ArrowLeft, Send, Trash2, ShieldCheck, Zap, MoreHorizontal, Heart, Gift, Copy, Share2, UserPlus, ScanLine, QrCode, Camera, Image, Reply, Forward, Undo2, Smile, Crown, Settings, UserMinus, Volume2, VolumeX, Link, LogOut, Edit3, Check, FileText, Download, Upload, RefreshCw, Sun, Moon, Globe, Info, Lock as LockIcon, ArrowDownLeft, ArrowUpRight, Sparkles, Banknote, TrendingUp, TrendingDown } from 'lucide-react';
 import { PostCard } from './components/PostCard';
 // TrustBadge removed - trust system simplified
@@ -183,7 +183,7 @@ const App: React.FC = () => {
 
   // Chat detail state
   type ChatMessageReaction = { emoji: string; user_id: number; user_name: string };
-  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; senderName?: string; senderAvatar?: string | null; content: string; mediaUrl?: string | null; messageType: 'text' | 'image' | 'system' | 'transfer'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; senderName?: string; senderAvatar?: string | null; content: string; mediaUrl?: string | null; messageType: 'text' | 'image' | 'system' | 'transfer'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null; transfer?: ApiTransferInfo | null}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
   const [removedFromSessions, setRemovedFromSessions] = useState<Set<number>>(new Set());
@@ -196,6 +196,8 @@ const App: React.FC = () => {
   const [transferAmount, setTransferAmount] = useState('');
   const [transferNote, setTransferNote] = useState('');
   const [isSendingTransfer, setIsSendingTransfer] = useState(false);
+  const [transferActionId, setTransferActionId] = useState<number | null>(null);
+  const [isProcessingTransfer, setIsProcessingTransfer] = useState(false);
   const [isUploadingChatImage, setIsUploadingChatImage] = useState(false);
   const chatImageInputRef = useRef<HTMLInputElement>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
@@ -280,6 +282,7 @@ const App: React.FC = () => {
     if (showChatActions) { setShowChatActions(false); return true; }
     if (selectedMessageId) { setSelectedMessageId(null); setMenuPosition(null); return true; }
     if (showReactorsFor) { setShowReactorsFor(null); return true; }
+    if (transferActionId !== null) { setTransferActionId(null); return true; }
     if (showTransferModal) { setShowTransferModal(false); return true; }
     if (showAttachmentPicker) { setShowAttachmentPicker(false); return true; }
     if (showDraftList) { setShowDraftList(false); return true; }
@@ -330,7 +333,7 @@ const App: React.FC = () => {
     return false;
   }, [currentView, isPublishing, chatLightboxSrc, showLikeModal, showEmojiPicker,
       showChatActions, selectedMessageId, showReactorsFor, showAttachmentPicker,
-      showTransferModal,
+      showTransferModal, transferActionId,
       showDraftList, showAddMembersModal, showInviteLinks, showMemberActions,
       inlineCommentPost, publishPreview]);
 
@@ -511,9 +514,14 @@ const App: React.FC = () => {
           messageType: message.message_type,
           status: message.status,
           replyTo: message.reply_to ? { id: message.reply_to.id, content: message.reply_to.content, sender_name: message.reply_to.sender_name } : null,
+          transfer: message.transfer || null,
         }];
       });
       scrollChatToBottom(true);
+      // Also refresh session list so chat-list preview reflects latest message
+      if (currentUser?.id) {
+        fetchSessions(currentUser.id);
+      }
     } else {
       // User is not viewing this chat - refresh sessions to update unread count
       if (currentUser?.id) {
@@ -599,16 +607,31 @@ const App: React.FC = () => {
           status: m.status,
           createdAt: m.created_at,
           replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
-          reactions: m.reactions || []
+          reactions: m.reactions || [],
+          transfer: m.transfer || null,
         })));
       }).catch(() => {});
     }
   }, [currentUser, fetchSessions]);
 
+  // Update an existing transfer message (accept/decline broadcast)
+  const handleTransferUpdated = useCallback((message: ApiMessage) => {
+    setChatMessages(prev => prev.map(m => (
+      Number(m.id) === Number(message.id)
+        ? { ...m, transfer: message.transfer || null, content: message.content }
+        : m
+    )));
+    if (currentUser?.id) {
+      fetchUserBalances(currentUser.id);
+      fetchSessions(currentUser.id);
+    }
+  }, [currentUser?.id, fetchSessions, fetchUserBalances]);
+
   // Connect to WebSocket for real-time chat
   useChatWebSocket({
     userId: currentUser?.id ?? null,
     onMessage: handleWebSocketMessage,
+    onTransferUpdated: handleTransferUpdated,
     onReactionAdded: handleReactionAdded,
     onReactionRemoved: handleReactionRemoved,
     onMemberRemoved: handleMemberRemoved,
@@ -1015,7 +1038,8 @@ const App: React.FC = () => {
           status: m.status,
           createdAt: m.created_at,
           replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
-          reactions: m.reactions || []
+          reactions: m.reactions || [],
+          transfer: m.transfer || null,
         })));
         markSessionAsRead(Number(selectedChat.id));
       } catch (error) {
@@ -2902,6 +2926,7 @@ const App: React.FC = () => {
               status: m.status,
               createdAt: m.created_at,
               replyTo: m.reply_to ? { id: m.reply_to.id, content: m.reply_to.content, sender_name: m.reply_to.sender_name } : null,
+              transfer: m.transfer || null,
             }));
           return [...prev, ...newMsgs];
         });
@@ -3191,6 +3216,7 @@ const App: React.FC = () => {
           status: msg.status,
           replyTo: null,
           reactions: [],
+          transfer: msg.transfer || null,
           createdAt: msg.created_at,
         }]);
         setShowTransferModal(false);
@@ -3204,6 +3230,51 @@ const App: React.FC = () => {
         toast.error(err?.message || 'Transfer failed');
       } finally {
         setIsSendingTransfer(false);
+      }
+    };
+
+    const handleOpenTransfer = (messageId: string | number) => {
+      setTransferActionId(Number(messageId));
+    };
+
+    const updateTransferMessage = (msg: ApiMessage) => {
+      setChatMessages(prev => prev.map(m => (
+        Number(m.id) === Number(msg.id)
+          ? { ...m, transfer: msg.transfer || null, content: msg.content }
+          : m
+      )));
+    };
+
+    const handleAcceptTransfer = async () => {
+      if (!transferActionId || !currentUser || isProcessingTransfer) return;
+      setIsProcessingTransfer(true);
+      try {
+        const updated = await api.acceptSatTransfer(transferActionId, currentUser.id);
+        updateTransferMessage(updated);
+        setTransferActionId(null);
+        fetchUserBalances(currentUser.id);
+        if (selectedChat) fetchSessions(currentUser.id);
+        toast.success(`+${(updated.transfer?.amount ?? 0).toLocaleString()} sat received`);
+      } catch (err: any) {
+        toast.error(err?.message || 'Could not accept');
+      } finally {
+        setIsProcessingTransfer(false);
+      }
+    };
+
+    const handleDeclineTransfer = async () => {
+      if (!transferActionId || !currentUser || isProcessingTransfer) return;
+      setIsProcessingTransfer(true);
+      try {
+        const updated = await api.declineSatTransfer(transferActionId, currentUser.id);
+        updateTransferMessage(updated);
+        setTransferActionId(null);
+        if (selectedChat) fetchSessions(currentUser.id);
+        toast.success('Transfer declined');
+      } catch (err: any) {
+        toast.error(err?.message || 'Could not decline');
+      } finally {
+        setIsProcessingTransfer(false);
       }
     };
 
@@ -3311,8 +3382,18 @@ const App: React.FC = () => {
             if (msg.messageType === 'transfer') {
               let payload: { amount: number; note?: string | null; recipient_name?: string; sender_name?: string } | null = null;
               try { payload = JSON.parse(msg.content); } catch { payload = null; }
-              const amount = payload?.amount ?? 0;
-              const note = payload?.note?.trim();
+              const t = msg.transfer;
+              const amount = t?.amount ?? payload?.amount ?? 0;
+              const note = (t?.note ?? payload?.note ?? '').trim();
+              const status = t?.status ?? 'accepted'; // legacy rows w/o transfer record render as accepted
+              const canAct = !isMe && status === 'pending';
+              const isPendingFromMe = isMe && status === 'pending';
+              const statusLabel =
+                status === 'pending' ? (isMe ? 'Awaiting acceptance' : 'Tap to accept')
+                : status === 'accepted' ? (isMe ? `Accepted by ${chatPartner?.name || 'them'}` : `Received from ${chatPartner?.name || 'them'}`)
+                : status === 'refunded' ? (isMe ? 'Declined — refunded' : 'You declined this transfer')
+                : '';
+              const dimmed = status === 'refunded';
               return (
                 <div key={msg.id}>
                   {showTimestamp && msgTime && (
@@ -3328,10 +3409,19 @@ const App: React.FC = () => {
                         </button>
                       </div>
                     )}
-                    <div className={`max-w-[70%] ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
-                      <div className={`w-60 rounded-2xl overflow-hidden border ${isMe ? 'border-orange-500/40' : 'border-stone-700'} bg-gradient-to-br from-orange-600 to-amber-600 shadow-lg`}>
+                    <div className={`max-w-[75%] ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
+                      <button
+                        type="button"
+                        onClick={() => canAct && handleOpenTransfer(msg.id)}
+                        disabled={!canAct}
+                        className={`w-64 rounded-2xl overflow-hidden border text-left transition-all ${
+                          dimmed
+                            ? 'border-stone-700 bg-gradient-to-br from-stone-800 to-stone-900 opacity-70'
+                            : 'border-orange-500/40 bg-gradient-to-br from-orange-600 to-amber-600 shadow-lg'
+                        } ${canAct ? 'active:scale-[0.98] cursor-pointer' : 'cursor-default'}`}
+                      >
                         <div className="px-4 pt-4 pb-3 flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${dimmed ? 'bg-white/10' : 'bg-white/20'}`}>
                             <Banknote size={18} className="text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -3342,10 +3432,14 @@ const App: React.FC = () => {
                         {note && (
                           <div className="px-4 pb-2 text-[13px] text-white/90 italic break-words">"{note}"</div>
                         )}
-                        <div className="px-4 py-2 bg-black/25 text-[11px] text-white/80">
-                          {isMe ? `Sent to ${chatPartner?.name || payload?.recipient_name || 'them'}` : `From ${chatPartner?.name || payload?.sender_name || 'them'}`}
+                        <div className="px-4 py-2 bg-black/25 text-[11px] text-white/80 flex items-center justify-between">
+                          <span>{statusLabel}</span>
+                          {canAct && <span className="text-white font-semibold">Tap →</span>}
                         </div>
-                      </div>
+                      </button>
+                      {isPendingFromMe && (
+                        <span className="text-[11px] text-stone-500 mt-1.5">Recipient hasn't accepted yet</span>
+                      )}
                     </div>
                     {isMe && (
                       <div className="w-8 flex-shrink-0" />
@@ -3707,6 +3801,53 @@ const App: React.FC = () => {
             </div>
           </>
         )}
+
+        {/* Accept / Decline incoming transfer */}
+        {transferActionId !== null && (() => {
+          const msg = chatMessages.find(m => Number(m.id) === Number(transferActionId));
+          if (!msg || msg.transfer?.status !== 'pending') return null;
+          const amount = msg.transfer?.amount ?? 0;
+          const note = (msg.transfer?.note ?? '').trim();
+          return (
+            <>
+              <div className="fixed inset-0 z-50 bg-black/70" onClick={() => setTransferActionId(null)} />
+              <div className="fixed left-0 right-0 bottom-0 z-50 bg-stone-950 border-t border-stone-800 rounded-t-3xl px-5 pt-4 pb-8 safe-bottom-nav">
+                <div className="flex justify-center pt-1 pb-3">
+                  <div className="w-10 h-1 rounded-full bg-stone-700" />
+                </div>
+                <div className="flex flex-col items-center pt-2 pb-5">
+                  <img
+                    src={getAvatarUrl(chatPartner?.avatar, chatPartner?.name || 'User')}
+                    className="w-14 h-14 rounded-full object-cover mb-3"
+                    onError={(e) => handleAvatarError(e, chatPartner?.name || 'User')}
+                  />
+                  <div className="text-xs text-stone-500">From {chatPartner?.name}</div>
+                  <div className="mt-1 text-4xl font-bold tabular-nums">{amount.toLocaleString()}</div>
+                  <div className="text-sm text-stone-400 -mt-1">sat</div>
+                  {note && (
+                    <div className="mt-3 max-w-[80%] text-center text-sm text-stone-300 italic">"{note}"</div>
+                  )}
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleDeclineTransfer}
+                    disabled={isProcessingTransfer}
+                    className="flex-1 py-3.5 rounded-2xl bg-stone-800 text-stone-300 font-medium active:bg-stone-700 disabled:opacity-50"
+                  >
+                    Decline
+                  </button>
+                  <button
+                    onClick={handleAcceptTransfer}
+                    disabled={isProcessingTransfer}
+                    className="flex-1 py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-semibold active:scale-[0.99] disabled:opacity-50 transition-transform"
+                  >
+                    {isProcessingTransfer ? 'Processing…' : 'Accept'}
+                  </button>
+                </div>
+              </div>
+            </>
+          );
+        })()}
 
         {/* Hidden file input for chat images */}
         <input

@@ -168,6 +168,20 @@ class ReactionInfo(BaseModel):
     user_name: str
 
 
+class TransferInfo(BaseModel):
+    """Embedded transfer state for a 'transfer'-typed message."""
+    amount: int
+    note: str | None = None
+    status: str  # pending | accepted | refunded
+    sender_id: int
+    recipient_id: int
+    accepted_at: datetime | None = None
+    refunded_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
 class MessageResponse(BaseModel):
     """Message response."""
     id: int
@@ -180,6 +194,7 @@ class MessageResponse(BaseModel):
     status: str = 'sent'
     reply_to: ReplyInfo | None = None
     reactions: list[ReactionInfo] = []
+    transfer: TransferInfo | None = None
     created_at: datetime
 
     class Config:

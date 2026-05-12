@@ -170,6 +170,31 @@ class GroupInviteLink(Base):
     session: Mapped['ChatSession'] = relationship('ChatSession', back_populates='invite_links')
 
 
+class MessageTransfer(Base):
+    """Escrow record for a SAT transfer sent in a 1:1 chat.
+
+    Lifecycle:
+      pending  -> sender's funds debited, awaiting recipient action
+      accepted -> recipient credited
+      refunded -> sender refunded (declined or auto-expired)
+    """
+
+    __tablename__ = 'message_transfers'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey('messages.id', ondelete='CASCADE'), unique=True, index=True
+    )
+    sender_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    recipient_id: Mapped[int] = mapped_column(ForeignKey('users.id', ondelete='CASCADE'))
+    amount: Mapped[int] = mapped_column(Integer)
+    note: Mapped[str | None] = mapped_column(String(140), default=None)
+    status: Mapped[str] = mapped_column(String(20), default='pending', index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+
+
 class JoinRequest(Base):
     """Pending request to join a group (when join_approval is enabled)."""
 
