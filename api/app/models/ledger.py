@@ -54,6 +54,10 @@ class ActionType(str, Enum):
     EXCHANGE_SELL_SAT = 'exchange_sell_sat'  # sat -> USDT
     EXCHANGE_BONUS = 'exchange_bonus'        # First exchange bonus
 
+    # P2P chat transfer
+    TRANSFER_OUT = 'transfer_out'  # Sent sat to another user via chat
+    TRANSFER_IN = 'transfer_in'    # Received sat from another user via chat
+
 
 class RefType(str, Enum):
     """What entity a ledger entry references."""
@@ -65,6 +69,7 @@ class RefType(str, Enum):
     USER = 'user'
     POST_LIKE = 'post_like'
     COMMENT_LIKE = 'comment_like'
+    MESSAGE = 'message'  # Chat message (transfer)
 
 
 class Ledger(Base):

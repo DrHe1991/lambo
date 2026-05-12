@@ -287,7 +287,7 @@ export interface ApiMessage {
   sender: ApiUser;
   content: string;
   media_url: string | null;
-  message_type: 'text' | 'image' | 'system';
+  message_type: 'text' | 'image' | 'system' | 'transfer';
   status: 'sent' | 'pending';
   reply_to: ApiReplyInfo | null;
   reactions: ApiReaction[];
@@ -621,6 +621,13 @@ export const api = {
     apiRequest<ApiMessage[]>(`/api/chat/sessions/${sessionId}/messages`, {
       method: 'POST',
       body: { content, reply_to_id: replyToId || null, media_url: mediaUrl || null },
+      params: { sender_id: senderId },
+    }),
+
+  sendSatTransfer: (sessionId: number, senderId: number, amount: number, note?: string) =>
+    apiRequest<ApiMessage>(`/api/chat/sessions/${sessionId}/sat-transfer`, {
+      method: 'POST',
+      body: { amount, note: note || null },
       params: { sender_id: senderId },
     }),
 

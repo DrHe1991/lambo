@@ -183,7 +183,7 @@ const App: React.FC = () => {
 
   // Chat detail state
   type ChatMessageReaction = { emoji: string; user_id: number; user_name: string };
-  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; senderName?: string; senderAvatar?: string | null; content: string; mediaUrl?: string | null; messageType: 'text' | 'image' | 'system'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
+  const [chatMessages, setChatMessages] = useState<Array<{id: string | number; senderId: string | number; senderName?: string; senderAvatar?: string | null; content: string; mediaUrl?: string | null; messageType: 'text' | 'image' | 'system' | 'transfer'; status: 'sent' | 'pending'; createdAt?: string; reactions?: ChatMessageReaction[]; replyTo?: {id: number; content: string; sender_name: string} | null}>>([]);
   const [chatMessageInput, setChatMessageInput] = useState('');
   const [isLoadingChatMessages, setIsLoadingChatMessages] = useState(false);
   const [removedFromSessions, setRemovedFromSessions] = useState<Set<number>>(new Set());
@@ -192,6 +192,10 @@ const App: React.FC = () => {
   const [emojiPage, setEmojiPage] = useState(0);
   const [showAttachmentPicker, setShowAttachmentPicker] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferAmount, setTransferAmount] = useState('');
+  const [transferNote, setTransferNote] = useState('');
+  const [isSendingTransfer, setIsSendingTransfer] = useState(false);
   const [isUploadingChatImage, setIsUploadingChatImage] = useState(false);
   const chatImageInputRef = useRef<HTMLInputElement>(null);
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
@@ -276,6 +280,7 @@ const App: React.FC = () => {
     if (showChatActions) { setShowChatActions(false); return true; }
     if (selectedMessageId) { setSelectedMessageId(null); setMenuPosition(null); return true; }
     if (showReactorsFor) { setShowReactorsFor(null); return true; }
+    if (showTransferModal) { setShowTransferModal(false); return true; }
     if (showAttachmentPicker) { setShowAttachmentPicker(false); return true; }
     if (showDraftList) { setShowDraftList(false); return true; }
     if (showAddMembersModal) { setShowAddMembersModal(false); return true; }
@@ -325,6 +330,7 @@ const App: React.FC = () => {
     return false;
   }, [currentView, isPublishing, chatLightboxSrc, showLikeModal, showEmojiPicker,
       showChatActions, selectedMessageId, showReactorsFor, showAttachmentPicker,
+      showTransferModal,
       showDraftList, showAddMembersModal, showInviteLinks, showMemberActions,
       inlineCommentPost, publishPreview]);
 
@@ -3148,6 +3154,59 @@ const App: React.FC = () => {
       }
     };
 
+    const openTransferModal = () => {
+      setShowAttachmentPicker(false);
+      setTransferAmount('');
+      setTransferNote('');
+      setShowTransferModal(true);
+    };
+
+    const handleSendTransfer = async () => {
+      if (!selectedChat || !currentUser || isSendingTransfer) return;
+      const amount = Math.floor(Number(transferAmount));
+      if (!amount || amount <= 0) {
+        toast.error('Enter an amount');
+        return;
+      }
+      if (amount > satBalance) {
+        toast.error('Insufficient SAT balance');
+        return;
+      }
+      setIsSendingTransfer(true);
+      try {
+        const msg = await api.sendSatTransfer(
+          Number(selectedChat.id),
+          currentUser.id,
+          amount,
+          transferNote.trim() || undefined,
+        );
+        setChatMessages(prev => [...prev, {
+          id: msg.id,
+          senderId: msg.sender_id,
+          senderName: msg.sender?.name,
+          senderAvatar: msg.sender?.avatar,
+          content: msg.content,
+          mediaUrl: null,
+          messageType: msg.message_type,
+          status: msg.status,
+          replyTo: null,
+          reactions: [],
+          createdAt: msg.created_at,
+        }]);
+        setShowTransferModal(false);
+        setTransferAmount('');
+        setTransferNote('');
+        scrollChatToBottom(true);
+        fetchSessions(currentUser.id);
+        fetchUserBalances(currentUser.id);
+        toast.success(`Sent ${amount.toLocaleString()} sat`);
+      } catch (err: any) {
+        toast.error(err?.message || 'Transfer failed');
+      } finally {
+        setIsSendingTransfer(false);
+      }
+    };
+
     // Handler to open group info page
     const handleOpenGroupInfo = async () => {
       if (!selectedChat || !currentUser) return;
@@ -3244,6 +3303,54 @@ const App: React.FC = () => {
                   <p className="text-amber-400 text-xs text-center">
                     ⚠️ {msg.content}
                   </p>
+                </div>
+              );
+            }
+
+            // SAT transfer message (WeChat 转账 style card)
+            if (msg.messageType === 'transfer') {
+              let payload: { amount: number; note?: string | null; recipient_name?: string; sender_name?: string } | null = null;
+              try { payload = JSON.parse(msg.content); } catch { payload = null; }
+              const amount = payload?.amount ?? 0;
+              const note = payload?.note?.trim();
+              return (
+                <div key={msg.id}>
+                  {showTimestamp && msgTime && (
+                    <div className="flex justify-center my-3">
+                      <span className="text-xs text-stone-500 bg-stone-900/50 px-2 py-0.5 rounded">{formatChatTime(msgTime)}</span>
+                    </div>
+                  )}
+                  <div className={`flex items-start gap-2 mt-3 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    {!isMe && (
+                      <div className="w-8 flex-shrink-0 pt-0.5">
+                        <button onClick={handleOpenProfile}>
+                          <img src={getAvatarUrl(chatPartner?.avatar, chatPartner?.name || 'User')} className="w-8 h-8 rounded-full object-cover" onError={(e) => handleAvatarError(e, chatPartner?.name || 'User')} />
+                        </button>
+                      </div>
+                    )}
+                    <div className={`max-w-[70%] ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
+                      <div className={`w-60 rounded-2xl overflow-hidden border ${isMe ? 'border-orange-500/40' : 'border-stone-700'} bg-gradient-to-br from-orange-600 to-amber-600 shadow-lg`}>
+                        <div className="px-4 pt-4 pb-3 flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+                            <Banknote size={18} className="text-white" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] uppercase tracking-wider text-white/70 font-semibold">SAT Transfer</div>
+                            <div className="text-white text-xl font-bold leading-tight">{amount.toLocaleString()} sat</div>
+                          </div>
+                        </div>
+                        {note && (
+                          <div className="px-4 pb-2 text-[13px] text-white/90 italic break-words">"{note}"</div>
+                        )}
+                        <div className="px-4 py-2 bg-black/25 text-[11px] text-white/80">
+                          {isMe ? `Sent to ${chatPartner?.name || payload?.recipient_name || 'them'}` : `From ${chatPartner?.name || payload?.sender_name || 'them'}`}
+                        </div>
+                      </div>
+                    </div>
+                    {isMe && (
+                      <div className="w-8 flex-shrink-0" />
+                    )}
+                  </div>
                 </div>
               );
             }
@@ -3478,22 +3585,124 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Attachment picker */}
+        {/* Attachment picker - WeChat-style slide-up grid */}
         {showAttachmentPicker && (
           <>
-            <div className="fixed inset-0 z-10" onClick={() => setShowAttachmentPicker(false)} />
-            <div className="absolute bottom-24 right-16 bg-stone-900 border border-stone-800 rounded-xl shadow-xl overflow-hidden z-20">
-              <button 
-                className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3"
-                onClick={() => handleAttachment('camera')}
+            <div className="fixed inset-0 z-30" onClick={() => setShowAttachmentPicker(false)} />
+            <div className="absolute left-0 right-0 bottom-0 z-40 bg-stone-950 border-t border-stone-800 px-4 pt-5 pb-6 safe-bottom-nav">
+              <div className="grid grid-cols-4 gap-y-5 gap-x-3">
+                <button
+                  className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
+                  onClick={() => handleAttachment('album')}
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-stone-800/80 flex items-center justify-center">
+                    <Image size={26} className="text-stone-200" />
+                  </div>
+                  <span className="text-[11px] text-stone-400">Album</span>
+                </button>
+                <button
+                  className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
+                  onClick={() => handleAttachment('camera')}
+                >
+                  <div className="w-14 h-14 rounded-2xl bg-stone-800/80 flex items-center justify-center">
+                    <Camera size={26} className="text-stone-200" />
+                  </div>
+                  <span className="text-[11px] text-stone-400">Camera</span>
+                </button>
+                {!isGroup && (
+                  <button
+                    className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
+                    onClick={openTransferModal}
+                  >
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-orange-500 to-amber-600 flex items-center justify-center shadow-lg shadow-orange-900/40">
+                      <Banknote size={26} className="text-white" />
+                    </div>
+                    <span className="text-[11px] text-stone-200 font-medium">Transfer</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* SAT transfer modal */}
+        {showTransferModal && chatPartner && (
+          <>
+            <div className="fixed inset-0 z-50 bg-black/70" onClick={() => setShowTransferModal(false)} />
+            <div className="fixed left-0 right-0 bottom-0 z-50 bg-stone-950 border-t border-stone-800 rounded-t-3xl px-5 pt-4 pb-8 safe-bottom-nav">
+              <div className="flex justify-center pt-1 pb-3">
+                <div className="w-10 h-1 rounded-full bg-stone-700" />
+              </div>
+              <div className="flex items-center gap-3 mb-5">
+                <img
+                  src={getAvatarUrl(chatPartner.avatar, chatPartner.name || 'User')}
+                  className="w-11 h-11 rounded-full object-cover"
+                  onError={(e) => handleAvatarError(e, chatPartner.name || 'User')}
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-stone-500">Transfer to</div>
+                  <div className="text-base font-semibold truncate">{chatPartner.name}</div>
+                </div>
+                <button onClick={() => setShowTransferModal(false)} className="p-2 -mr-2 text-stone-400 hover:text-white">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="rounded-2xl bg-stone-900/70 border border-stone-800 px-5 py-5 mb-3">
+                <div className="text-xs text-stone-500 mb-1">Amount (sat)</div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-stone-500 text-2xl font-light">SAT</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="0"
+                    value={transferAmount}
+                    onChange={(e) => setTransferAmount(e.target.value.replace(/[^0-9]/g, ''))}
+                    className="flex-1 min-w-0 bg-transparent border-none outline-none text-3xl font-semibold tabular-nums placeholder:text-stone-700"
+                    autoFocus
+                  />
+                </div>
+                <div className="mt-3 flex items-center justify-between text-xs text-stone-500">
+                  <span>Balance: <span className="text-stone-300 tabular-nums">{satBalance.toLocaleString()}</span> sat</span>
+                  <button
+                    className="text-orange-400 active:text-orange-300"
+                    onClick={() => setTransferAmount(String(satBalance))}
+                  >
+                    Max
+                  </button>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  {[100, 500, 1000, 5000].map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setTransferAmount(String(p))}
+                      className="flex-1 py-1.5 text-xs rounded-lg bg-stone-800/70 active:bg-stone-700 text-stone-300"
+                    >
+                      {p.toLocaleString()}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <input
+                type="text"
+                placeholder="Add a note (optional)"
+                value={transferNote}
+                onChange={(e) => setTransferNote(e.target.value.slice(0, 140))}
+                className="w-full bg-stone-900/70 border border-stone-800 rounded-2xl px-4 py-3 text-sm placeholder:text-stone-600 outline-none focus:border-orange-500/50"
+              />
+
+              <button
+                onClick={handleSendTransfer}
+                disabled={isSendingTransfer || !Number(transferAmount) || Number(transferAmount) > satBalance}
+                className="mt-5 w-full py-3.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-600 text-white font-semibold text-base disabled:opacity-40 disabled:from-stone-700 disabled:to-stone-700 active:scale-[0.99] transition-transform"
               >
-                <Camera size={18} className="text-orange-400" /> Camera
-              </button>
-              <button 
-                className="w-full px-4 py-3 text-left text-sm text-stone-200 hover:bg-stone-800 flex items-center gap-3"
-                onClick={() => handleAttachment('album')}
-              >
-                <Image size={18} className="text-orange-400" /> Album
+                {isSendingTransfer ? 'Sending…' : (
+                  Number(transferAmount) > satBalance
+                    ? 'Insufficient balance'
+                    : `Send ${Number(transferAmount || 0).toLocaleString()} sat`
+                )}
               </button>
             </div>
           </>

@@ -1,7 +1,9 @@
+import json
 import secrets
 from datetime import datetime as dt, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, func, and_, or_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -9,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.db.database import get_db
 from app.models.user import User, Follow
 from app.models.chat import ChatSession, ChatMember, Message, MessageReaction, GroupInviteLink, JoinRequest
+from app.models.ledger import ActionType, RefType
 from app.schemas.chat import (
     ChatSessionCreate, ChatSessionResponse, ChatSessionUpdate, MessageCreate, MessageResponse,
     ReactionCreate, ReactionResponse, ReactionInfo, ReplyInfo, GroupDetailResponse, MemberInfo,
@@ -17,6 +20,7 @@ from app.schemas.chat import (
 )
 from app.schemas.user import UserBrief
 from app.services.chat_service import ChatService, MessagePermission
+from app.services.ledger_service import LedgerService, InsufficientBalance
 from app.services.ws_manager import manager
 
 
@@ -541,6 +545,148 @@ async def send_message(
         # Note: No WebSocket send for system msg - sender gets it from API response
 
     return responses
+
+
+# Max single transfer = 1,000,000 sat (~$10 at 100k sat/$).
+MAX_TRANSFER_SAT = 1_000_000
+
+
+class SatTransferRequest(BaseModel):
+    """Body for sending a SAT transfer in a 1:1 chat."""
+    amount: int = Field(..., gt=0, le=MAX_TRANSFER_SAT, description='Amount in sat to send')
+    note: str | None = Field(None, max_length=140)
+
+
+@router.post(
+    '/sessions/{session_id}/sat-transfer',
+    response_model=MessageResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def send_sat_transfer(
+    session_id: int,
+    body: SatTransferRequest,
+    sender_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a SAT transfer to the other participant in a 1:1 chat.
+
+    Atomic: deducts from sender's available_balance, credits recipient,
+    writes ledger rows on both sides, posts a 'transfer' message into the
+    chat session, and broadcasts via WebSocket.
+    """
+    sender_membership = await db.execute(
+        select(ChatMember).where(
+            and_(
+                ChatMember.session_id == session_id,
+                ChatMember.user_id == sender_id,
+                ChatMember.left_at == None,
+            )
+        )
+    )
+    if not sender_membership.scalar_one_or_none():
+        raise HTTPException(status_code=403, detail='Not a member of this chat')
+
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail='Session not found')
+    if session.is_group:
+        raise HTTPException(status_code=400, detail='SAT transfers are only supported in 1:1 chats')
+
+    # Find the other participant
+    members_result = await db.execute(
+        select(ChatMember).where(
+            and_(
+                ChatMember.session_id == session_id,
+                ChatMember.left_at == None,
+            )
+        )
+    )
+    members = list(members_result.scalars().all())
+    recipient_id = next((m.user_id for m in members if m.user_id != sender_id), None)
+    if recipient_id is None:
+        raise HTTPException(status_code=400, detail='Recipient not found in this chat')
+
+    sender = await db.get(User, sender_id)
+    recipient = await db.get(User, recipient_id)
+    if not sender or not recipient:
+        raise HTTPException(status_code=404, detail='User not found')
+
+    note = (body.note or '').strip() or None
+    ledger = LedgerService(db)
+    ledger_note = f'transfer to {recipient.name or recipient.handle or recipient_id}'
+    if note:
+        ledger_note = f'{ledger_note}: {note[:80]}'
+
+    try:
+        await ledger.spend(
+            sender_id,
+            body.amount,
+            ActionType.TRANSFER_OUT,
+            ref_type=RefType.USER,
+            ref_id=recipient_id,
+            note=ledger_note,
+        )
+    except InsufficientBalance as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await ledger.earn(
+        recipient_id,
+        body.amount,
+        ActionType.TRANSFER_IN,
+        ref_type=RefType.USER,
+        ref_id=sender_id,
+        note=f'transfer from {sender.name or sender.handle or sender_id}'
+        + (f': {note[:80]}' if note else ''),
+    )
+
+    payload = {
+        'amount': body.amount,
+        'note': note,
+        'recipient_id': recipient_id,
+        'recipient_name': recipient.name or recipient.handle,
+        'sender_name': sender.name or sender.handle,
+    }
+    message = Message(
+        session_id=session_id,
+        sender_id=sender_id,
+        content=json.dumps(payload, ensure_ascii=False),
+        message_type='transfer',
+        status='sent',
+    )
+    db.add(message)
+    await db.flush()
+    await db.refresh(message)
+
+    session.updated_at = dt.utcnow()
+    await db.commit()
+    await db.refresh(message)
+
+    response = MessageResponse(
+        id=message.id,
+        session_id=message.session_id,
+        sender_id=message.sender_id,
+        sender=UserBrief(
+            id=sender.id,
+            name=sender.name,
+            handle=sender.handle,
+            avatar=sender.avatar,
+            trust_score=sender.trust_score,
+        ),
+        content=message.content,
+        media_url=None,
+        message_type=message.message_type,
+        status=message.status,
+        reply_to=None,
+        created_at=message.created_at,
+    )
+
+    await manager.broadcast_to_session(
+        [m.user_id for m in members],
+        {'type': 'new_message', 'message': response.model_dump(mode='json')},
+        exclude_user=sender_id,
+    )
+
+    return response
 
 
 @router.get('/sessions/{session_id}/messages', response_model=list[MessageResponse])
